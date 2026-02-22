@@ -1,0 +1,42 @@
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PAGE : INVENTAIRE
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="page active" id="page-inventaire">
+  <div class="section-head">
+    <h2>Inventaire des matières premières</h2>
+    <div class="actions">
+      <button class="btn btn-ghost btn-sm" id="inv-arch-btn" onclick="toggleShowArchived('inv')"></button>
+      <button class="btn btn-primary" onclick="openInvModal()">
+        <i class="fas fa-plus"></i> Ajouter
+      </button>
+    </div>
+  </div>
+
+  <div class="grid-4" style="margin-bottom:20px" id="inv-stats"></div>
+
+  <div class="card">
+    <div class="filter-tabs" id="inv-filters" style="margin-bottom:16px">
+      <button class="filter-tab active" data-cat="all" onclick="setInvFilter('all',this)">Tous</button>
+      <button class="filter-tab" data-cat="malt" onclick="setInvFilter('malt',this)">Malt</button>
+      <button class="filter-tab" data-cat="houblon" onclick="setInvFilter('houblon',this)">Houblon</button>
+      <button class="filter-tab" data-cat="levure" onclick="setInvFilter('levure',this)">Levure</button>
+      <button class="filter-tab" data-cat="autre" onclick="setInvFilter('autre',this)">Autre</button>
+    </div>
+    <table id="inv-table">
+      <thead>
+        <tr>
+          <th>Ingrédient</th><th>Catégorie</th><th>Origine</th>
+          <th>Specs</th><th style="text-align:right">Quantité</th><th style="text-align:right">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="inv-body"></tbody>
+    </table>
+    <div class="empty" id="inv-empty" style="display:none">
+      <i class="fas fa-box-open"></i><p>Aucun ingrédient en stock</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PAGE : RECETTES
+═══════════════════════════════════════════════════════════════════════════ -->

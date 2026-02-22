@@ -1,0 +1,78 @@
+<!-- Lightbox image bière -->
+<div id="beer-lightbox" onclick="closeBeerLightbox()" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.93);cursor:zoom-out;align-items:center;justify-content:center;flex-direction:column;gap:12px">
+  <button onclick="event.stopPropagation();closeBeerLightbox()" style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.12);border:none;color:#fff;font-size:1.4rem;width:40px;height:40px;border-radius:50%;cursor:pointer;line-height:1">✕</button>
+  <img id="beer-lightbox-img" src="" alt="" style="max-width:95vw;max-height:88vh;object-fit:contain;border-radius:6px;box-shadow:0 8px 48px rgba(0,0,0,.7)">
+  <div id="beer-lightbox-name" style="color:rgba(255,255,255,.7);font-size:.95rem;letter-spacing:.03em"></div>
+</div>
+
+<!-- Modal Bière (cave) -->
+<div class="modal-overlay" id="beer-modal" onclick="if(event.target===this)closeModal('beer-modal')">
+  <div class="modal">
+    <div class="modal-head"><h3 id="beer-modal-title">Ajouter une bière</h3><button class="modal-close" onclick="closeModal('beer-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row cols-2">
+        <div class="field"><label>Nom <span class="req">*</span></label><input type="text" id="beer-f-name" placeholder="Ex : IPA Tropicale"></div>
+        <div class="field" style="position:relative"><label>Type</label>
+          <input type="text" id="beer-f-type" placeholder="Rechercher un type de bière…" autocomplete="off"
+            oninput="beerTypeSearch(this)" onfocus="beerTypeSearch(this)" onblur="setTimeout(closeBeerTypeSuggest,200)">
+          <div id="beer-type-sug" class="ing-suggest" style="max-height:280px"></div>
+        </div>
+      </div>
+      <div class="form-row cols-3">
+        <div class="field"><label>ABV (%)</label><input type="number" id="beer-f-abv" step="0.1" placeholder="Ex : 6.5"></div>
+        <div class="field"><label>Stock actuel 33cl</label><input type="number" id="beer-f-33" value="0" min="0"></div>
+        <div class="field"><label>Stock actuel 75cl</label><input type="number" id="beer-f-75" value="0" min="0"></div>
+      </div>
+      <div class="form-row cols-2" id="beer-f-init-wrap" style="display:none">
+        <div class="field"><label>Remplissage initial 33cl <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none">(historique)</span></label><input type="number" id="beer-f-33-init" value="0" min="0"></div>
+        <div class="field"><label>Remplissage initial 75cl <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none">(historique)</span></label><input type="number" id="beer-f-75-init" value="0" min="0"></div>
+      </div>
+      <div class="field" style="margin-bottom:14px"><label>Origine / Brasserie</label><input type="text" id="beer-f-origin" placeholder="Ex : Maison, Belgique..."></div>
+      <div class="field" style="margin-bottom:14px"><label>Description</label><textarea id="beer-f-desc" placeholder="Notes de dégustation, arômes..."></textarea></div>
+      <div class="form-row cols-2" style="margin-bottom:14px" id="beer-f-dates-wrap">
+        <div class="field"><label>Date du brassin</label><input type="date" id="beer-f-brew-date"></div>
+        <div class="field"><label>Date d'embouteillage</label><input type="date" id="beer-f-bottling-date"></div>
+      </div>
+      <div class="field"><label>Photo</label>
+        <input type="file" id="beer-f-photo" accept="image/*" onchange="previewBeerPhoto(event)" style="display:none">
+        <label for="beer-f-photo" style="display:block;padding:10px;border:2px dashed var(--border);border-radius:9px;cursor:pointer;text-align:center;color:var(--muted)">
+          <i class="fas fa-camera" style="font-size:1.5rem;display:block;margin-bottom:4px"></i> Cliquer pour ajouter une photo
+        </label>
+        <img id="beer-f-photo-preview" style="display:none;width:100%;max-height:180px;object-fit:contain;margin-top:8px;border-radius:9px">
+      </div>
+      <input type="hidden" id="beer-f-id">
+      <input type="hidden" id="beer-f-photo-b64">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('beer-modal')">Annuler</button>
+      <button class="btn btn-primary" onclick="saveBeer()"><i class="fas fa-floppy-disk"></i> Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Détail Bière (cave) -->
+<div class="modal-overlay" id="beer-detail-modal" onclick="if(event.target===this)closeModal('beer-detail-modal')">
+  <div class="modal modal-lg" style="max-width:640px">
+    <div class="modal-head">
+      <h3 id="bd-title" style="font-size:1.25rem"></h3>
+      <button class="modal-close" onclick="closeModal('beer-detail-modal')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div id="bd-photo-wrap" style="display:none;max-height:320px;overflow:hidden;border-radius:0;cursor:zoom-in" onclick="_bdPhotoClick()">
+        <img id="bd-photo" src="" alt="" style="width:100%;max-height:320px;object-fit:cover;display:block;transition:transform .3s">
+      </div>
+      <div style="padding:20px 24px">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px" id="bd-badges"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px" id="bd-stocks"></div>
+        <div id="bd-desc" style="font-size:.9rem;line-height:1.6;color:var(--text);margin-bottom:12px;white-space:pre-wrap"></div>
+        <div id="bd-meta" style="font-size:.82rem;color:var(--muted)"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('beer-detail-modal')">Fermer</button>
+      <button class="btn btn-ghost" id="bd-edit-btn" onclick=""><i class="fas fa-pen"></i> Modifier</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL PARAMÈTRES AVANCÉS ══════════════════════════════════════════ -->

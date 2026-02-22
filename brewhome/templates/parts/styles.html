@@ -1,0 +1,402 @@
+<style>
+:root {
+  --bg: #0a0a0a; --bg2: #111111; --card: #1a1a1a; --card2: #222222;
+  --amber: #ff9500; --gold: #ffc940; --border: #2a2a2a;
+  --text: #ffffff; --muted: #888888;
+  --malt: #d97706; --hop: #10b981; --yeast: #ec4899; --other: #8b5cf6;
+  --danger: #ef4444; --success: #22c55e; --info: #3b82f6;
+}
+[data-theme="light"] {
+  --bg: #f5f2ec; --bg2: #ebe7de; --card: #ffffff; --card2: #f4f1eb;
+  --amber: #c2710c; --gold: #92400e; --border: #ddd8ce;
+  --text: #1c1712; --muted: #78716c;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:'Work Sans',sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+h1,h2,h3{font-family:'Playfair Display',serif;letter-spacing:-.02em}
+a{color:var(--amber);text-decoration:none}
+
+/* ── NAV ── */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,10,10,.95);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0;padding:0 24px;height:56px}
+.nav-brand{font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:900;color:var(--amber);margin-right:32px;white-space:nowrap}
+.nav-brand span{color:var(--text)}
+.nav-links{display:flex;gap:4px;flex:1}
+.nav-btn{padding:8px 18px;border:none;background:transparent;color:var(--muted);cursor:pointer;border-radius:8px;font-family:'Work Sans',sans-serif;font-size:.9rem;font-weight:500;transition:all .2s;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.nav-btn:hover{color:var(--text);background:rgba(255,255,255,.06)}
+.nav-btn.active{color:var(--amber);background:rgba(255,149,0,.12);font-weight:600}
+.nav-badge{background:rgba(255,149,0,.25);color:var(--gold);border-radius:10px;padding:1px 7px;font-size:.75rem;font-weight:700}
+
+/* ── LAYOUT ── */
+.page{display:none;padding:24px;padding-top:80px;max-width:1400px;margin:0 auto}
+.page.active{display:block}
+
+/* ── CARDS & GRID ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;transition:border-color .2s}
+.card:hover{border-color:rgba(255,149,0,.2)}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}
+.grid-4{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+
+/* ── STAT CARDS ── */
+.stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;text-align:center}
+.stat-val{font-size:2rem;font-weight:700;color:var(--amber);line-height:1}
+.stat-lbl{font-size:.8rem;color:var(--muted);margin-top:6px;text-transform:uppercase;letter-spacing:.06em}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border:none;border-radius:9px;cursor:pointer;font-family:'Work Sans',sans-serif;font-size:.875rem;font-weight:600;transition:all .2s;white-space:nowrap}
+.btn:hover{transform:translateY(-1px)}
+.btn-primary{background:linear-gradient(135deg,var(--amber),var(--gold));color:#000}
+.btn-primary:hover{box-shadow:0 4px 16px rgba(255,149,0,.4)}
+.btn-ghost{background:rgba(255,255,255,.05);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{background:rgba(255,255,255,.1);border-color:rgba(255,149,0,.4)}
+.btn-danger{background:rgba(239,68,68,.15);color:var(--danger);border:1px solid rgba(239,68,68,.25)}
+.btn-danger:hover{background:rgba(239,68,68,.25)}
+.btn-success{background:rgba(34,197,94,.15);color:var(--success);border:1px solid rgba(34,197,94,.25)}
+.btn-success:hover{background:rgba(34,197,94,.25)}
+.btn-sm{padding:6px 13px;font-size:.8rem}
+.btn-icon{padding:7px;border-radius:8px;width:32px;height:32px;justify-content:center}
+
+/* ── SETTINGS TABS ── */
+.stabs{display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:10px;padding:4px;margin-bottom:18px}
+.stab{flex:1;padding:9px;border:none;background:transparent;color:var(--muted);cursor:pointer;border-radius:8px;font-family:'Work Sans',sans-serif;font-size:.85rem;font-weight:600;transition:all .2s}
+.stab.active{background:var(--card2);color:var(--amber)}
+.cat-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.cat-chip{padding:6px 14px;border-radius:20px;background:rgba(255,255,255,.05);border:1px solid var(--border);cursor:pointer;font-size:.82rem;font-weight:600;color:var(--muted);transition:all .2s}
+.cat-chip.active{border-color:var(--amber);color:var(--amber);background:rgba(255,149,0,.1)}
+.catalog-list{max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:0 12px}
+.catalog-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)}
+.catalog-row:last-child{border-bottom:none}
+.thresh-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.thresh-row:last-child{border-bottom:none}
+.thresh-lbl{width:90px;font-weight:600;font-size:.9rem}
+.thresh-hint{font-size:.78rem;color:var(--muted);flex:1}
+
+/* ── FORMS ── */
+.form-row{display:grid;gap:14px;margin-bottom:14px}
+.form-row.cols-2{grid-template-columns:1fr 1fr}
+.form-row.cols-3{grid-template-columns:1fr 1fr 1fr}
+.form-row.cols-4{grid-template-columns:1fr 1fr 1fr 1fr}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.field label .req{color:var(--danger)}
+input,select,textarea{width:100%;background:#1c1c1c;border:1px solid var(--border);color:var(--text);padding:9px 13px;border-radius:9px;font-family:'Work Sans',sans-serif;font-size:.9rem;transition:border-color .2s,box-shadow .2s;color-scheme:dark}
+[data-theme="light"] input,[data-theme="light"] select,[data-theme="light"] textarea{background:#fff;color-scheme:light}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,149,0,.12)}
+input::placeholder,textarea::placeholder{color:rgba(160,160,160,.4)}
+select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23ff9500' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;cursor:pointer}
+select option{background:#1c1c1c;color:#fff}
+select optgroup{background:#0f0f0f;color:var(--amber);font-style:normal;font-weight:700;font-size:.8rem;letter-spacing:.05em}
+select optgroup option{background:#1c1c1c;color:#fff;font-weight:400;padding-left:8px}
+[data-theme="light"] select option{background:#fff;color:#1c1712}
+[data-theme="light"] select optgroup{background:#f4f1eb;color:var(--amber)}
+[data-theme="light"] select optgroup option{background:#fff;color:#1c1712}
+textarea{resize:vertical;min-height:80px}
+
+/* ── BADGES ── */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:16px;font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.badge::before{content:'';width:5px;height:5px;border-radius:50%}
+.badge-malt{background:rgba(217,119,6,.15);color:var(--malt);border:1px solid rgba(217,119,6,.3)}.badge-malt::before{background:var(--malt)}
+.badge-houblon{background:rgba(16,185,129,.15);color:var(--hop);border:1px solid rgba(16,185,129,.3)}.badge-houblon::before{background:var(--hop)}
+.badge-levure{background:rgba(236,72,153,.15);color:var(--yeast);border:1px solid rgba(236,72,153,.3)}.badge-levure::before{background:var(--yeast)}
+.badge-autre{background:rgba(139,92,246,.15);color:var(--other);border:1px solid rgba(139,92,246,.3)}.badge-autre::before{background:var(--other)}
+
+/* ── TABLES ── */
+table{width:100%;border-collapse:collapse}
+thead th{padding:10px 12px;text-align:left;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);border-bottom:1px solid var(--border)}
+tbody tr{border-bottom:1px solid rgba(42,42,42,.5);transition:background .15s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:rgba(255,149,0,.03)}
+td{padding:10px 12px;vertical-align:middle}
+
+/* ── QTY CONTROL ── */
+.qty-ctrl{display:inline-flex;align-items:center;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.qty-ctrl:focus-within{border-color:var(--amber)}
+.qty-btn{width:26px;height:30px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:color .15s}
+.qty-btn:hover{color:var(--amber)}
+.qty-inp{width:56px;text-align:center;background:transparent;border:none;color:var(--text);font-weight:700;font-size:.9rem;padding:0;-moz-appearance:textfield}
+.qty-inp:focus{outline:none}
+.qty-inp::-webkit-outer-spin-button,.qty-inp::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.qty-unit{font-size:.78rem;color:var(--muted);padding:0 8px 0 2px}
+
+/* ── SECTION HEADERS ── */
+.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.section-head h2{font-size:1.5rem}
+.section-head .actions{display:flex;gap:8px}
+
+/* ── FILTER TABS ── */
+.filter-tabs{display:flex;gap:4px;background:rgba(255,255,255,.03);padding:5px;border-radius:10px;border:1px solid var(--border);overflow-x:auto}
+.filter-tab{padding:7px 16px;border:none;background:transparent;color:var(--muted);cursor:pointer;border-radius:7px;font-size:.85rem;font-weight:500;transition:all .2s;white-space:nowrap}
+.filter-tab:hover{color:var(--text)}
+.filter-tab.active{background:linear-gradient(135deg,var(--amber),var(--gold));color:#000;font-weight:600}
+
+/* ── RECIPE LIST ── */
+#recipe-layout{display:grid;grid-template-columns:300px 1fr;gap:20px}
+#recipe-layout.recipe-list-only{grid-template-columns:1fr}
+#recipe-layout.recipe-list-only > div:last-child{display:none}
+#recipe-layout.recipe-list-only #recipe-list-container{max-width:680px}
+.recipe-item{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;cursor:pointer;margin-bottom:8px;transition:all .2s}
+.recipe-item:hover{border-color:var(--amber);background:rgba(255,149,0,.06)}
+.recipe-item.active{border-color:var(--amber);background:rgba(255,149,0,.1)}
+.recipe-item{align-items:flex-start}
+.recipe-item-name{font-weight:600;font-size:.95rem}
+.recipe-item-meta{font-size:.8rem;color:var(--muted)}
+.recipe-item-status{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.rec-status-btn{display:inline-flex;align-items:center;gap:4px;font-size:.72rem;font-weight:600;padding:2px 9px;border-radius:12px;border:1px solid;cursor:pointer;background:none;font-family:inherit;line-height:1.5;white-space:nowrap;transition:filter .15s}
+.rec-status-btn:hover{filter:brightness(1.25)}
+.star-input{display:inline-flex;gap:3px;cursor:pointer;font-size:1.55rem;line-height:1;user-select:none}
+.star-input .star{color:var(--border);transition:color .15s}
+.star-input .star.on{color:var(--amber)}
+.star-input .star:hover{opacity:.75}
+.stars-sm{display:inline-flex;gap:1px;font-size:.75rem;vertical-align:middle;line-height:1}
+
+/* ── INGREDIENT ROWS ── */
+.ing-row{display:flex;gap:10px;align-items:flex-end;padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:9px;margin-bottom:8px}
+.ing-row .ing-name{flex:2;min-width:0}
+.ing-row .ing-qty{flex:1;min-width:80px}
+.ing-row .ing-unit{flex:1;min-width:70px}
+.ing-row .ing-extra{flex:1;min-width:80px}
+.ing-row .ing-remove{flex-shrink:0;margin-bottom:1px}
+.ing-lbl{font-size:.67rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;display:flex;align-items:center;gap:3px;white-space:nowrap}
+.stock-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.stock-ok{background:var(--success)}
+.stock-low{background:#f59e0b}
+.stock-none{background:var(--danger)}
+.stock-na{background:var(--muted)}
+
+/* ── BREW CARDS ── */
+.brew-group{margin-bottom:24px}
+.brew-group-header{display:flex;align-items:center;gap:8px;font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:6px 0 10px;border-bottom:1px solid var(--border);margin-bottom:10px}
+.brew-group-count{margin-left:auto;background:rgba(255,255,255,.07);border-radius:20px;padding:1px 8px;font-size:.75rem;font-weight:600;color:var(--muted)}
+.brew-card{padding:14px 16px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.brew-card-info{flex:1}
+.brew-card-name{font-weight:600}
+.brew-card-meta{font-size:.8rem;color:var(--muted);margin-top:3px}
+
+/* ── BEER CARDS ── */
+.beer-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px}
+.beer-card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:all .2s}
+.beer-card:hover{border-color:rgba(255,149,0,.3);transform:translateY(-2px)}
+.beer-photo{width:100%;height:160px;object-fit:cover;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:3rem;overflow:hidden}
+.beer-photo img{width:100%;height:160px;object-fit:cover;transition:transform .3s}
+.beer-photo:hover img{transform:scale(1.04)}
+#beer-detail-modal .modal{overflow:hidden;overflow-y:auto}
+.badge-info{background:rgba(99,179,237,.18);color:var(--info)}
+.beer-body{padding:14px}
+.beer-name{font-weight:700;font-size:1rem;margin-bottom:6px}
+.beer-type{font-size:.8rem;color:var(--muted)}
+.beer-abv{color:var(--amber);font-weight:700}
+.beer-stocks{display:flex;gap:12px;margin:10px 0;font-size:.85rem}
+.beer-stock-item{display:flex;flex-direction:column;gap:2px;color:var(--muted)}
+.beer-stock-row{display:flex;align-items:center;gap:5px}
+.beer-stock-val{font-weight:700;color:var(--text)}
+.bottle-bar{background:var(--border);border-radius:3px;height:3px;overflow:hidden;width:60px}
+.bottle-bar-fill{height:100%;border-radius:3px;transition:width .4s}
+
+/* ── MODALS ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:18px;width:100%;max-width:640px;max-height:90vh;overflow-y:auto;transform:translateY(20px);transition:transform .2s}
+.modal-overlay.open .modal{transform:translateY(0)}
+.modal-lg{max-width:860px}
+.modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--border)}
+.modal-head h3{font-size:1.2rem}
+.modal-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.3rem;padding:4px;transition:color .2s;line-height:1}
+.modal-close:hover{color:var(--text)}
+.modal-body{padding:24px}
+.modal-foot{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px}
+
+/* ── ALERTS ── */
+.alert{padding:12px 16px;border-radius:9px;font-size:.875rem;margin-bottom:14px;display:none}
+.alert.show{display:flex;align-items:center;gap:10px}
+.alert-success{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:var(--success)}
+.alert-danger{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:var(--danger)}
+.alert-info{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:var(--info)}
+.alert-warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:#f59e0b}
+
+/* ── DIVIDER ── */
+.divider{height:1px;background:var(--border);margin:20px 0}
+.section-label{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px}
+
+/* ── EMPTY STATE ── */
+.empty{text-align:center;padding:48px 24px;color:var(--muted)}
+.empty i{font-size:3rem;margin-bottom:12px;opacity:.4}
+.empty p{font-size:1rem}
+
+/* ── INGREDIENT SELECTOR POPUP ── */
+.ing-suggest{position:absolute;top:100%;left:0;right:0;background:var(--card2);border:1px solid var(--border);border-radius:9px;max-height:240px;overflow-y:auto;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.5);display:none}
+.ing-suggest.open{display:block}
+.ing-suggest-item{padding:9px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s}
+.ing-suggest-item:hover{background:rgba(255,149,0,.1)}
+.ing-suggest-cat{padding:6px 14px;font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;background:rgba(255,255,255,.02);border-bottom:1px solid var(--border)}
+.ing-suggest-stock{font-size:.78rem;color:var(--muted)}
+
+/* ── RECIPE VIEW PANEL ── */
+.rec-view-header{margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.rec-view-title{font-family:'Playfair Display',serif;font-size:1.5rem;font-weight:700;margin-bottom:8px;line-height:1.2}
+.rec-view-meta{display:flex;flex-wrap:wrap;gap:6px}
+.rec-view-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:12px;font-size:.76rem;font-weight:600;background:rgba(255,149,0,.1);color:var(--amber);border:1px solid rgba(255,149,0,.18)}
+.rec-view-section{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:16px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:5px}
+.malt-bar-row{margin-bottom:9px}
+.malt-bar-label{display:flex;justify-content:space-between;align-items:center;font-size:.83rem;margin-bottom:3px}
+.malt-bar-name{display:flex;align-items:center;gap:6px}
+.malt-ebc-dot{display:inline-block;width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.malt-bar-track{height:7px;background:rgba(217,119,6,.15);border-radius:4px;overflow:hidden}
+.malt-bar-fill{height:100%;border-radius:4px;background:var(--malt);transition:width .4s ease}
+.view-ing-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.view-ing-table th{text-align:left;padding:5px 8px;font-size:.7rem;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);font-weight:600}
+.view-ing-table td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.04)}
+.view-ing-table tr:last-child td{border-bottom:none}
+.view-notes{padding:12px 14px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;font-size:.83rem;line-height:1.6;white-space:pre-wrap}
+.rvp-strip{display:flex;flex-direction:column;gap:7px;margin-bottom:14px;padding:11px 15px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:9px}
+.rvp-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;font-size:.92rem;color:var(--text)}
+.rvp-lbl{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin-right:3px}
+.rvp-sep{color:var(--border);font-size:.88rem;margin:0 2px}
+/* ── INGREDIENT MOVE BUTTONS ── */
+.ing-move-btns{display:flex;flex-direction:column;gap:2px;flex-shrink:0;justify-content:center;margin-bottom:1px}
+.ing-move-btn{background:none;border:1px solid var(--border);border-radius:3px;color:var(--muted);cursor:pointer;padding:0;width:18px;height:15px;font-size:.5rem;display:flex;align-items:center;justify-content:center;transition:all .15s;line-height:1}
+.ing-move-btn:hover:not(:disabled){color:var(--amber);border-color:var(--amber)}
+.ing-move-btn:disabled{opacity:.18;cursor:default}
+/* ── MALT PCT BADGE ── */
+.malt-pct{flex-shrink:0;font-size:.75rem;font-weight:700;color:var(--malt);min-width:44px;text-align:center}
+
+/* ── ADVANCED PARAMS TOGGLE ── */
+.adv-toggle{background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;display:flex;align-items:center;gap:5px;padding:2px 0;transition:color .15s}
+.adv-toggle:hover{color:var(--text)}
+.adv-toggle .adv-icon{font-size:.65rem;transition:transform .2s}
+.adv-toggle.open .adv-icon{transform:rotate(90deg)}
+
+/* ── STOCK INDICATOR ── */
+.stock-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;font-size:.72rem;font-weight:600}
+.sb-ok{background:rgba(34,197,94,.15);color:var(--success)}
+.sb-low{background:rgba(245,158,11,.15);color:#f59e0b}
+.sb-empty{background:rgba(239,68,68,.15);color:var(--danger)}
+.sb-na{background:rgba(136,136,136,.12);color:var(--muted)}
+
+/* ── CALC PANEL ── */
+.calc-panel{padding:14px 16px;background:rgba(255,149,0,.04);border:1px solid rgba(255,149,0,.15);border-radius:10px;margin-bottom:16px}
+.calc-panel-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--amber);margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.calc-bar-row{display:grid;grid-template-columns:42px 1fr 62px 108px;align-items:center;gap:8px;margin-bottom:7px}
+.calc-bar-lbl{font-size:.78rem;font-weight:700;color:var(--muted)}
+.calc-bar-track{height:8px;background:rgba(255,255,255,.07);border-radius:4px;position:relative;overflow:visible}
+.calc-bar-range{position:absolute;top:0;height:100%;background:rgba(255,149,0,.3);border-radius:4px}
+.calc-bar-marker{position:absolute;top:-3px;width:3px;height:14px;border-radius:2px;transform:translateX(-50%);transition:left .3s ease}
+.calc-bar-val{font-size:.82rem;font-weight:700;text-align:right}
+.calc-bar-target{font-size:.69rem;color:var(--muted);white-space:nowrap;text-align:right}
+
+/* ── SCROLLBAR ── */
+*{scrollbar-width:thin;scrollbar-color:rgba(255,149,0,.35) rgba(255,255,255,.04)}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:rgba(255,255,255,.03);border-radius:10px}
+::-webkit-scrollbar-thumb{background:rgba(255,149,0,.35);border-radius:10px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,201,64,.65);border-radius:10px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-corner{background:transparent}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px}
+.toast-item{padding:12px 18px;border-radius:10px;font-size:.875rem;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,.4);animation:toastIn .3s ease;display:flex;align-items:center;gap:10px;max-width:340px}
+@keyframes toastIn{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast-success{background:#166534;color:#bbf7d0;border:1px solid #16a34a}
+.toast-error{background:#7f1d1d;color:#fecaca;border:1px solid #dc2626}
+.toast-info{background:#1e3a5f;color:#bfdbfe;border:1px solid #3b82f6}
+
+.archived-item { opacity:.38; filter:saturate(.3); }
+.archived-item strong, .archived-item .brew-card-name,
+.archived-item .recipe-item-name, .archived-item .beer-name { text-decoration:line-through; }
+
+/* ── BREW SPINDLE INLINE ── */
+.brew-spindle-badge{display:inline-flex;align-items:center;gap:7px;margin-top:6px;padding:4px 10px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);border-radius:20px;font-size:.8rem}
+.brew-spindle-badge .bsb-grav{color:var(--amber);font-weight:700}
+.brew-spindle-badge .bsb-temp{color:#3b82f6;font-weight:600}
+.brew-spindle-badge .bsb-ago{color:var(--muted)}
+.bsb-live{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);animation:pulse-dot 2s infinite}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── SPINDLES ── */
+.spindle-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-top:8px}
+.spindle-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;transition:border-color .3s}
+.spindle-card:hover{border-color:rgba(59,130,246,.4)}
+.spindle-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:8px;flex-wrap:wrap}
+.spindle-age-badge{display:inline-flex;align-items:center;gap:5px;font-size:.73rem;font-weight:600;padding:2px 9px;border-radius:20px;border:1px solid;white-space:nowrap}
+@keyframes spindle-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.spindle-age-pulse{animation:spindle-pulse 2s ease-in-out infinite}
+.spindle-name{font-size:1.05rem;font-weight:700}
+.spindle-metrics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px}
+.spindle-metric{text-align:center;background:var(--bg2);border-radius:10px;padding:10px 6px}
+.spindle-metric-val{font-size:1.25rem;font-weight:700;color:var(--amber)}
+.spindle-metric-lbl{font-size:.72rem;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+.spindle-brew-link{display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:8px;font-size:.85rem;margin-bottom:12px}
+.token-box{font-family:monospace;font-size:.8rem;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;word-break:break-all;color:var(--gold);margin:10px 0;cursor:pointer;transition:border-color .2s}
+.token-box:hover{border-color:var(--amber)}
+.battery-bar{height:5px;border-radius:3px;background:var(--border);overflow:hidden;width:48px;display:inline-block;vertical-align:middle;margin-right:4px}
+.battery-fill{height:100%;border-radius:3px;transition:width .4s}
+
+@media(max-width:768px){
+  .form-row.cols-2,.form-row.cols-3,.form-row.cols-4{grid-template-columns:1fr}
+  .nav-brand{font-size:1.1rem;margin-right:16px}
+  .nav-btn{padding:6px 10px;font-size:.8rem}
+  .ing-row{flex-wrap:wrap}
+}
+
+/* ══ THÈME CLAIR ══════════════════════════════════════════════════════════════ */
+[data-theme="light"] nav{background:rgba(245,242,236,.96)}
+[data-theme="light"] .nav-btn:hover{background:rgba(0,0,0,.06)}
+[data-theme="light"] .nav-btn.active{background:rgba(194,113,12,.1)}
+[data-theme="light"] .nav-badge{background:rgba(194,113,12,.18);color:var(--gold)}
+
+[data-theme="light"] .btn-ghost{background:rgba(0,0,0,.04);border-color:var(--border)}
+[data-theme="light"] .btn-ghost:hover{background:rgba(0,0,0,.09);border-color:rgba(194,113,12,.4)}
+
+[data-theme="light"] .stabs{background:rgba(0,0,0,.06)}
+[data-theme="light"] .stab.active{background:var(--card)}
+[data-theme="light"] .cat-chip{background:rgba(0,0,0,.04);border-color:var(--border)}
+[data-theme="light"] .filter-tabs{background:rgba(0,0,0,.04)}
+[data-theme="light"] .filter-tab:hover{color:var(--text)}
+
+[data-theme="light"] .card:hover{border-color:rgba(194,113,12,.3)}
+[data-theme="light"] .modal-overlay{background:rgba(0,0,0,.45)}
+
+[data-theme="light"] .recipe-item{background:rgba(0,0,0,.02)}
+[data-theme="light"] .recipe-item:hover{background:rgba(194,113,12,.07)}
+[data-theme="light"] .recipe-item.active{background:rgba(194,113,12,.11)}
+[data-theme="light"] .brew-card{background:rgba(0,0,0,.02)}
+[data-theme="light"] .brew-group-count{background:rgba(0,0,0,.07)}
+[data-theme="light"] .beer-card:hover{border-color:rgba(194,113,12,.35)}
+
+[data-theme="light"] .ing-row{background:rgba(0,0,0,.02)}
+[data-theme="light"] .ing-suggest{background:var(--card);box-shadow:0 8px 24px rgba(0,0,0,.12)}
+[data-theme="light"] .ing-suggest-item:hover{background:rgba(194,113,12,.08)}
+[data-theme="light"] .ing-suggest-cat{background:rgba(0,0,0,.04)}
+
+[data-theme="light"] .qty-ctrl{background:rgba(0,0,0,.04)}
+
+[data-theme="light"] .view-notes{background:rgba(0,0,0,.03)}
+[data-theme="light"] .rvp-strip{background:rgba(0,0,0,.03)}
+[data-theme="light"] .view-ing-table td{border-bottom-color:rgba(0,0,0,.06)}
+[data-theme="light"] tbody tr:hover{background:rgba(194,113,12,.04)}
+
+[data-theme="light"] .calc-bar-track{background:rgba(0,0,0,.08)}
+[data-theme="light"] .calc-panel{background:rgba(194,113,12,.05);border-color:rgba(194,113,12,.2)}
+
+[data-theme="light"] .adv-toggle{color:var(--muted)}
+[data-theme="light"] .adv-toggle:hover{color:var(--text)}
+
+[data-theme="light"] .token-box{background:var(--bg2);color:var(--amber)}
+[data-theme="light"] .spindle-metric{background:var(--bg2)}
+
+[data-theme="light"] #rec-wc-panel{background:rgba(0,0,0,.04)!important}
+
+[data-theme="light"] *{scrollbar-color:rgba(194,113,12,.4) rgba(0,0,0,.08)}
+[data-theme="light"] ::-webkit-scrollbar-track{background:rgba(0,0,0,.07)}
+[data-theme="light"] ::-webkit-scrollbar-thumb{background:rgba(194,113,12,.4)}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover{background:rgba(194,113,12,.65)}
+
+[data-theme="light"] .toast-success{background:#f0fdf4;color:#15803d;border-color:#86efac;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+[data-theme="light"] .toast-error{background:#fef2f2;color:#dc2626;border-color:#fca5a5;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+[data-theme="light"] .toast-info{background:#eff6ff;color:#2563eb;border-color:#93c5fd;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+
+/* transition douce au changement de thème */
+body,nav,.card,.modal,.btn,.ing-row,.recipe-item,.brew-card,.beer-card,
+input,select,textarea,.stabs,.stab,.filter-tabs,.filter-tab{
+  transition:background .25s,border-color .25s,color .15s;
+}
+</style>

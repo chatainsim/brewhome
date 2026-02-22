@@ -1,0 +1,183 @@
+<div class="page" id="page-recettes">
+  <div class="section-head">
+    <h2>Recettes de brassage</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <div id="rec-arch-wrap"></div>
+      <div class="actions" id="rec-actions">
+        <button class="btn btn-primary" onclick="newRecipeFromList()"><i class="fas fa-plus"></i> Nouvelle recette</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="recipe-layout" class="recipe-list-only">
+    <!-- Liste -->
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="section-label" style="margin:0">Recettes sauvegardées</div>
+        <select id="rec-sort-select" onchange="recSort=this.value;renderRecipeList()" style="font-size:.78rem;padding:3px 8px;border-radius:6px;background:var(--card);border:1px solid var(--border);color:var(--text);cursor:pointer">
+          <option value="recent">↕ Récent</option>
+          <option value="name">↕ Nom A→Z</option>
+          <option value="rating">↕ Note</option>
+          <option value="style">↕ Style</option>
+          <option value="volume">↕ Volume</option>
+        </select>
+      </div>
+      <div id="recipe-list-container">
+        <div class="empty" id="recipe-list-empty"><i class="fas fa-scroll"></i><p>Aucune recette</p></div>
+      </div>
+    </div>
+
+    <!-- Formulaire / Vue -->
+    <div class="card">
+      <div id="rec-alert" class="alert"></div>
+
+      <!-- ── MODE VISUALISATION ── -->
+      <div id="rec-view-panel" style="display:none"></div>
+
+      <!-- ── MODE ÉDITION ── -->
+      <div id="rec-form-panel">
+      <div class="section-label">Informations générales</div>
+      <div class="form-row cols-2">
+        <div class="field"><label>N° Brassin</label><input type="number" id="rec-batch" value="1" min="1"></div>
+        <div class="field"><label>Nom de la bière <span class="req">*</span></label><input type="text" id="rec-name" placeholder="Ex : IPA Tropicale"></div>
+      </div>
+      <div class="form-row cols-3">
+        <div class="field" style="position:relative">
+          <label>Style BJCP</label>
+          <input type="text" id="rec-style" placeholder="Rechercher un style…" autocomplete="off"
+            oninput="bjcpSearch(this)" onfocus="bjcpSearch(this)" onblur="setTimeout(closeBjcpSuggest,200)">
+          <div id="bjcp-sug" class="ing-suggest" style="max-height:320px"></div>
+        </div>
+        <div class="field"><label>Volume (L)</label><input type="number" id="rec-volume" value="20" min="1" step="0.5" oninput="recCalc()"></div>
+        <div class="field"><label>Date de brassage</label><input type="date" id="rec-brew-date"></div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-label">Paramètres techniques</div>
+      <div class="form-row cols-4">
+        <div class="field"><label>T° empâtage (°C)</label><input type="number" id="rec-mash-temp" value="66" step="0.5" oninput="recCalc()"></div>
+        <div class="field"><label>Durée empâtage (min)</label><input type="number" id="rec-mash-time" value="60" step="5"></div>
+        <div class="field"><label>Ébullition (min)</label><input type="number" id="rec-boil-time" value="60" step="5" oninput="recCalc()"></div>
+        <div class="field"><label>Rendement (%)</label><input type="number" id="rec-efficiency" value="72" min="40" max="100" oninput="recCalc()"></div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="field"><label><i class="fas fa-temperature-half" style="color:var(--info)"></i> T° fermentation (°C)</label><input type="number" id="rec-ferm-temp" value="20" step="0.5" min="0" max="40"></div>
+        <div class="field"><label><i class="fas fa-calendar-days" style="color:var(--info)"></i> Durée fermentation (jours)</label><input type="number" id="rec-ferm-time" value="14" step="1" min="1"></div>
+      </div>
+      <div style="margin:6px 0 4px">
+        <button type="button" class="adv-toggle" id="btn-adv-params" onclick="toggleAdvancedParams()">
+          <i class="fas fa-chevron-right adv-icon"></i> Paramètres avancés (eau)
+        </button>
+      </div>
+      <div id="rec-advanced-params" style="display:none">
+        <div class="form-row cols-3" style="margin-top:10px;margin-bottom:12px">
+          <div class="field"><label>Ratio empâtage (L/kg)</label><input type="number" id="rec-mash-ratio" value="3.5" step="0.1" oninput="recCalc()"></div>
+          <div class="field"><label>Évaporation (L/h)</label><input type="number" id="rec-evap" value="3.0" step="0.5" oninput="recCalc()"></div>
+          <div class="field"><label>Absorption grain (L/kg)</label><input type="number" id="rec-absorption" value="1.0" step="0.1" oninput="recCalc()"></div>
+        </div>
+      </div>
+
+      <!-- Volumes calculés -->
+      <div class="grid-4" style="margin-bottom:16px" id="rec-water-cards">
+        <div class="stat"><div class="stat-val" id="rw-mash">–</div><div class="stat-lbl">Eau empâtage (L)</div></div>
+        <div class="stat"><div class="stat-val" id="rw-sparge">–</div><div class="stat-lbl">Eau rinçage (L)</div></div>
+        <div class="stat"><div class="stat-val" id="rw-preboil">–</div><div class="stat-lbl">Pré-ébullition (L)</div></div>
+        <div class="stat"><div class="stat-val" id="rw-total">–</div><div class="stat-lbl">Eau totale (L)</div></div>
+      </div>
+
+      <div id="rec-calc-panel"></div>
+
+      <!-- ── CORRECTION D'EAU ── -->
+      <div style="margin:4px 0 6px">
+        <button type="button" class="adv-toggle" id="btn-wc" onclick="toggleWaterCorrection()">
+          <i class="fas fa-chevron-right adv-icon"></i>
+          <i class="fas fa-flask-vial" style="color:var(--info);margin:0 3px"></i> Correction d'eau
+        </button>
+      </div>
+      <div id="rec-wc-panel" style="display:none;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px">
+
+        <!-- Source -->
+        <div style="margin-bottom:10px">
+          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:5px">
+            <i class="fas fa-water"></i> Eau source (profil paramètres)
+          </div>
+          <div id="wc-source-display" style="font-size:.8rem;color:var(--muted)">—</div>
+        </div>
+
+        <!-- Volume -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <span style="font-size:.82rem;color:var(--muted)"><i class="fas fa-droplet"></i> Volume d'eau total</span>
+          <input type="number" id="wc-volume" step="0.5" min="0.1" style="width:80px" oninput="calcWaterCorrection()">
+          <span style="font-size:.8rem;color:var(--muted)">L</span>
+        </div>
+
+        <!-- Profil cible -->
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:7px">Profil cible (mg/L)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('neutre')">Neutre</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('equilibre')">Équilibré</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('ipa')">IPA</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('stout')">Stout</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('pilsen')">Pilsen</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('munich')">Munich</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('vienne')">Vienne</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('dortmund')">Dortmund</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('london')">London</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('burton')">Burton</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('dublin')">Dublin</button>
+          <button class="btn btn-ghost btn-sm" onclick="wcPreset('edinburgh')">Edinburgh</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:6px">
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Ca²⁺</label><input type="number" id="wc-t-ca"   min="0" step="1" oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Mg²⁺</label><input type="number" id="wc-t-mg"   min="0" step="1" oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Na⁺</label> <input type="number" id="wc-t-na"   min="0" step="1" oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">SO₄²⁻</label><input type="number" id="wc-t-so4" min="0" step="1" oninput="calcWaterCorrection()"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px">
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Cl⁻</label>    <input type="number" id="wc-t-cl"   min="0" step="1"   oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">HCO₃⁻</label> <input type="number" id="wc-t-hco3" min="0" step="1"   oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">pH cible (moût)</label><input type="number" id="wc-t-ph" min="4.0" max="6.5" step="0.1" placeholder="5.3" oninput="calcWaterCorrection()"></div>
+        </div>
+
+        <!-- Résultats -->
+        <div id="wc-results" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:14px"></div>
+      </div><!-- /rec-wc-panel -->
+
+      <div class="divider"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="section-label" style="margin:0">Ingrédients</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm btn-ghost" onclick="addIngRow('malt')"><i class="fas fa-plus"></i> Malt</button>
+          <button class="btn btn-sm btn-ghost" onclick="addIngRow('houblon')"><i class="fas fa-plus"></i> Houblon</button>
+          <button class="btn btn-sm btn-ghost" onclick="addIngRow('levure')"><i class="fas fa-plus"></i> Levure</button>
+          <button class="btn btn-sm btn-ghost" onclick="addIngRow('autre')"><i class="fas fa-plus"></i> Autre</button>
+        </div>
+      </div>
+      <div id="rec-ingredients"></div>
+
+      <div class="divider"></div>
+      <div class="field" style="margin-bottom:12px">
+        <label>Note</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="star-input" id="rec-star-input">
+            <span class="star" onclick="setRecRating(1)">★</span>
+            <span class="star" onclick="setRecRating(2)">★</span>
+            <span class="star" onclick="setRecRating(3)">★</span>
+            <span class="star" onclick="setRecRating(4)">★</span>
+            <span class="star" onclick="setRecRating(5)">★</span>
+          </div>
+          <span id="rec-rating-label" style="font-size:.82rem;color:var(--muted)">Non noté</span>
+        </div>
+        <input type="hidden" id="rec-rating">
+      </div>
+      <div class="field"><label>Notes</label><textarea id="rec-notes" placeholder="Profil d'eau, observations, modifications..."></textarea></div>
+
+      <input type="hidden" id="rec-editing-id">
+      </div><!-- /rec-form-panel -->
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PAGE : BRASSINS
+═══════════════════════════════════════════════════════════════════════════ -->

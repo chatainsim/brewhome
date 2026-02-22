@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BrewHome — Gestion Brasserie</title>
+<link rel="stylesheet" href="/static/fonts/google/fonts.css">
+<link rel="stylesheet" href="/static/fonts/fa/all.min.css">
+<script src="/static/js/chart.umd.min.js"></script>
+<!-- Anti-flash : applique le thème avant le rendu -->
+<script>(function(){var t=localStorage.getItem('brewhome-theme');document.documentElement.setAttribute('data-theme',t||'dark');})();</script>
+{% include 'parts/styles.html' %}
+</head>
+<body>
+
+{% include 'parts/nav.html' %}
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- PAGES -->
+{% include 'parts/page_inventaire.html' %}
+{% include 'parts/page_recettes.html' %}
+{% include 'parts/page_brassins.html' %}
+{% include 'parts/page_cave.html' %}
+{% include 'parts/page_spindles.html' %}
+
+<!-- MODALS -->
+{% include 'parts/modals_inv.html' %}
+{% include 'parts/modals_brew.html' %}
+{% include 'parts/modals_beer.html' %}
+{% include 'parts/modals_settings.html' %}
+{% include 'parts/modals_spindles.html' %}
+
+<!-- SCRIPTS -->
+{% include 'parts/scripts.html' %}
+
+</body>
+</html>

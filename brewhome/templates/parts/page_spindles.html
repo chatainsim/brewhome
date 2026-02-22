@@ -1,0 +1,40 @@
+<div class="page" id="page-spindles">
+  <div class="section-head">
+    <h2>Densimètres connectés</h2>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="openSpindleModal()"><i class="fas fa-plus"></i> Ajouter</button>
+    </div>
+  </div>
+  <div class="grid-4" style="margin-bottom:20px" id="spin-stats"></div>
+  <div class="spindle-grid" id="spindle-grid"></div>
+  <div class="empty" id="spindle-empty" style="display:none">
+    <i class="fas fa-water"></i><p>Aucun densimètre configuré</p>
+  </div>
+
+  <!-- Gestion de la base de données des mesures -->
+  <div class="card" style="margin-top:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px">
+      <div>
+        <div style="font-weight:700;margin-bottom:4px"><i class="fas fa-database" style="color:var(--amber);margin-right:7px"></i>Base de données des mesures</div>
+        <div id="spin-db-stats" style="font-size:.83rem;color:var(--muted)">Chargement…</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:.85rem;color:var(--muted)">Purger les mesures de plus de</span>
+        <select id="purge-days" style="width:110px">
+          <option value="7">7 jours</option>
+          <option value="30" selected>30 jours</option>
+          <option value="90">3 mois</option>
+          <option value="180">6 mois</option>
+          <option value="365">1 an</option>
+        </select>
+        <button class="btn btn-danger btn-sm" onclick="purgeReadings()">
+          <i class="fas fa-trash-can"></i> Purger
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MODALS
+═══════════════════════════════════════════════════════════════════════════ -->

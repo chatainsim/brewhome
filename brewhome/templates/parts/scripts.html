@@ -1,0 +1,3893 @@
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════════════════
+const S = { inventory: [], recipes: [], brews: [], beers: [], catalog: [], bjcp: [], spindles: [] };
+let invFilter = 'all';
+let showArchivedInv=false, showArchivedRec=false, showArchivedBrew=false, showArchivedCave=false;
+let appSettings = JSON.parse(localStorage.getItem('brewSettings') || '{}');
+const DEFAULT_THRESH = {malt:1000, houblon:50, levure:2, autre:100};
+function getThresh(cat) { return ((appSettings.thresholds||{})[cat] ?? DEFAULT_THRESH[cat]); }
+function saveSettings() { localStorage.setItem('brewSettings', JSON.stringify(appSettings)); }
+// Normalise une quantité vers l'unité de base de sa dimension
+function toBaseVal(qty, unit) {
+  if (unit === 'kg')  return { v: qty * 1000, dim: 'weight' };
+  if (unit === 'g')   return { v: qty,        dim: 'weight' };
+  if (unit === 'L')   return { v: qty * 1000, dim: 'volume' };
+  if (unit === 'mL')  return { v: qty,        dim: 'volume' };
+  return { v: qty, dim: 'count' }; // pièce, sachet, unité, …
+}
+let settingsCat = 'malt';
+let recSort = 'recent';
+const STAR_LABELS = ['Non noté', 'Passable', 'Correct', 'Bon', 'Très bon', 'Excellent'];
+let recEditingId = null;
+let recViewMode  = 'edit'; // 'view' | 'edit'
+let recIngredients = []; // [{id,category,inventory_item_id,name,quantity,unit,...}]
+let _invSugItems = []; // cache for inventory suggest clicks
+let _rSugItems   = []; // cache for recipe ingredient suggest clicks
+
+// ══════════════════════════════════════════════════════════════════════════════
+// API
+// ══════════════════════════════════════════════════════════════════════════════
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: r.statusText }));
+    throw err;
+  }
+  return r.json();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════════════════════════════
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.getElementById('nav-' + page).classList.add('active');
+  window.scrollTo(0, 0);
+  _refreshPage(page);
+}
+
+async function _refreshPage(page) {
+  try {
+    if (page === 'inventaire') {
+      S.inventory = await api('GET', '/api/inventory');
+      renderInventaire();
+    } else if (page === 'recettes') {
+      S.recipes = await api('GET', '/api/recipes');
+      renderRecipeList();
+    } else if (page === 'brassins') {
+      [S.brews, S.spindles] = await Promise.all([
+        api('GET', '/api/brews'),
+        api('GET', '/api/spindles'),
+      ]);
+      renderBrassins();
+    } else if (page === 'cave') {
+      S.beers = await api('GET', '/api/beers');
+      renderCave();
+    } else if (page === 'spindles') {
+      S.spindles = await api('GET', '/api/spindles');
+      renderSpindles();
+    }
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+  } catch(e) { /* refresh silencieux */ }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TOAST
+// ══════════════════════════════════════════════════════════════════════════════
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast-item toast-${type}`;
+  el.innerHTML = `<i class="fas fa-${type==='success'?'check-circle':type==='error'?'circle-xmark':'circle-info'}"></i> ${msg}`;
+  document.getElementById('toast').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ARCHIVE
+// ══════════════════════════════════════════════════════════════════════════════
+async function archiveItem(entity, id, archived) {
+  const paths = {inv:'inventory', rec:'recipes', brew:'brews', cave:'beers'};
+  try {
+    const updated = await api('PATCH', `/api/${paths[entity]}/${id}`, {archived});
+    const arr = {inv:S.inventory, rec:S.recipes, brew:S.brews, cave:S.beers}[entity];
+    const idx = arr.findIndex(x=>x.id===id);
+    if(idx!==-1) arr[idx] = {...arr[idx], archived: archived?1:0};
+    ({inv:renderInventaire, rec:renderRecipeList, brew:renderBrassins, cave:renderCave})[entity]();
+    toast(archived ? 'Archivé' : 'Désarchivé', 'success');
+  } catch(e) { toast('Erreur archivage', 'error'); }
+}
+
+function toggleShowArchived(section) {
+  if(section==='inv')  { showArchivedInv  = !showArchivedInv;  renderInventaire(); }
+  if(section==='rec')  { showArchivedRec  = !showArchivedRec;  renderRecipeList(); }
+  if(section==='brew') { showArchivedBrew = !showArchivedBrew; renderBrassins();   }
+  if(section==='cave') { showArchivedCave = !showArchivedCave; renderCave();       }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SETTINGS MODAL
+// ══════════════════════════════════════════════════════════════════════════════
+function openSettings() {
+  renderSettingsCatalog(settingsCat);
+  renderSettingsThresholds();
+  settingsTab('catalogue');
+  document.getElementById('modal-settings').classList.add('open');
+}
+function closeSettings() { document.getElementById('modal-settings').classList.remove('open'); }
+
+function settingsTab(tab) {
+  document.querySelectorAll('#modal-settings .stab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('stab-catalogue').style.display  = tab === 'catalogue'  ? '' : 'none';
+  document.getElementById('stab-thresholds').style.display = tab === 'thresholds' ? '' : 'none';
+  document.getElementById('stab-water').style.display      = tab === 'water'      ? '' : 'none';
+  document.getElementById('stab-import').style.display     = tab === 'import'     ? '' : 'none';
+  document.getElementById('stab-github').style.display     = tab === 'github'     ? '' : 'none';
+  document.getElementById('settings-save-btn').style.display = tab === 'thresholds' ? '' : 'none';
+  document.getElementById('github-save-btn').style.display   = tab === 'github'     ? '' : 'none';
+  if (tab === 'thresholds') renderSettingsThresholds();
+  if (tab === 'water')      renderSettingsWater();
+  if (tab === 'github')     renderSettingsGithub();
+}
+
+function renderSettingsCatalog(cat) {
+  settingsCat = cat;
+  document.querySelectorAll('#settings-cat-chips .cat-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.cat === cat);
+  });
+  const items = S.catalog.filter(c => c.category === cat)
+    .sort((a,b) => (a.subcategory||'').localeCompare(b.subcategory||'') || a.name.localeCompare(b.name));
+  const list = document.getElementById('settings-catalog-list');
+  list.innerHTML = items.length ? items.map(item => _catalogRowHtml(item, cat)).join('')
+    : '<div style="color:var(--muted);text-align:center;padding:20px 0;font-size:.87rem">Aucun article dans cette catégorie</div>';
+  // Afficher les bons champs selon catégorie
+  document.getElementById('scat-ebc-wrap').style.display    = cat === 'malt'    ? '' : 'none';
+  document.getElementById('scat-maxpct-wrap').style.display = cat === 'malt'    ? '' : 'none';
+  document.getElementById('scat-alpha-wrap').style.display  = cat === 'houblon' ? '' : 'none';
+  document.getElementById('scat-ytype-wrap').style.display  = cat === 'levure'  ? '' : 'none';
+  document.getElementById('scat-yeast-wrap').style.display  = cat === 'levure'  ? '' : 'none';
+  document.getElementById('scat-unit').value = cat === 'malt' ? 'kg' : 'g';
+}
+
+function _catalogRowHtml(item, cat) {
+  return `
+    <div class="catalog-row" id="crow-${item.id}">
+      <div style="flex:1">
+        <span style="font-weight:600">${esc(item.name)}</span>
+        ${item.subcategory ? `<span style="font-size:.78rem;color:var(--muted);margin-left:6px">${esc(item.subcategory)}</span>` : ''}
+        ${item.ebc        != null ? `<span class="badge badge-malt"    style="font-size:.68rem;margin-left:4px">EBC ${item.ebc}</span>` : ''}
+        ${item.max_usage_pct != null ? `<span class="badge badge-malt" style="font-size:.68rem;margin-left:4px;opacity:.8">max ${item.max_usage_pct}%</span>` : ''}
+        ${item.alpha      != null ? `<span class="badge badge-houblon" style="font-size:.68rem;margin-left:4px">α ${item.alpha}%</span>` : ''}
+        ${item.yeast_type ? `<span class="badge badge-levure" style="font-size:.68rem;margin-left:4px">${esc(item.yeast_type)}</span>` : ''}
+        ${item.temp_min != null || item.temp_max != null ? `<span class="badge badge-levure" style="font-size:.68rem;margin-left:4px;opacity:.8">${item.temp_min??'?'}–${item.temp_max??'?'}°C</span>` : ''}
+        ${item.attenuation_min != null || item.attenuation_max != null ? `<span class="badge badge-levure" style="font-size:.68rem;margin-left:4px;opacity:.7">${item.attenuation_min??'?'}–${item.attenuation_max??'?'}%</span>` : ''}
+        ${item.alcohol_tolerance != null ? `<span class="badge badge-levure" style="font-size:.68rem;margin-left:4px;opacity:.6">tol. ${item.alcohol_tolerance}%</span>` : ''}
+        ${item.dosage_per_liter != null ? `<span class="badge badge-levure" style="font-size:.68rem;margin-left:4px;opacity:.6">${item.dosage_per_liter}g/L</span>` : ''}
+        <span style="font-size:.72rem;color:var(--muted);margin-left:6px">[${item.default_unit || 'g'}]</span>
+      </div>
+      <button class="btn btn-icon btn-ghost btn-sm" onclick="editCatalogInline(${item.id})" title="Modifier"><i class="fas fa-pen"></i></button>
+      <button class="btn btn-icon btn-danger btn-sm" onclick="deleteCatalogItem(${item.id})" title="Supprimer"><i class="fas fa-trash"></i></button>
+    </div>`;
+}
+
+function editCatalogInline(id) {
+  const item = S.catalog.find(c => c.id === id);
+  if (!item) return;
+  const cat = item.category;
+  const extraField =
+    cat === 'malt'    ? `<input type="number" id="cedit-ebc-${id}"    value="${item.ebc    ?? ''}" step="0.1" placeholder="EBC"    style="width:70px" title="EBC">
+                         <input type="number" id="cedit-maxpct-${id}" value="${item.max_usage_pct ?? ''}" step="1" min="0" max="100" placeholder="% max" style="width:70px" title="% max recette">` :
+    cat === 'houblon' ? `<input type="number" id="cedit-alpha-${id}"  value="${item.alpha  ?? ''}" step="0.1" placeholder="α%"     style="width:70px" title="Alpha %">` :
+    cat === 'levure'  ? `<input type="text"   id="cedit-ytype-${id}"  value="${esc(item.yeast_type||'')}"  placeholder="Type" style="width:80px" title="Type levure">` : '';
+  const yeastExtra = cat === 'levure' ? `
+    <div style="width:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;padding-top:6px;border-top:1px solid var(--border)">
+      <input type="number" id="cedit-tmin-${id}"   value="${item.temp_min??''}"          step="0.5" placeholder="T°min°C" style="width:80px" title="T° min fermentation">
+      <input type="number" id="cedit-tmax-${id}"   value="${item.temp_max??''}"          step="0.5" placeholder="T°max°C" style="width:80px" title="T° max fermentation">
+      <input type="number" id="cedit-dosage-${id}" value="${item.dosage_per_liter??''}"  step="0.01" placeholder="g/L"    style="width:70px" title="Dosage g/L">
+      <input type="number" id="cedit-attmin-${id}" value="${item.attenuation_min??''}"   step="1"    placeholder="Att.min%" style="width:78px" title="Atténuation min">
+      <input type="number" id="cedit-attmax-${id}" value="${item.attenuation_max??''}"   step="1"    placeholder="Att.max%" style="width:78px" title="Atténuation max">
+      <input type="number" id="cedit-alctol-${id}" value="${item.alcohol_tolerance??''}" step="0.5"  placeholder="Tol.alc%" style="width:82px" title="Tolérance alcool">
+    </div>` : '';
+  const unitOpts = ['kg','g','L','mL','unité','sachet'].map(u =>
+    `<option value="${u}" ${item.default_unit===u?'selected':''}>${u}</option>`).join('');
+
+  document.getElementById(`crow-${id}`).outerHTML = `
+    <div class="catalog-row" id="crow-${id}" style="flex-wrap:wrap;gap:6px">
+      <input type="text" id="cedit-name-${id}" value="${esc(item.name)}" style="flex:1;min-width:130px" placeholder="Nom">
+      <input type="text" id="cedit-sub-${id}"  value="${esc(item.subcategory||'')}" style="width:110px" placeholder="Sous-cat.">
+      ${extraField}
+      <select id="cedit-unit-${id}" style="width:70px" title="Unité par défaut">${unitOpts}</select>
+      <button class="btn btn-success btn-icon btn-sm" onclick="saveCatalogEdit(${id})" title="Enregistrer"><i class="fas fa-check"></i></button>
+      <button class="btn btn-ghost  btn-icon btn-sm" onclick="renderSettingsCatalog(settingsCat)" title="Annuler"><i class="fas fa-xmark"></i></button>
+      ${yeastExtra}
+    </div>`;
+  document.getElementById(`cedit-name-${id}`).focus();
+}
+
+async function saveCatalogEdit(id) {
+  const item = S.catalog.find(c => c.id === id);
+  if (!item) return;
+  const cat  = item.category;
+  const name = document.getElementById(`cedit-name-${id}`).value.trim();
+  if (!name) { toast('Nom requis', 'error'); return; }
+  const fv = (elId) => { const el = document.getElementById(elId); return el && el.value !== '' ? parseFloat(el.value) : null; };
+  const payload = {
+    name,
+    category:    cat,
+    subcategory: document.getElementById(`cedit-sub-${id}`).value.trim() || null,
+    ebc:         cat === 'malt'    ? fv(`cedit-ebc-${id}`)    : null,
+    max_usage_pct: cat === 'malt'  ? fv(`cedit-maxpct-${id}`) : null,
+    alpha:       cat === 'houblon' ? fv(`cedit-alpha-${id}`)  : null,
+    yeast_type:  cat === 'levure'  ? (document.getElementById(`cedit-ytype-${id}`)?.value.trim() || null) : null,
+    temp_min:          cat === 'levure' ? fv(`cedit-tmin-${id}`)   : null,
+    temp_max:          cat === 'levure' ? fv(`cedit-tmax-${id}`)   : null,
+    dosage_per_liter:  cat === 'levure' ? fv(`cedit-dosage-${id}`) : null,
+    attenuation_min:   cat === 'levure' ? fv(`cedit-attmin-${id}`) : null,
+    attenuation_max:   cat === 'levure' ? fv(`cedit-attmax-${id}`) : null,
+    alcohol_tolerance: cat === 'levure' ? fv(`cedit-alctol-${id}`) : null,
+    default_unit: document.getElementById(`cedit-unit-${id}`).value,
+  };
+  try {
+    const updated = await api('PUT', `/api/catalog/${id}`, payload);
+    const idx = S.catalog.findIndex(c => c.id === id);
+    if (idx !== -1) S.catalog[idx] = updated;
+    renderSettingsCatalog(settingsCat);
+    toast('Catalogue mis à jour', 'success');
+  } catch(e) { toast('Erreur mise à jour', 'error'); }
+}
+
+async function addCatalogItem() {
+  const name = document.getElementById('scat-name').value.trim();
+  if (!name) { toast('Nom requis', 'error'); return; }
+  const sfv = (id) => { const el = document.getElementById(id); return el && el.value !== '' ? parseFloat(el.value) : null; };
+  const payload = {
+    name,
+    category:    settingsCat,
+    subcategory: document.getElementById('scat-sub').value.trim() || null,
+    ebc:         sfv('scat-ebc'),
+    max_usage_pct: sfv('scat-maxpct'),
+    alpha:       sfv('scat-alpha'),
+    yeast_type:  document.getElementById('scat-ytype').value.trim() || null,
+    temp_min:          sfv('scat-tmin'),
+    temp_max:          sfv('scat-tmax'),
+    dosage_per_liter:  sfv('scat-dosage'),
+    attenuation_min:   sfv('scat-attmin'),
+    attenuation_max:   sfv('scat-attmax'),
+    alcohol_tolerance: sfv('scat-alctol'),
+    default_unit: document.getElementById('scat-unit').value,
+  };
+  try {
+    const item = await api('POST', '/api/catalog', payload);
+    S.catalog.push(item);
+    ['scat-name','scat-sub','scat-ebc','scat-maxpct','scat-alpha','scat-ytype',
+     'scat-tmin','scat-tmax','scat-dosage','scat-attmin','scat-attmax','scat-alctol']
+      .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+    renderSettingsCatalog(settingsCat);
+    toast('Ajouté au catalogue', 'success');
+  } catch(e) { toast('Erreur ajout catalogue', 'error'); }
+}
+
+async function deleteCatalogItem(id) {
+  try {
+    await api('DELETE', `/api/catalog/${id}`);
+    S.catalog = S.catalog.filter(c => c.id !== id);
+    renderSettingsCatalog(settingsCat);
+    toast('Supprimé du catalogue', 'success');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+const AUTRE_UNITS = ['g','kg','mL','L','pièce','sachet'];
+
+function renderSettingsThresholds() {
+  const t  = appSettings.thresholds || {};
+  const tzEl = document.getElementById('tz-offset');
+  if (tzEl) tzEl.value = appSettings.tz_offset ?? 0;
+  document.getElementById('thresh-malt').value    = t.malt    ?? 1000;
+  document.getElementById('thresh-houblon').value = t.houblon ?? 50;
+  document.getElementById('thresh-levure').value  = t.levure  ?? 2;
+  // Per-unit thresholds for "autre"
+  const au = t.autre_units || { g: 100 };
+  AUTRE_UNITS.forEach(u => {
+    const el = document.getElementById(`tau-${u}`);
+    if (el) el.value = au[u] != null ? au[u] : '';
+  });
+}
+
+function saveThresholds() {
+  const autre_units = {};
+  AUTRE_UNITS.forEach(u => {
+    const v = document.getElementById(`tau-${u}`)?.value;
+    autre_units[u] = v !== '' && v != null ? parseFloat(v) : null;
+  });
+  appSettings.thresholds = {
+    malt:        parseFloat(document.getElementById('thresh-malt').value)    || 1000,
+    houblon:     parseFloat(document.getElementById('thresh-houblon').value) || 50,
+    levure:      parseFloat(document.getElementById('thresh-levure').value)  || 2,
+    autre_units,
+  };
+  saveSettings();
+  renderInventaire();
+  toast('Seuils enregistrés', 'success');
+}
+
+const WATER_FIELDS = ['price','ph','ca','mg','na','so4','cl','hco3'];
+
+function renderSettingsWater() {
+  const w = appSettings.water || {};
+  WATER_FIELDS.forEach(k => {
+    const el = document.getElementById(`water-${k}`);
+    if (el) el.value = w[k] != null ? w[k] : '';
+  });
+}
+
+function saveWaterSettings() {
+  const w = {};
+  WATER_FIELDS.forEach(k => {
+    const v = document.getElementById(`water-${k}`)?.value;
+    w[k] = v !== '' && v != null ? parseFloat(v) : null;
+  });
+  appSettings.water = w;
+  saveSettings();
+  toast('Profil eau enregistré', 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODALS
+// ══════════════════════════════════════════════════════════════════════════════
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LOAD ALL DATA
+// ══════════════════════════════════════════════════════════════════════════════
+async function loadAll() {
+  const [inv, rec, bra, beerList, stats, catalog, bjcp, spindles] = await Promise.all([
+    api('GET', '/api/inventory'),
+    api('GET', '/api/recipes'),
+    api('GET', '/api/brews'),
+    api('GET', '/api/beers'),
+    api('GET', '/api/stats'),
+    api('GET', '/api/catalog'),
+    api('GET', '/api/bjcp'),
+    api('GET', '/api/spindles'),
+  ]);
+  S.inventory = inv;
+  S.recipes   = rec;
+  S.brews     = bra;
+  S.beers     = beerList;
+  S.catalog   = catalog;
+  S.bjcp      = bjcp;
+  S.spindles  = spindles;
+  updateNavBadges(stats);
+  renderInventaire();
+  renderRecipeList();
+  renderBrassins();
+  renderCave();
+  renderSpindles();
+}
+
+function updateNavBadges(stats) {
+  document.getElementById('nb-inv').textContent = stats.inventory_count;
+  document.getElementById('nb-rec').textContent = stats.recipes_count;
+  document.getElementById('nb-bra').textContent = stats.brews_count;
+  document.getElementById('nb-cav').textContent = stats.beers_count;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── INVENTAIRE ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function catLabel(c) { return {malt:'Malt',houblon:'Houblon',levure:'Levure',autre:'Autre'}[c] || c; }
+
+function renderInventaire() {
+  const filtered = S.inventory.filter(i => invFilter === 'all' || i.category === invFilter);
+  const active = filtered.filter(i => !i.archived);
+  const arch   = filtered.filter(i => i.archived);
+  const shown  = showArchivedInv ? [...active, ...arch] : active;
+
+  const tbody = document.getElementById('inv-body');
+  tbody.innerHTML = '';
+  document.getElementById('inv-empty').style.display = shown.length ? 'none' : 'block';
+
+  shown.forEach(item => {
+    const specs = [];
+    if (item.ebc != null) specs.push(`<span class="badge badge-malt" style="font-size:.7rem">EBC ${item.ebc}</span>`);
+    if (item.alpha != null) specs.push(`<span class="badge badge-houblon" style="font-size:.7rem">α ${item.alpha}%</span>`);
+    if (item.price_per_unit != null) specs.push(`<span class="badge" style="font-size:.7rem;background:rgba(34,197,94,.12);color:var(--success)"><i class="fas fa-euro-sign" style="font-size:.6rem"></i> ${item.price_per_unit.toFixed(2)}/${INV_PRICE_LABELS[item.category]||'unité'}</span>`);
+    const thresh  = getThresh(item.category);
+    const isEmpty = item.quantity <= 0;
+    let isLow = false;
+    if (!isEmpty) {
+      if (item.category === 'levure') {
+        // Seuil en sachets : comparaison brute
+        isLow = item.quantity < thresh;
+      } else if (item.category === 'autre') {
+        // Seuil par unité : comparaison directe dans l'unité de l'ingrédient
+        const autreUnits = (appSettings.thresholds || {}).autre_units || { g: 100 };
+        const unitThresh = autreUnits[item.unit];
+        isLow = unitThresh != null && item.quantity < unitThresh;
+      } else {
+        // Malt / Houblon : seuil en grammes
+        const qtyG = item.unit === 'kg' ? item.quantity * 1000 : item.quantity;
+        isLow = qtyG < thresh;
+      }
+    }
+    const qtyColor = isEmpty ? 'var(--danger)' : isLow ? '#f59e0b' : 'var(--text)';
+    const archIcon = item.archived ? 'box-open' : 'box-archive';
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr class="${item.archived ? 'archived-item' : ''}">
+        <td><strong>${esc(item.name)}</strong>${item.notes ? `<div style="font-size:.78rem;color:var(--muted)">${esc(item.notes)}</div>` : ''}</td>
+        <td><span class="badge badge-${item.category}">${catLabel(item.category)}</span></td>
+        <td style="color:var(--muted);font-size:.85rem">${esc(item.origin||'')}</td>
+        <td>${specs.join(' ')}</td>
+        <td style="text-align:right">
+          <div style="display:inline-flex;align-items:center;gap:6px">
+            <div class="qty-ctrl">
+              <button class="qty-btn" onclick="adjustQty(${item.id},-1)">−</button>
+              <input class="qty-inp" type="number" value="${item.quantity}" min="0" step="0.001"
+                     onchange="setQty(${item.id},parseFloat(this.value))" style="color:${qtyColor}">
+              <span class="qty-unit">${esc(item.unit)}</span>
+              <button class="qty-btn" onclick="adjustQty(${item.id},1)">+</button>
+            </div>
+          </div>
+        </td>
+        <td style="text-align:right">
+          <div style="display:flex;gap:4px;justify-content:flex-end">
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="archiveItem('inv',${item.id},${item.archived?0:1})" title="${item.archived?'Désarchiver':'Archiver'}"><i class="fas fa-${archIcon}"></i></button>
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="editInventoryItem(${item.id})" title="Modifier"><i class="fas fa-pen"></i></button>
+            <button class="btn btn-icon btn-danger btn-sm" onclick="deleteInventoryItem(${item.id})" title="Supprimer"><i class="fas fa-trash"></i></button>
+          </div>
+        </td>
+      </tr>`);
+  });
+
+  // Stats (active only)
+  const activeAll = S.inventory.filter(i => !i.archived);
+  const counts = { malt:0, houblon:0, levure:0, autre:0 };
+  activeAll.forEach(i => counts[i.category] = (counts[i.category]||0)+1);
+
+  const maltKgTotal = activeAll.filter(i => i.category === 'malt')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.unit === 'g' ? i.quantity / 1000 : 0), 0);
+  const hopGTotal = activeAll.filter(i => i.category === 'houblon')
+    .reduce((s, i) => s + (i.unit === 'g' ? i.quantity : i.unit === 'kg' ? i.quantity * 1000 : 0), 0);
+  const maltQtyLabel = maltKgTotal > 0 ? (maltKgTotal >= 1 ? maltKgTotal.toFixed(2) + ' kg' : (maltKgTotal * 1000).toFixed(0) + ' g') : '';
+  const hopQtyLabel  = hopGTotal  > 0 ? (hopGTotal >= 1000 ? (hopGTotal / 1000).toFixed(2) + ' kg' : hopGTotal.toFixed(0) + ' g') : '';
+
+  document.getElementById('inv-stats').innerHTML = `
+    <div class="stat"><div class="stat-val" style="color:var(--text)">${activeAll.length}</div><div class="stat-lbl">Total articles</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--malt)">${counts.malt}</div><div class="stat-lbl">Malts</div>${maltQtyLabel ? `<div style="font-size:.78rem;color:var(--malt);opacity:.75;margin-top:3px">${maltQtyLabel}</div>` : ''}</div>
+    <div class="stat"><div class="stat-val" style="color:var(--hop)">${counts.houblon}</div><div class="stat-lbl">Houblons</div>${hopQtyLabel ? `<div style="font-size:.78rem;color:var(--hop);opacity:.75;margin-top:3px">${hopQtyLabel}</div>` : ''}</div>
+    <div class="stat"><div class="stat-val" style="color:var(--yeast)">${counts.levure}</div><div class="stat-lbl">Levures</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--other)">${counts.autre}</div><div class="stat-lbl">Autres</div></div>`;
+
+  // Archive button
+  const archBtn = document.getElementById('inv-arch-btn');
+  if (archBtn) {
+    const archCount = S.inventory.filter(i => i.archived).length;
+    archBtn.textContent = showArchivedInv ? 'Masquer archives' : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
+  }
+}
+
+function setInvFilter(cat, btn) {
+  invFilter = cat;
+  document.querySelectorAll('#inv-filters .filter-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderInventaire();
+}
+
+const INV_PRICE_LABELS = { malt:'€/kg', houblon:'€/g', levure:'€/sachet', autre:'€/unité' };
+function invCatChange() {
+  const cat = document.getElementById('inv-f-cat').value;
+  document.getElementById('inv-f-ebc-wrap').style.display   = cat === 'malt'    ? '' : 'none';
+  document.getElementById('inv-f-alpha-wrap').style.display = cat === 'houblon' ? '' : 'none';
+  const priceLabel = document.getElementById('inv-f-price-lbl');
+  if (priceLabel) priceLabel.textContent = `Prix (${INV_PRICE_LABELS[cat] || '€/unité'})`;
+  // Refresh suggest only if the name field is currently focused
+  const nameInput = document.getElementById('inv-f-name');
+  if (nameInput && document.activeElement === nameInput) invNameSuggest(nameInput);
+}
+
+async function adjustQty(id, delta) {
+  const item = S.inventory.find(i => i.id === id);
+  if (!item) return;
+  const step = item.unit === 'g' || item.unit === 'mL' ? 100 : 0.1;
+  const newQty = Math.max(0, parseFloat((item.quantity + delta * step).toFixed(3)));
+  await setQty(id, newQty);
+}
+async function setQty(id, qty) {
+  try {
+    const updated = await api('PATCH', `/api/inventory/${id}/qty`, { quantity: qty });
+    const idx = S.inventory.findIndex(i => i.id === id);
+    if (idx !== -1) S.inventory[idx] = updated;
+    renderInventaire();
+  } catch(e) { toast('Erreur mise à jour quantité', 'error'); }
+}
+
+function openInvModal(item = null) {
+  document.getElementById('inv-f-id').value    = item ? item.id : '';
+  document.getElementById('inv-f-name').value  = item ? item.name : '';
+  document.getElementById('inv-f-cat').value   = item ? item.category : 'malt';
+  document.getElementById('inv-f-qty').value   = item ? item.quantity : 0;
+  document.getElementById('inv-f-unit').value  = item ? item.unit : 'kg';
+  document.getElementById('inv-f-ebc').value   = item ? (item.ebc||'') : '';
+  document.getElementById('inv-f-alpha').value = item ? (item.alpha||'') : '';
+  document.getElementById('inv-f-origin').value= item ? (item.origin||'') : '';
+  document.getElementById('inv-f-notes').value  = item ? (item.notes||'') : '';
+  document.getElementById('inv-f-price').value  = item ? (item.price_per_unit ?? '') : '';
+  document.getElementById('inv-modal-title').textContent = item ? 'Modifier l\'ingrédient' : 'Ajouter un ingrédient';
+  invCatChange();
+  openModal('inv-modal');
+}
+
+function editInventoryItem(id) { openInvModal(S.inventory.find(i => i.id === id)); }
+
+function invNameSuggest(input) {
+  const q   = input.value.toLowerCase();
+  if (!q) { closeInvSuggest(); return; }
+  const cat = document.getElementById('inv-f-cat').value;
+  const sug = document.getElementById('inv-name-sug');
+  _invSugItems = [];
+  closeInvSuggest();
+  const matches = S.catalog.filter(c =>
+    c.category === cat && c.name.toLowerCase().includes(q)
+  ).slice(0, 30);
+  if (!matches.length) return;
+  const groups = {};
+  matches.forEach(c => {
+    const g = c.subcategory || 'Autres';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(c);
+  });
+  let html = '';
+  Object.entries(groups).forEach(([grp, items]) => {
+    html += `<div class="ing-suggest-cat">${esc(grp)}</div>`;
+    items.forEach(item => {
+      const specs = [];
+      if (item.ebc   != null) specs.push(`EBC ${item.ebc}`);
+      if (item.alpha != null) specs.push(`α ${item.alpha}%`);
+      const specTxt = specs.length ? ` <span style="color:var(--muted);font-size:.72rem">${specs.join(' · ')}</span>` : '';
+      const _ii = _invSugItems.push(item) - 1;
+      html += `<div class="ing-suggest-item" onmousedown="applyInvCatalog(_invSugItems[${_ii}])">
+        <span>${esc(item.name)}${specTxt}</span>
+      </div>`;
+    });
+  });
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+
+function closeInvSuggest() {
+  document.getElementById('inv-name-sug').classList.remove('open');
+}
+
+function applyInvCatalog(item) {
+  document.getElementById('inv-f-name').value  = item.name;
+  document.getElementById('inv-f-cat').value   = item.category;
+  if (item.ebc   != null) document.getElementById('inv-f-ebc').value   = item.ebc;
+  if (item.alpha != null) document.getElementById('inv-f-alpha').value = item.alpha;
+  if (item.default_unit && !document.getElementById('inv-f-id').value)
+    document.getElementById('inv-f-unit').value = item.default_unit;
+  invCatChange();
+  closeInvSuggest();
+}
+
+async function saveInventoryItem() {
+  const name = document.getElementById('inv-f-name').value.trim();
+  if (!name) { toast('Le nom est requis', 'error'); return; }
+  const id  = document.getElementById('inv-f-id').value;
+  const cat = document.getElementById('inv-f-cat').value;
+  const payload = {
+    name, category: cat,
+    quantity: parseFloat(document.getElementById('inv-f-qty').value) || 0,
+    unit:     document.getElementById('inv-f-unit').value,
+    origin:   document.getElementById('inv-f-origin').value.trim() || null,
+    ebc:           document.getElementById('inv-f-ebc').value   ? parseFloat(document.getElementById('inv-f-ebc').value)   : null,
+    alpha:         document.getElementById('inv-f-alpha').value ? parseFloat(document.getElementById('inv-f-alpha').value) : null,
+    notes:         document.getElementById('inv-f-notes').value.trim() || null,
+    price_per_unit:document.getElementById('inv-f-price').value ? parseFloat(document.getElementById('inv-f-price').value) : null,
+  };
+  try {
+    if (id) {
+      const updated = await api('PUT', `/api/inventory/${id}`, payload);
+      const idx = S.inventory.findIndex(i => i.id === parseInt(id));
+      if (idx !== -1) S.inventory[idx] = updated;
+    } else {
+      const created = await api('POST', '/api/inventory', payload);
+      S.inventory.push(created);
+    }
+    closeModal('inv-modal');
+    renderInventaire();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast(id ? 'Ingrédient mis à jour' : 'Ingrédient ajouté', 'success');
+  } catch(e) { toast('Erreur lors de la sauvegarde', 'error'); }
+}
+
+async function deleteInventoryItem(id) {
+  if (!confirm('Supprimer cet ingrédient ?')) return;
+  try {
+    await api('DELETE', `/api/inventory/${id}`);
+    S.inventory = S.inventory.filter(i => i.id !== id);
+    renderInventaire();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast('Ingrédient supprimé', 'success');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── RECETTES ─────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function showRecipeListOnly() {
+  recEditingId = null;
+  document.getElementById('recipe-layout').classList.add('recipe-list-only');
+  document.getElementById('rec-actions').innerHTML =
+    `<button class="btn btn-primary" onclick="newRecipeFromList()"><i class="fas fa-plus"></i> Nouvelle recette</button>`;
+  renderRecipeList();
+}
+
+function exitRecipeListOnly() {
+  document.getElementById('recipe-layout').classList.remove('recipe-list-only');
+}
+
+function newRecipeFromList() {
+  exitRecipeListOnly();
+  clearRecipeForm();
+}
+
+function goToCaveFromRecipe(recipeId) {
+  const r = S.recipes.find(x => x.id === recipeId);
+  const el = document.getElementById('cave-search');
+  if (el) el.value = r ? r.name : '';
+  navigate('cave');
+}
+
+function setRecRating(v) {
+  const current = parseInt(document.getElementById('rec-rating').value) || 0;
+  const newVal = current === v ? 0 : v; // click same star = remove rating
+  document.getElementById('rec-rating').value = newVal || '';
+  renderRecStars(newVal);
+}
+
+function renderRecStars(n) {
+  document.querySelectorAll('#rec-star-input .star').forEach((el, i) => {
+    el.classList.toggle('on', i < n);
+  });
+  const lbl = document.getElementById('rec-rating-label');
+  if (lbl) lbl.textContent = STAR_LABELS[n] || 'Non noté';
+}
+
+async function rateRecipe(id, n) {
+  const r = S.recipes.find(x => x.id === id);
+  if (!r) return;
+  const newRating = r.rating === n ? null : n; // toggle
+  try {
+    await api('PATCH', `/api/recipes/${id}`, { rating: newRating });
+    r.rating = newRating;
+    renderRecipeView();
+    renderRecipeList();
+  } catch(e) { toast('Erreur notation', 'error'); }
+}
+
+function recipeCost(r) {
+  let total = 0, has = false;
+  (r.ingredients || []).forEach(ing => {
+    const c = ingCost(ing);
+    if (c !== null) { total += c; has = true; }
+  });
+  return has ? total : null;
+}
+
+function renderRecipeList() {
+  // Sync sort select
+  const sortSel = document.getElementById('rec-sort-select');
+  if (sortSel) sortSel.value = recSort;
+
+  const c = document.getElementById('recipe-list-container');
+  const active = S.recipes.filter(r => !r.archived);
+  const arch   = S.recipes.filter(r => r.archived);
+  const shown  = showArchivedRec ? [...active, ...arch] : active;
+
+  // Apply sort (archives always follow actives)
+  const sortFn = {
+    name:   (a, b) => a.name.localeCompare(b.name),
+    rating: (a, b) => (b.rating || 0) - (a.rating || 0),
+    style:  (a, b) => (a.style || '').localeCompare(b.style || ''),
+    volume: (a, b) => b.volume - a.volume,
+    recent: () => 0,
+  }[recSort] || (() => 0);
+  if (recSort !== 'recent') {
+    active.sort(sortFn);
+    arch.sort(sortFn);
+    shown.splice(0, shown.length, ...active, ...(showArchivedRec ? arch : []));
+  }
+
+  if (!S.recipes.length) {
+    c.innerHTML = '<div class="empty" id="recipe-list-empty"><i class="fas fa-scroll"></i><p>Aucune recette</p></div>';
+  } else {
+    const BREW_STATUS = {
+      planned:    { icon:'calendar-plus',      color:'var(--muted)',    label:'Planifié' },
+      in_progress:{ icon:'fire-flame-curved',  color:'var(--amber)',    label:'En cours' },
+      fermenting: { icon:'flask',              color:'var(--info)',     label:'En fermentation' },
+    };
+    c.innerHTML = shown.map(r => {
+      const cost = recipeCost(r);
+      const costBadge = cost !== null
+        ? `<span style="color:var(--success);font-weight:700;white-space:nowrap"><i class="fas fa-euro-sign" style="font-size:.65rem"></i> ${cost.toFixed(2)}</span>`
+        : '';
+      const starsHtml = r.rating
+        ? `<span class="stars-sm">${Array.from({length:5},(_,i)=>`<span style="color:${i<r.rating?'var(--amber)':'var(--border)'}">\u2605</span>`).join('')}</span>`
+        : '';
+
+      // Brassins actifs liés à cette recette
+      const activeBrews = S.brews.filter(b => b.recipe_id === r.id && !b.archived && b.status !== 'completed');
+      // Stock en cave lié à cette recette
+      const linkedBeers = S.beers.filter(b => b.recipe_id === r.id && !b.archived);
+      const total33 = linkedBeers.reduce((s, b) => s + (b.stock_33cl || 0), 0);
+      const total75 = linkedBeers.reduce((s, b) => s + (b.stock_75cl || 0), 0);
+      const hasStock = (total33 + total75) > 0;
+
+      let statusHtml = '';
+      if (activeBrews.length > 0) {
+        const brew = activeBrews[0];
+        const bs = BREW_STATUS[brew.status] || { icon:'flask', color:'var(--muted)', label:brew.status };
+        const brewLabel = activeBrews.length > 1
+          ? `${activeBrews.length} brassins actifs`
+          : esc(brew.name);
+        statusHtml += `<button class="rec-status-btn" style="color:${bs.color};background:${bs.color}1a;border-color:${bs.color}55"
+          onclick="event.stopPropagation();navigate('brassins')" title="${esc(brew.name)} — ${bs.label}">
+          <i class="fas fa-${bs.icon}"></i> ${brewLabel}</button>`;
+      }
+      if (hasStock) {
+        const parts = [total33 ? total33 + '\u00d7 33cl' : '', total75 ? total75 + '\u00d7 75cl' : ''].filter(Boolean).join(' · ');
+        statusHtml += `<button class="rec-status-btn" style="color:var(--success);background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.3)"
+          onclick="event.stopPropagation();goToCaveFromRecipe(${r.id})" title="Voir en cave">
+          <i class="fas fa-wine-bottle"></i> ${parts}</button>`;
+      }
+      if (!activeBrews.length && !hasStock) {
+        statusHtml = `<span style="font-size:.72rem;color:var(--muted);font-style:italic"><i class="fas fa-circle-info"></i> Aucun brassin actif · Pas de stock</span>`;
+      }
+
+      return `
+      <div class="recipe-item ${r.archived?'archived-item':''} ${recEditingId===r.id?'active':''}" onclick="loadRecipeForm(${r.id})">
+        <div style="min-width:0;flex:1">
+          <div class="recipe-item-name">${esc(r.name)}</div>
+          <div class="recipe-item-meta" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span>${r.batch_no ? '#' + r.batch_no + ' · ' : ''}${r.style ? esc(r.style) + ' · ' : ''}${r.volume}L · ${r.ingredients.length} ing.</span>
+            ${starsHtml}
+            ${costBadge}
+          </div>
+          <div class="recipe-item-status">${statusHtml}</div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0;margin-top:2px">
+          <button class="btn btn-icon btn-ghost btn-sm" onclick="event.stopPropagation();archiveItem('rec',${r.id},${r.archived?0:1})" title="${r.archived?'Désarchiver':'Archiver'}"><i class="fas fa-${r.archived?'box-open':'box-archive'}"></i></button>
+          <button class="btn btn-icon btn-danger btn-sm" onclick="event.stopPropagation();deleteRecipe(${r.id})" title="Supprimer"><i class="fas fa-trash"></i></button>
+        </div>
+      </div>`;
+    }).join('') || '<div style="color:var(--muted);padding:12px 0;text-align:center">Aucune recette active.</div>';
+  }
+
+  // Archive toggle button for recipes
+  const archWrap = document.getElementById('rec-arch-wrap');
+  if (archWrap) {
+    const archCount = arch.length;
+    archWrap.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="toggleShowArchived('rec')">${showArchivedRec ? 'Masquer archives' : '\uD83D\uDDC3\uFE0F Archives (' + archCount + ')'}</button>`;
+  }
+}
+
+function clearRecipeForm() {
+  recEditingId = null;
+  recIngredients = [];
+  document.getElementById('rec-editing-id').value = '';
+  document.getElementById('rec-batch').value    = (S.recipes.length + 1);
+  document.getElementById('rec-name').value     = '';
+  document.getElementById('rec-style').value    = '';
+  document.getElementById('rec-volume').value   = '20';
+  document.getElementById('rec-brew-date').value= '';
+  document.getElementById('rec-mash-temp').value= '66';
+  document.getElementById('rec-mash-time').value= '60';
+  document.getElementById('rec-boil-time').value= '60';
+  document.getElementById('rec-efficiency').value='72';
+  document.getElementById('rec-mash-ratio').value='3.5';
+  document.getElementById('rec-evap').value     = '3.0';
+  document.getElementById('rec-absorption').value='1.0';
+  document.getElementById('rec-notes').value    = '';
+  document.getElementById('rec-rating').value   = '';
+  renderRecStars(0);
+  renderIngredientRows();
+  recCalc();
+  renderRecipeList();
+  showRecAlert('');
+  setRecipeMode('edit');
+}
+
+function loadRecipeForm(id) {
+  const r = S.recipes.find(x => x.id === id);
+  if (!r) return;
+  exitRecipeListOnly();
+  recEditingId = id;
+  document.getElementById('rec-editing-id').value = id;
+  document.getElementById('rec-batch').value    = r.batch_no || '';
+  document.getElementById('rec-name').value     = r.name;
+  document.getElementById('rec-style').value    = r.style || '';
+  document.getElementById('rec-volume').value   = r.volume;
+  document.getElementById('rec-brew-date').value= r.brew_date || '';
+  document.getElementById('rec-mash-temp').value= r.mash_temp;
+  document.getElementById('rec-mash-time').value= r.mash_time;
+  document.getElementById('rec-boil-time').value= r.boil_time;
+  document.getElementById('rec-efficiency').value= r.brewhouse_efficiency;
+  document.getElementById('rec-mash-ratio').value= r.mash_ratio;
+  document.getElementById('rec-evap').value     = r.evap_rate;
+  document.getElementById('rec-absorption').value= r.grain_absorption;
+  document.getElementById('rec-ferm-temp').value = r.ferm_temp ?? 20;
+  document.getElementById('rec-ferm-time').value = r.ferm_time ?? 14;
+  document.getElementById('rec-notes').value    = r.notes || '';
+  document.getElementById('rec-rating').value   = r.rating || '';
+  renderRecStars(r.rating || 0);
+  recIngredients = r.ingredients.map(i => ({...i}));
+  renderIngredientRows();
+  recCalc();
+  renderRecipeList();
+  showRecAlert('');
+  setRecipeMode('view');
+}
+
+function showRecAlert(msg, type='danger') {
+  const el = document.getElementById('rec-alert');
+  if (!msg) { el.classList.remove('show'); return; }
+  el.className = `alert alert-${type} show`;
+  el.textContent = msg;
+}
+
+// Water calcs
+function recCalc() {
+  const vol  = parseFloat(document.getElementById('rec-volume').value) || 20;
+  const boil = parseFloat(document.getElementById('rec-boil-time').value) || 60;
+  const ratio= parseFloat(document.getElementById('rec-mash-ratio').value) || 3;
+  const evap = parseFloat(document.getElementById('rec-evap').value) || 3;
+  const abs  = parseFloat(document.getElementById('rec-absorption').value) || 0.8;
+
+  const grainKg = recIngredients.filter(i=>i.category==='malt')
+    .reduce((s,i) => s + (i.unit==='kg' ? i.quantity : i.quantity/1000), 0);
+
+  const preboil     = vol + evap * (boil/60);
+  const grainAbs    = grainKg * abs;
+  const totalWater  = preboil + grainAbs;          // Eau totale toujours nécessaire
+
+  // Eau d'empâtage : ratio voulu, mais au minimum 55 % du total
+  // pour garantir empâtage ≥ rinçage dans tous les cas
+  const mashFromRatio = grainKg * ratio;
+  const mashMin       = totalWater * 0.55;
+  const mashWater     = grainKg > 0 ? Math.max(mashFromRatio, mashMin) : 0;
+  const sparge        = Math.max(0, totalWater - mashWater);
+
+  const fmtL = v => v > 0 ? v.toFixed(1) : '–';
+  const hasGrain = grainKg > 0;
+  document.getElementById('rw-mash').textContent   = hasGrain ? fmtL(mashWater) : '–';
+  document.getElementById('rw-sparge').textContent = hasGrain ? fmtL(sparge) : '–';
+  document.getElementById('rw-preboil').textContent= fmtL(preboil);
+  document.getElementById('rw-total').textContent  = hasGrain ? fmtL(totalWater) : '–';
+  calcBrewStats();
+  // Sync water correction panel volume if open
+  if (hasGrain && document.getElementById('rec-wc-panel')?.style.display !== 'none') {
+    const wcVol = document.getElementById('wc-volume');
+    if (wcVol) { wcVol.value = totalWater.toFixed(1); calcWaterCorrection(); }
+  }
+}
+
+// ── Conversion d'unité pour calcul de coût ───────────────────────────────────
+function convertQtyForCost(qty, from, to) {
+  if (from === to) return qty;
+  if (from === 'g'  && to === 'kg') return qty / 1000;
+  if (from === 'kg' && to === 'g')  return qty * 1000;
+  if ((from === 'ml' || from === 'mL') && to === 'L')  return qty / 1000;
+  if (from === 'L' && (to === 'ml' || to === 'mL'))   return qty * 1000;
+  return null; // incompatible
+}
+
+// Unité canonique dans laquelle le prix est toujours saisi/stocké
+const CANONICAL_PRICE_UNIT = { malt: 'kg', houblon: 'g', levure: 'sachet' };
+
+function ingCost(ing) {
+  const inv = ing.inventory_item_id
+    ? S.inventory.find(i => i.id === ing.inventory_item_id)
+    : S.inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase() && i.category === ing.category);
+  if (!inv || inv.price_per_unit == null) return null;
+  // Convertir la quantité de l'ingrédient vers l'unité canonique du prix
+  // (ex: g → kg pour les malts, peu importe l'unité de stockage)
+  const priceUnit = CANONICAL_PRICE_UNIT[ing.category] || inv.unit;
+  const converted = convertQtyForCost(ing.quantity || 0, ing.unit, priceUnit);
+  if (converted === null) return null;
+  return converted * inv.price_per_unit;
+}
+
+// Ingredient rows
+let ingRowId = 0;
+function addIngRow(cat, data = null) {
+  const rid = ++ingRowId;
+  const ing = data || { _rid: rid, category: cat, name: '', quantity: 0,
+    unit: cat==='malt'?'kg':cat==='houblon'?'g':cat==='levure'?'sachet':'g',
+    hop_type: cat==='houblon' ? 'ebullition' : null,
+    other_type: cat==='autre' ? 'ebullition' : null,
+    inventory_item_id: null };
+  if (!data) { ing._rid = rid; recIngredients.push(ing); }
+  else ing._rid = rid;
+  renderIngredientRows();
+}
+
+function renderIngredientRows() {
+  const container = document.getElementById('rec-ingredients');
+  if (!recIngredients.length) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:.875rem;padding:12px 0">Aucun ingrédient. Utilisez les boutons ci-dessus pour en ajouter.</div>';
+    return;
+  }
+
+  const cats = ['malt','houblon','levure','autre'];
+  let html = '';
+  // Pre-compute total malt kg for % display
+  const totalMaltKg = recIngredients
+    .filter(i => i.category === 'malt')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.quantity / 1000), 0);
+  const totalHopG = recIngredients
+    .filter(i => i.category === 'houblon')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity * 1000 : i.quantity), 0);
+
+  cats.forEach(cat => {
+    const ings = recIngredients.filter(i => i.category === cat);
+    if (!ings.length) return;
+    const catColors = {malt:'var(--malt)',houblon:'var(--hop)',levure:'var(--yeast)',autre:'var(--other)'};
+    let totalLabel = '';
+    if (cat === 'malt' && totalMaltKg > 0)
+      totalLabel = `<span style="font-weight:400;opacity:.7;margin-left:8px">${totalMaltKg >= 1 ? totalMaltKg.toFixed(2)+' kg' : (totalMaltKg*1000).toFixed(0)+' g'}</span>`;
+    if (cat === 'houblon' && totalHopG > 0)
+      totalLabel = `<span style="font-weight:400;opacity:.7;margin-left:8px">${totalHopG.toFixed(0)} g</span>`;
+    html += `<div style="margin-bottom:10px"><div class="section-label" style="color:${catColors[cat]};margin-bottom:6px">${catLabel(cat)}${totalLabel}</div>`;
+    ings.forEach((ing, idx) => {
+      const realIdx = recIngredients.indexOf(ing);
+      const stockInfo = getStockInfo(ing);
+      let extraFields = '';
+      if (cat === 'houblon') {
+        const ht = ing.hop_type || 'ebullition';
+        const durationField = ht === 'dryhop' ? `
+          <div style="flex-shrink:0;width:88px">
+            <div class="ing-lbl"><i class="fas fa-calendar-days"></i> Jours</div>
+            <input type="number" placeholder="jours" step="1" min="0" value="${ing.hop_days!=null?ing.hop_days:''}"
+              onchange="recIngredients[${realIdx}].hop_days=parseFloat(this.value)||null;calcBrewStats()"
+              style="font-size:.8rem">
+          </div>` : `
+          <div style="flex-shrink:0;width:88px">
+            <div class="ing-lbl"><i class="fas fa-clock"></i> Min fin ébu.</div>
+            <input type="number" placeholder="min" step="1" min="0" value="${ing.hop_time!=null?ing.hop_time:''}"
+              onchange="recIngredients[${realIdx}].hop_time=parseFloat(this.value)||null;calcBrewStats()"
+              style="font-size:.8rem">
+          </div>`;
+        extraFields = `
+          <div style="flex-shrink:0;width:78px">
+            <div class="ing-lbl"><i class="fas fa-percent"></i> Alpha</div>
+            <input type="number" placeholder="%" step="0.1" min="0" max="30" value="${ing.alpha!=null?ing.alpha:''}"
+              onchange="recIngredients[${realIdx}].alpha=parseFloat(this.value)||null;calcBrewStats()"
+              style="font-size:.8rem">
+          </div>
+          <div style="flex-shrink:0;min-width:128px">
+            <div class="ing-lbl"><i class="fas fa-tag"></i> Type d'ajout</div>
+            <select onchange="recIngredients[${realIdx}].hop_type=this.value;renderIngredientRows()" style="font-size:.8rem">
+              <option value="ebullition" ${ht==='ebullition'?'selected':''}>Ebullition</option>
+              <option value="whirlpool"  ${ht==='whirlpool' ?'selected':''}>Whirlpool</option>
+              <option value="dryhop"     ${ht==='dryhop'    ?'selected':''}>Dry Hop</option>
+            </select>
+          </div>
+          ${durationField}`;
+      }
+      if (cat === 'autre') {
+        const ot = ing.other_type || 'ebullition';
+        const OTHER_LABELS = {empatage:'Empâtage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
+        const needsMinutes = ot === 'ebullition' || ot === 'whirlpool';
+        const needsDays    = ot === 'dryhop';
+        const timeField = needsMinutes ? `
+          <div style="flex-shrink:0;width:88px">
+            <div class="ing-lbl"><i class="fas fa-clock"></i> Min fin ébu.</div>
+            <input type="number" placeholder="min" step="1" min="0" value="${ing.other_time!=null?ing.other_time:''}"
+              onchange="recIngredients[${realIdx}].other_time=parseFloat(this.value)||null"
+              style="font-size:.8rem">
+          </div>` : needsDays ? `
+          <div style="flex-shrink:0;width:88px">
+            <div class="ing-lbl"><i class="fas fa-calendar-days"></i> Jours</div>
+            <input type="number" placeholder="jours" step="1" min="0" value="${ing.other_time!=null?ing.other_time:''}"
+              onchange="recIngredients[${realIdx}].other_time=parseFloat(this.value)||null"
+              style="font-size:.8rem">
+          </div>` : '';
+        extraFields = `
+          <div style="flex-shrink:0;min-width:152px">
+            <div class="ing-lbl"><i class="fas fa-tag"></i> Moment d'ajout</div>
+            <select onchange="recIngredients[${realIdx}].other_type=this.value;renderIngredientRows()" style="font-size:.8rem">
+              ${Object.entries(OTHER_LABELS).map(([v,l])=>`<option value="${v}" ${ot===v?'selected':''}>${l}</option>`).join('')}
+            </select>
+          </div>
+          ${timeField}`;
+      }
+      // Move up/down availability within same category
+      const canUp   = recIngredients.slice(0, realIdx).some(x => x.category === cat);
+      const canDown = recIngredients.slice(realIdx + 1).some(x => x.category === cat);
+      // Malt % badge
+      const maltKg  = cat === 'malt' ? (ing.unit === 'kg' ? ing.quantity : ing.quantity / 1000) : 0;
+      const maltPct = cat === 'malt' && totalMaltKg > 0 ? (maltKg / totalMaltKg * 100).toFixed(1) : null;
+
+      html += `
+        <div class="ing-row">
+          <div class="ing-move-btns">
+            <button class="ing-move-btn" onclick="moveIngUp(${realIdx})" ${!canUp?'disabled':''} title="Monter"><i class="fas fa-chevron-up"></i></button>
+            <button class="ing-move-btn" onclick="moveIngDown(${realIdx})" ${!canDown?'disabled':''} title="Descendre"><i class="fas fa-chevron-down"></i></button>
+          </div>
+          <div class="ing-name" style="position:relative">
+            <div class="ing-lbl"><i class="fas fa-flask" style="font-size:.6rem"></i> Ingrédient</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <div class="stock-dot ${stockInfo.cls}" title="${stockInfo.tip}" style="flex-shrink:0"></div>
+              <input type="text" placeholder="Nom" value="${esc(ing.name)}"
+                oninput="recIngredients[${realIdx}].name=this.value;updateIngSuggest(this,${realIdx},'${cat}')"
+                onfocus="updateIngSuggest(this,${realIdx},'${cat}')"
+                onblur="setTimeout(()=>closeAllSuggest(),200)"
+                style="font-size:.875rem">
+              ${stockInfo.badge}
+            </div>
+            <div class="ing-suggest" id="sug-${realIdx}"></div>
+          </div>
+          <div class="ing-qty" style="max-width:110px">
+            <div class="ing-lbl"><i class="fas fa-scale-balanced"></i> Quantité</div>
+            <input type="number" placeholder="0" step="${ing.unit==='g'?1:ing.unit==='sachet'?0.5:0.1}" min="0" value="${ing.quantity||''}"
+              onchange="recIngredients[${realIdx}].quantity=parseFloat(this.value)||0;renderIngredientRows();recCalc()"
+              style="font-size:.875rem">
+          </div>
+          <div class="ing-unit" style="max-width:90px">
+            <div class="ing-lbl"><i class="fas fa-ruler"></i> Unité</div>
+            <select onchange="recIngredients[${realIdx}].unit=this.value;renderIngredientRows();recCalc()" style="font-size:.8rem">
+              ${['kg','g','L','mL','sachet','pièce'].map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
+            </select>
+          </div>
+          ${maltPct !== null ? `<div class="malt-pct">${maltPct}%</div>` : ''}
+          ${extraFields}
+          ${(() => { const c = ingCost(ing); return c !== null ? `<div style="flex-shrink:0;text-align:center"><div class="ing-lbl"><i class="fas fa-euro-sign"></i> Coût</div><div style="font-size:.85rem;color:var(--success);font-weight:600">≈ ${c.toFixed(2)} €</div></div>` : ''; })()}
+          <button class="btn btn-icon btn-danger btn-sm ing-remove" onclick="removeIng(${realIdx})"><i class="fas fa-times"></i></button>
+        </div>`;
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+  calcBrewStats();
+}
+
+function getStockInfo(ing) {
+  if (!ing.inventory_item_id) {
+    // Try to find by name
+    const match = S.inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase());
+    if (match) {
+      ing.inventory_item_id = match.id;
+      ing.stock_qty = match.quantity;
+    }
+  }
+  const inv = ing.inventory_item_id ? S.inventory.find(i => i.id === ing.inventory_item_id) : null;
+  if (!inv) return { cls: 'stock-na', tip: 'Non lié au stock', badge: '' };
+  const ok = inv.quantity >= ing.quantity;
+  const low = inv.quantity > 0 && inv.quantity < ing.quantity;
+  const cls = ok ? 'stock-ok' : low ? 'stock-low' : 'stock-none';
+  const sbcls = ok ? 'sb-ok' : low ? 'sb-low' : 'sb-empty';
+  const badge = `<div class="stock-badge ${sbcls}" style="font-size:.7rem">${inv.quantity} ${inv.unit} dispo</div>`;
+  const tip = ok ? 'En stock' : low ? 'Stock faible' : 'Stock insuffisant';
+  return { cls, tip, badge };
+}
+
+function updateIngSuggest(input, idx, cat) {
+  const q   = input.value.toLowerCase();
+  const sug = document.getElementById(`sug-${idx}`);
+  _rSugItems = [];
+  closeAllSuggest();
+
+  // Search catalog first, then include inventory-only items
+  const catItems = S.catalog.filter(c =>
+    c.category === cat && (q.length < 1 || c.name.toLowerCase().includes(q))
+  );
+  // Also include inventory items not in catalog
+  const invExtra = S.inventory.filter(i =>
+    i.category === cat &&
+    (q.length < 1 || i.name.toLowerCase().includes(q)) &&
+    !catItems.some(c => c.name.toLowerCase() === i.name.toLowerCase())
+  );
+
+  if (!catItems.length && !invExtra.length) return;
+
+  // Group by subcategory
+  const groups = {};
+  catItems.forEach(c => {
+    const g = c.subcategory || 'Autres';
+    if (!groups[g]) groups[g] = [];
+    const invMatch = S.inventory.find(i => i.name.toLowerCase() === c.name.toLowerCase() && i.category === cat);
+    groups[g].push({ ...c, _inv: invMatch || null });
+  });
+  if (invExtra.length) {
+    if (!groups['En stock']) groups['En stock'] = [];
+    invExtra.forEach(i => groups['En stock'].push({ name: i.name, _inv: i, id: null }));
+  }
+
+  let html = '';
+  Object.entries(groups).forEach(([grp, items]) => {
+    html += `<div class="ing-suggest-cat">${esc(grp)}</div>`;
+    items.forEach(item => {
+      const inv     = item._inv;
+      const stockTxt = inv ? `<span style="color:${inv.quantity>0?'var(--success)':'var(--danger)'};">${inv.quantity} ${inv.unit}</span>` : '';
+      const specs   = [];
+      if (item.ebc   != null) specs.push(`EBC ${item.ebc}`);
+      if (item.alpha != null) specs.push(`α ${item.alpha}%`);
+      const specTxt = specs.length ? `<span style="color:var(--muted);font-size:.72rem">${specs.join(' · ')}</span>` : '';
+      const _ri = _rSugItems.push({name: item.name, invId: inv?inv.id:null, catalog: item}) - 1;
+      html += `<div class="ing-suggest-item" onmousedown="selectSuggest(${idx},${_ri})">
+        <span>${esc(item.name)} ${specTxt}</span>
+        ${stockTxt}
+      </div>`;
+    });
+  });
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+
+function closeAllSuggest() {
+  document.querySelectorAll('.ing-suggest').forEach(s => s.classList.remove('open'));
+}
+
+function selectSuggest(idx, si) {
+  const { name, invId, catalog } = _rSugItems[si];
+  recIngredients[idx].name = name;
+  recIngredients[idx].inventory_item_id = invId || null;
+  // Auto-fill from catalog
+  if (catalog) {
+    if (catalog.ebc   != null) recIngredients[idx].ebc   = catalog.ebc;
+    if (catalog.alpha != null) recIngredients[idx].alpha = catalog.alpha;
+    if (catalog.gu    != null) recIngredients[idx].gu    = catalog.gu;
+    if (catalog.default_unit)  recIngredients[idx].unit  = catalog.default_unit;
+  }
+  if (!recIngredients[idx].unit && invId) {
+    const inv = S.inventory.find(i => i.id === invId);
+    if (inv) recIngredients[idx].unit = inv.unit;
+  }
+  renderIngredientRows();
+  recCalc();
+}
+
+function removeIng(idx) {
+  recIngredients.splice(idx, 1);
+  renderIngredientRows();
+  recCalc();
+}
+
+async function saveRecipe() {
+  const name = document.getElementById('rec-name').value.trim();
+  if (!name) { showRecAlert('Le nom de la bière est requis'); return; }
+  const payload = {
+    batch_no:    parseInt(document.getElementById('rec-batch').value) || null,
+    name,
+    style:       document.getElementById('rec-style').value.trim() || null,
+    volume:      parseFloat(document.getElementById('rec-volume').value) || 20,
+    brew_date:   document.getElementById('rec-brew-date').value || null,
+    mash_temp:   parseFloat(document.getElementById('rec-mash-temp').value),
+    mash_time:   parseInt(document.getElementById('rec-mash-time').value),
+    boil_time:   parseInt(document.getElementById('rec-boil-time').value),
+    mash_ratio:  parseFloat(document.getElementById('rec-mash-ratio').value),
+    evap_rate:   parseFloat(document.getElementById('rec-evap').value),
+    grain_absorption: parseFloat(document.getElementById('rec-absorption').value),
+    brewhouse_efficiency: parseFloat(document.getElementById('rec-efficiency').value),
+    ferm_temp:   parseFloat(document.getElementById('rec-ferm-temp').value) || 20,
+    ferm_time:   parseInt(document.getElementById('rec-ferm-time').value)   || 14,
+    notes:       document.getElementById('rec-notes').value.trim() || null,
+    rating:      parseInt(document.getElementById('rec-rating').value) || null,
+    ingredients: recIngredients.map(i => ({
+      inventory_item_id: i.inventory_item_id || null,
+      name: i.name, category: i.category,
+      quantity: i.quantity, unit: i.unit,
+      hop_time: i.hop_time || null, hop_type: i.hop_type || null, hop_days: i.hop_days || null,
+      other_type: i.other_type || null, other_time: i.other_time || null,
+      ebc: i.ebc || null, alpha: i.alpha || null, notes: i.notes || null,
+    })),
+  };
+  try {
+    if (recEditingId) {
+      const updated = await api('PUT', `/api/recipes/${recEditingId}`, payload);
+      const idx = S.recipes.findIndex(r => r.id === recEditingId);
+      if (idx !== -1) S.recipes[idx] = updated;
+      toast('Recette mise à jour', 'success');
+    } else {
+      const created = await api('POST', '/api/recipes', payload);
+      S.recipes.unshift(created);
+      recEditingId = created.id;
+      toast('Recette enregistrée', 'success');
+    }
+    renderRecipeList();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    showRecAlert('');
+    setRecipeMode('view');
+  } catch(e) { showRecAlert('Erreur lors de la sauvegarde : ' + (e.error || '')); }
+}
+
+async function deleteRecipe(id) {
+  if (!confirm('Supprimer cette recette ?')) return;
+  try {
+    await api('DELETE', `/api/recipes/${id}`);
+    S.recipes = S.recipes.filter(r => r.id !== id);
+    if (recEditingId === id) clearRecipeForm();
+    else renderRecipeList();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast('Recette supprimée', 'success');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+// ── Mode visualisation / édition ──────────────────────────────────────────────
+function setRecipeMode(mode) {
+  recViewMode = mode;
+  const formEl  = document.getElementById('rec-form-panel');
+  const viewEl  = document.getElementById('rec-view-panel');
+  const actions = document.getElementById('rec-actions');
+  if (mode === 'view') {
+    formEl.style.display = 'none';
+    viewEl.style.display = '';
+    renderRecipeView();
+    actions.innerHTML = `
+      <button class="btn btn-ghost" onclick="showRecipeListOnly()"><i class="fas fa-arrow-left"></i> Liste</button>
+      <button class="btn btn-ghost" onclick="newRecipeFromList()"><i class="fas fa-plus"></i> Nouvelle</button>
+      <button class="btn btn-ghost" onclick="duplicateRecipe()"><i class="fas fa-copy"></i> Dupliquer</button>
+      <button class="btn btn-ghost" onclick="printRecipe()"><i class="fas fa-print"></i> Imprimer</button>
+      <button class="btn btn-primary" onclick="setRecipeMode('edit')"><i class="fas fa-pen"></i> Éditer</button>`;
+  } else {
+    formEl.style.display = '';
+    viewEl.style.display = 'none';
+    const hasRec = !!recEditingId;
+    actions.innerHTML = `
+      <button class="btn btn-ghost" onclick="showRecipeListOnly()"><i class="fas fa-arrow-left"></i> Liste</button>
+      ${hasRec ? `<button class="btn btn-ghost" onclick="loadRecipeForm(${recEditingId})"><i class="fas fa-rotate-left"></i> Annuler</button>` : ''}
+      <button class="btn btn-primary" onclick="saveRecipe()"><i class="fas fa-floppy-disk"></i> Enregistrer</button>`;
+  }
+}
+
+function ebcToColor(ebc) {
+  const srm = (ebc || 0) / 1.97;
+  if (srm <  2) return '#FFE699';
+  if (srm <  4) return '#FFD878';
+  if (srm <  6) return '#FFCA5A';
+  if (srm <  9) return '#FFC033';
+  if (srm < 12) return '#EBB008';
+  if (srm < 15) return '#D98000';
+  if (srm < 18) return '#CB6E00';
+  if (srm < 22) return '#BE5C00';
+  if (srm < 28) return '#A95200';
+  if (srm < 35) return '#8D4C00';
+  if (srm < 44) return '#6B3A00';
+  return '#3D1F00';
+}
+
+function renderRecipeView() {
+  const panel = document.getElementById('rec-view-panel');
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) { panel.innerHTML = ''; return; }
+
+  // Water values from hidden form elements (already computed)
+  const wv = id => document.getElementById(id)?.textContent || '–';
+
+  // Malt bill
+  const malts = recIngredients.filter(i => i.category === 'malt');
+  const totalMaltKg = malts.reduce((s, m) => s + (m.unit === 'kg' ? m.quantity : m.quantity / 1000), 0);
+  let maltHtml = '';
+  malts.forEach(m => {
+    const kg  = m.unit === 'kg' ? m.quantity : m.quantity / 1000;
+    const pct = totalMaltKg > 0 ? (kg / totalMaltKg * 100) : 0;
+    const ebcVal = m.ebc != null ? m.ebc : (S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase())?.ebc ?? null);
+    const dot = ebcVal != null
+      ? `<span class="malt-ebc-dot" style="background:${ebcToColor(ebcVal)}" title="EBC ${ebcVal}"></span>` : '';
+    maltHtml += `<div class="malt-bar-row">
+      <div class="malt-bar-label">
+        <span class="malt-bar-name">${dot}<span>${esc(m.name)}</span></span>
+        <span style="color:var(--muted)">${m.quantity} ${m.unit}&ensp;<strong style="color:var(--malt)">${totalMaltKg > 0 ? pct.toFixed(1) : '–'}%</strong></span>
+      </div>
+      <div class="malt-bar-track"><div class="malt-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
+    </div>`;
+  });
+
+  // Hops
+  const hops = recIngredients.filter(i => i.category === 'houblon');
+  let hopHtml = '';
+  if (hops.length) {
+    hopHtml = `<table class="view-ing-table"><thead><tr>
+      <th>Houblon</th><th>Qté</th><th>Alpha</th><th>Type</th><th>Durée</th>
+    </tr></thead><tbody>`;
+    hops.forEach(h => {
+      const ht = h.hop_type || 'ebullition';
+      const htLabel = { ebullition: 'Ebullition', whirlpool: 'Whirlpool', dryhop: 'Dry Hop' }[ht] || ht;
+      const dur = ht === 'dryhop'
+        ? (h.hop_days != null ? h.hop_days + ' j' : '–')
+        : (h.hop_time != null ? h.hop_time + ' min' : '–');
+      hopHtml += `<tr>
+        <td style="color:var(--hop);font-weight:500">${esc(h.name)}</td>
+        <td>${h.quantity} ${h.unit}</td>
+        <td>${h.alpha != null ? h.alpha + '%' : '–'}</td>
+        <td><span style="font-size:.75rem;padding:2px 7px;border-radius:10px;background:rgba(16,185,129,.1);color:var(--hop)">${htLabel}</span></td>
+        <td>${dur}</td>
+      </tr>`;
+    });
+    hopHtml += '</tbody></table>';
+  }
+
+  // Levures + Autres
+  const OTHER_TYPE_LABELS = {empatage:'Empâtage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
+  let otherHtml = '';
+  [{ cat: 'levure', label: 'Levures', color: 'var(--yeast)' }, { cat: 'autre', label: 'Autres', color: 'var(--other)' }].forEach(({ cat, label, color }) => {
+    const items = recIngredients.filter(i => i.category === cat);
+    if (!items.length) return;
+    otherHtml += `<div class="rec-view-section" style="color:${color}">${label}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">`;
+    items.forEach(i => {
+      let addInfo = '';
+      if (cat === 'autre') {
+        const ot = i.other_type || 'ebullition';
+        const otl = OTHER_TYPE_LABELS[ot] || ot;
+        const timeStr = (ot === 'dryhop') ? (i.other_time != null ? ' · ' + i.other_time + ' j' : '')
+          : (ot === 'ebullition' || ot === 'whirlpool') ? (i.other_time != null ? ' · ' + i.other_time + ' min' : '')
+          : '';
+        addInfo = `<span style="font-size:.72rem;color:${color};margin-left:5px">${otl}${timeStr}</span>`;
+      }
+      otherHtml += `<span style="background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:.82rem">
+        <strong>${esc(i.name)}</strong> <span style="color:var(--muted)">${i.quantity} ${i.unit}</span>${addInfo}
+      </span>`;
+    });
+    otherHtml += '</div>';
+  });
+
+  // Clone calc panel bars from the hidden form
+  const calcSrc = document.getElementById('rec-calc-panel');
+  const calcHtml = calcSrc?.innerHTML || '';
+
+  const rvStarsHtml = Array.from({length:5}, (_, i) => {
+    const v = i + 1;
+    const filled = (r.rating || 0) >= v;
+    return `<span onclick="rateRecipe(${r.id},${v})" title="${STAR_LABELS[v]}" style="cursor:pointer;font-size:1.5rem;line-height:1;color:${filled?'var(--amber)':'var(--border)'};transition:opacity .15s" onmouseover="this.style.opacity='.6'" onmouseout="this.style.opacity='1'">\u2605</span>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="rec-view-header">
+      <div class="rec-view-title">${esc(r.name)}</div>
+      <div class="rec-view-meta">
+        ${r.style    ? `<span class="rec-view-badge"><i class="fas fa-tag"></i> ${esc(r.style)}</span>` : ''}
+        ${r.batch_no ? `<span class="rec-view-badge"><i class="fas fa-hashtag"></i> Brassin ${r.batch_no}</span>` : ''}
+        <span class="rec-view-badge"><i class="fas fa-flask"></i> ${r.volume} L</span>
+        ${r.brew_date ? `<span class="rec-view-badge"><i class="fas fa-calendar"></i> ${r.brew_date}</span>` : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+        <div style="display:flex;gap:2px">${rvStarsHtml}</div>
+        <span style="font-size:.82rem;color:var(--muted)">${STAR_LABELS[r.rating||0]}</span>
+      </div>
+    </div>
+
+    <div class="rvp-strip">
+      <div class="rvp-row">
+        <span><span class="rvp-lbl">Empâtage</span>${r.mash_temp || 66}°C · ${r.mash_time || 60} min</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">Ébullition</span>${r.boil_time || 60} min</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">Rendement</span>${r.brewhouse_efficiency || 72}%</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">Fermentation</span><span style="color:var(--info)">${r.ferm_temp ?? 20}°C · ${r.ferm_time ?? 14} j</span></span>
+      </div>
+      <div class="rvp-row">
+        <span><span class="rvp-lbl">Eau emp.</span>${wv('rw-mash')} L</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">Rinçage</span>${wv('rw-sparge')} L</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">Pré-ébullition</span>${wv('rw-preboil')} L</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">Total eau</span>${wv('rw-total')} L</span>
+      </div>
+    </div>
+
+    ${calcHtml}
+
+    ${malts.length ? `<div class="rec-view-section" style="color:var(--malt)"><i class="fas fa-wheat-awn"></i> Malts & Céréales</div><div style="margin-bottom:12px">${maltHtml}</div>` : ''}
+    ${hops.length  ? `<div class="rec-view-section" style="color:var(--hop)"><i class="fas fa-seedling"></i> Houblons</div><div style="margin-bottom:12px">${hopHtml}</div>` : ''}
+    ${otherHtml}
+    ${r.notes ? `<div class="rec-view-section"><i class="fas fa-note-sticky"></i> Notes</div><div class="view-notes">${esc(r.notes)}</div>` : ''}
+  `;
+}
+
+// ── Déplacer un ingrédient dans sa catégorie ───────────────────────────────────
+function moveIngUp(realIdx) {
+  const cat = recIngredients[realIdx].category;
+  for (let i = realIdx - 1; i >= 0; i--) {
+    if (recIngredients[i].category === cat) {
+      [recIngredients[i], recIngredients[realIdx]] = [recIngredients[realIdx], recIngredients[i]];
+      renderIngredientRows();
+      return;
+    }
+  }
+}
+
+function moveIngDown(realIdx) {
+  const cat = recIngredients[realIdx].category;
+  for (let i = realIdx + 1; i < recIngredients.length; i++) {
+    if (recIngredients[i].category === cat) {
+      [recIngredients[i], recIngredients[realIdx]] = [recIngredients[realIdx], recIngredients[i]];
+      renderIngredientRows();
+      return;
+    }
+  }
+}
+
+// ── Paramètres avancés toggle ─────────────────────────────────────────────────
+function toggleAdvancedParams() {
+  const el  = document.getElementById('rec-advanced-params');
+  const btn = document.getElementById('btn-adv-params');
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : '';
+  btn.classList.toggle('open', !open);
+}
+
+// ── Dupliquer une recette ──────────────────────────────────────────────────────
+async function duplicateRecipe() {
+  if (!recEditingId) { showRecAlert('Ouvrez une recette pour la dupliquer'); return; }
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+  const maxBatch = S.recipes.reduce((m, x) => Math.max(m, x.batch_no || 0), 0);
+  const payload = {
+    batch_no:   maxBatch + 1,
+    name:       r.name + ' (copie)',
+    style:      r.style || null,
+    volume:     r.volume,
+    brew_date:  null,
+    mash_temp:  r.mash_temp,
+    mash_time:  r.mash_time,
+    boil_time:  r.boil_time,
+    mash_ratio: r.mash_ratio,
+    evap_rate:  r.evap_rate,
+    grain_absorption:     r.grain_absorption,
+    brewhouse_efficiency: r.brewhouse_efficiency,
+    ferm_temp:  r.ferm_temp || 20,
+    ferm_time:  r.ferm_time || 14,
+    notes:      r.notes || null,
+    ingredients: (r.ingredients || []).map(i => ({
+      inventory_item_id: i.inventory_item_id || null,
+      name: i.name, category: i.category,
+      quantity: i.quantity, unit: i.unit,
+      hop_time: i.hop_time || null, hop_type: i.hop_type || null, hop_days: i.hop_days || null,
+      other_type: i.other_type || null, other_time: i.other_time || null,
+      ebc: i.ebc || null, alpha: i.alpha || null, notes: i.notes || null,
+    })),
+  };
+  try {
+    const created = await api('POST', '/api/recipes', payload);
+    S.recipes.unshift(created);
+    loadRecipeForm(created.id);
+    renderRecipeList();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast('Recette dupliquée', 'success');
+  } catch(e) { showRecAlert('Erreur duplication : ' + (e.error || '')); }
+}
+
+// ── Imprimer une recette ───────────────────────────────────────────────────────
+function printRecipe() {
+  if (!recEditingId) { showRecAlert('Ouvrez une recette pour l\'imprimer'); return; }
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+
+  const wv = id => document.getElementById(id)?.textContent || '–';
+
+  // ── Recalcul des estimations ───────────────────────────────────────────────
+  const vol = parseFloat(document.getElementById('rec-volume').value) || 20;
+  const eff = parseFloat(document.getElementById('rec-efficiency').value) || 72;
+
+  let ogPoints = 0;
+  recIngredients.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let guVal = m.gu != null ? m.gu : null;
+    if (guVal == null) { const c = S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase()); if (c?.gu != null) guVal = c.gu; }
+    if (guVal == null) return;
+    ogPoints += (m.unit === 'kg' ? m.quantity : m.quantity / 1000) * guVal * (eff / 100);
+  });
+  const og  = ogPoints > 0 ? 1 + ogPoints / vol / 1000 : null;
+  const fg  = og != null ? 1 + (og - 1) * 0.25 : null;
+  const abv = og != null ? (og - fg) * 131.25 : null;
+
+  const wortOG = og || 1.050;
+  let ibuTotal = 0;
+  recIngredients.filter(i => i.category === 'houblon').forEach(h => {
+    if (!h.quantity || !h.alpha) return;
+    const ht = h.hop_type || 'ebullition';
+    if (ht === 'dryhop') return;
+    const mins = ht === 'whirlpool' ? 15 : (h.hop_time ?? 60);
+    const g = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
+    ibuTotal += 1.65 * Math.pow(0.000125, wortOG - 1) * (1 - Math.exp(-0.04 * mins)) / 4.15 * (h.alpha / 100) * g * 1000 / vol;
+  });
+  const ibuVal = ibuTotal > 0 ? ibuTotal : null;
+
+  let ebcWt = 0, ebcKg = 0;
+  recIngredients.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let e = m.ebc ?? (S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase())?.ebc ?? null);
+    if (e == null) return;
+    const kg = m.unit === 'kg' ? m.quantity : m.quantity / 1000;
+    ebcWt += kg * e; ebcKg += kg;
+  });
+  const ebcVal = ebcKg > 0 ? ebcWt / ebcKg : null;
+
+  // BJCP
+  const bjcp = S.bjcp.find(x => x.name === (document.getElementById('rec-style').value || '').trim()) || null;
+
+  // ── Barre d'estimation (HTML pur, compatible impression) ───────────────────
+  function estBar(label, val, cfgMin, cfgMax, dec, unit, bMin, bMax) {
+    const span = cfgMax - cfgMin;
+    const hasBjcp = bMin != null && bMax != null;
+    const pct = val != null ? Math.min(100, Math.max(0, (val - cfgMin) / span * 100)) : null;
+    const rL  = hasBjcp ? Math.min(100, Math.max(0, (bMin - cfgMin) / span * 100)) : 0;
+    const rW  = hasBjcp ? Math.min(100, Math.max(0, (bMax - cfgMin) / span * 100)) - rL : 0;
+    const inR = hasBjcp && val != null && val >= bMin && val <= bMax;
+    const col = val == null ? '#9ca3af' : hasBjcp ? (inR ? '#16a34a' : '#dc2626') : '#d97706';
+    const valStr = val != null ? val.toFixed(dec) + (unit ? '\u00a0' + unit : '') : '–';
+    const tgt = hasBjcp ? `⌖\u00a0${bMin.toFixed(dec)}–${bMax.toFixed(dec)}${unit||''}` : '';
+    return `<div class="est-row">
+      <div class="est-lbl">${label}</div>
+      <div class="est-track">
+        ${hasBjcp ? `<div class="est-range" style="left:${rL.toFixed(1)}%;width:${rW.toFixed(1)}%"></div>` : ''}
+        ${pct != null ? `<div class="est-marker" style="left:${pct.toFixed(1)}%;background:${col}"></div>` : ''}
+      </div>
+      <div class="est-val" style="color:${col}">${valStr}</div>
+      <div class="est-target">${tgt}</div>
+    </div>`;
+  }
+
+  const estimHtml =
+    estBar('OG',  og,     1.020, 1.130, 3, '',  bjcp?.og_min,  bjcp?.og_max)  +
+    estBar('FG',  fg,     1.002, 1.030, 3, '',  bjcp?.fg_min,  bjcp?.fg_max)  +
+    estBar('ABV', abv,    0,     14,    1, '%', bjcp?.abv_min, bjcp?.abv_max) +
+    estBar('IBU', ibuVal, 0,     120,   0, '',  bjcp?.ibu_min, bjcp?.ibu_max) +
+    estBar('EBC', ebcVal, 0,     120,   0, '',  bjcp?.ebc_min, bjcp?.ebc_max);
+
+  // ── Tableaux ingrédients ───────────────────────────────────────────────────
+  const catLabels = { malt:'Malts & Céréales', houblon:'Houblons', levure:'Levures', autre:'Autres' };
+  const totalMaltKg = (r.ingredients || []).filter(i => i.category === 'malt')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.quantity / 1000), 0);
+
+  let ingHtml = '';
+  ['malt','houblon','levure','autre'].forEach(cat => {
+    const items = (r.ingredients || []).filter(i => i.category === cat);
+    if (!items.length) return;
+    const PRINT_OT_LABELS = {empatage:'Empâtage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
+    let cols = '<th>Ingrédient</th><th>Qté</th>';
+    if (cat === 'malt')    cols += '<th style="text-align:right">%</th><th>EBC</th>';
+    if (cat === 'houblon') cols += '<th>Alpha</th><th>Type</th><th>Durée</th>';
+    if (cat === 'autre')   cols += '<th>Moment</th><th>Durée</th>';
+    ingHtml += `<h3>${catLabels[cat]}</h3><table><thead><tr>${cols}</tr></thead><tbody>`;
+    items.forEach(i => {
+      let row = `<td>${i.name}</td><td>${i.quantity}\u00a0${i.unit}</td>`;
+      if (cat === 'malt') {
+        const kg  = i.unit === 'kg' ? i.quantity : i.quantity / 1000;
+        const pct = totalMaltKg > 0 ? (kg / totalMaltKg * 100).toFixed(1) : '–';
+        const ebc = i.ebc ?? (S.catalog.find(c => c.name.toLowerCase() === i.name.toLowerCase())?.ebc ?? null);
+        const dot = ebc != null ? `<span class="ebc-dot" style="background:${ebcToColor(ebc)}"></span>` : '';
+        row += `<td style="text-align:right;font-weight:700;color:#d97706">${pct}%</td><td>${dot}${ebc ?? '–'}</td>`;
+      }
+      if (cat === 'houblon') {
+        const ht = i.hop_type || 'ebullition';
+        const htLabel = {ebullition:'Ebullition', whirlpool:'Whirlpool', dryhop:'Dry Hop'}[ht] || ht;
+        const dur = ht === 'dryhop' ? (i.hop_days != null ? i.hop_days + ' j' : '–') : (i.hop_time != null ? i.hop_time + ' min' : '–');
+        row += `<td>${i.alpha != null ? i.alpha + '%' : '–'}</td><td>${htLabel}</td><td>${dur}</td>`;
+      }
+      if (cat === 'autre') {
+        const ot = i.other_type || 'ebullition';
+        const otLabel = PRINT_OT_LABELS[ot] || ot;
+        const dur = (ot === 'dryhop') ? (i.other_time != null ? i.other_time + ' j' : '–')
+          : (ot === 'ebullition' || ot === 'whirlpool') ? (i.other_time != null ? i.other_time + ' min' : '–')
+          : '–';
+        row += `<td>${otLabel}</td><td>${dur}</td>`;
+      }
+      ingHtml += `<tr>${row}</tr>`;
+    });
+    ingHtml += '</tbody></table>';
+  });
+
+  const notesHtml = r.notes
+    ? `<div class="notes"><strong>Notes :</strong><br>${r.notes.replace(/\n/g,'<br>')}</div>` : '';
+
+  const win = window.open('', '_blank', 'width=840,height=700');
+  win.document.write(`<!DOCTYPE html><html lang="fr"><head>
+  <meta charset="UTF-8"><title>${r.name}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    body{font-family:Georgia,serif;color:#111;padding:28px 36px;font-size:13px}
+    h1{font-size:22px;margin-bottom:6px}
+    h3{font-family:sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin:18px 0 6px;border-bottom:1px solid #ddd;padding-bottom:4px}
+    .meta{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:16px}
+    .badge{display:inline-block;background:#f3f3f3;border:1px solid #ccc;border-radius:4px;padding:2px 8px;font-size:11px}
+    .header{border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px}
+    .params-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+    .param{background:#f8f8f8;padding:6px 10px;border-radius:4px}
+    .param-val{font-size:15px;font-weight:bold}
+    .param-lbl{font-family:sans-serif;font-size:10px;color:#888;text-transform:uppercase;margin-top:1px}
+    .water-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:4px}
+    .stat-box{text-align:center;background:#f8f8f8;padding:8px 4px;border-radius:6px}
+    .stat-val{font-size:15px;font-weight:bold}
+    .stat-lbl{font-family:sans-serif;font-size:10px;color:#888}
+    table{width:100%;border-collapse:collapse;margin-bottom:4px}
+    th{text-align:left;padding:4px 8px;font-size:11px;text-transform:uppercase;color:#888;border-bottom:1px solid #ddd;font-family:sans-serif}
+    td{padding:5px 8px;border-bottom:1px solid #f0f0f0;font-size:12px}
+    .notes{margin-top:16px;padding:10px 12px;background:#f8f8f8;border-radius:6px;font-size:12px;font-family:sans-serif;line-height:1.5}
+    .est-row{display:grid;grid-template-columns:44px 1fr 76px 140px;align-items:center;gap:8px;margin-bottom:7px;font-family:sans-serif}
+    .est-lbl{font-size:11px;font-weight:700;color:#555}
+    .est-track{height:8px;background:#e5e7eb;border-radius:4px;position:relative;overflow:visible}
+    .est-range{position:absolute;top:0;height:100%;background:#fbbf24;opacity:.33;border-radius:4px}
+    .est-marker{position:absolute;top:-3px;width:3px;height:14px;border-radius:2px;transform:translateX(-50%)}
+    .est-val{font-size:13px;font-weight:700;text-align:right}
+    .est-target{font-size:10px;color:#9ca3af}
+    .ebc-dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:middle;border:1px solid rgba(0,0,0,.15)}
+    @media print{body{padding:16px}}
+  </style></head><body>
+  <div class="header">
+    <h1>${esc(r.name)}</h1>
+    <div class="meta">
+      ${r.style   ? `<span class="badge">${esc(r.style)}</span>` : ''}
+      ${r.batch_no? `<span class="badge">Brassin #${r.batch_no}</span>` : ''}
+      <span class="badge">${r.volume} L</span>
+      ${r.brew_date ? `<span class="badge">${r.brew_date}</span>` : ''}
+    </div>
+  </div>
+  <div class="params-grid">
+    <div class="param"><div class="param-val">${r.mash_temp||66}°C</div><div class="param-lbl">T° empâtage</div></div>
+    <div class="param"><div class="param-val">${r.mash_time||60} min</div><div class="param-lbl">Durée empâtage</div></div>
+    <div class="param"><div class="param-val">${r.boil_time||60} min</div><div class="param-lbl">Ébullition</div></div>
+    <div class="param"><div class="param-val">${r.brewhouse_efficiency||72}%</div><div class="param-lbl">Rendement</div></div>
+    <div class="param"><div class="param-val">${r.ferm_temp||20}°C</div><div class="param-lbl">T° fermentation</div></div>
+    <div class="param"><div class="param-val">${r.ferm_time||14} j</div><div class="param-lbl">Fermentation</div></div>
+  </div>
+  <h3>Estimations${bjcp ? ' \u2014 ' + esc(bjcp.name) : ''}</h3>
+  <div style="padding:8px 0 4px">${estimHtml}</div>
+  <h3>Volumes d'eau</h3>
+  <div class="water-grid" style="margin-bottom:14px">
+    <div class="stat-box"><div class="stat-val">${wv('rw-mash')}</div><div class="stat-lbl">Empâtage (L)</div></div>
+    <div class="stat-box"><div class="stat-val">${wv('rw-sparge')}</div><div class="stat-lbl">Rinçage (L)</div></div>
+    <div class="stat-box"><div class="stat-val">${wv('rw-preboil')}</div><div class="stat-lbl">Pré-ébullition (L)</div></div>
+    <div class="stat-box"><div class="stat-val">${wv('rw-total')}</div><div class="stat-lbl">Eau totale (L)</div></div>
+  </div>
+  ${ingHtml}
+  ${notesHtml}
+  <script>window.onload=function(){window.print()}<\/script>
+</body></html>`);
+  win.document.close();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── BRASSINS ─────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+const BREW_STATUS = {
+  planned:     { label: 'Planifié',        color: 'var(--info)' },
+  in_progress: { label: 'En cours',        color: 'var(--amber)' },
+  fermenting:  { label: 'En fermentation', color: 'var(--hop)' },
+  completed:   { label: 'Terminé',         color: 'var(--success)' },
+};
+function brewStatusBadge(s) {
+  const st = BREW_STATUS[s] || { label: s || 'Planifié', color: 'var(--muted)' };
+  return `<span style="font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:20px;background:${st.color}22;color:${st.color};border:1px solid ${st.color}55;vertical-align:middle">${st.label}</span>`;
+}
+
+function _spindleAgo(dateStr) {
+  if (!dateStr) return null;
+  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (diff < 60)   return `il y a ${diff}s`;
+  if (diff < 3600) return `il y a ${Math.floor(diff/60)}min`;
+  if (diff < 86400)return `il y a ${Math.floor(diff/3600)}h`;
+  return `il y a ${Math.floor(diff/86400)}j`;
+}
+
+function renderBrassins() {
+  const active = S.brews.filter(b => !b.archived);
+  const arch   = S.brews.filter(b => b.archived);
+  const shown  = showArchivedBrew ? [...active, ...arch] : active;
+
+  // Stats on active brews only
+  document.getElementById('brew-stats').innerHTML = `
+    <div class="stat"><div class="stat-val">${active.length}</div><div class="stat-lbl">Total brassins</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--hop)">${active.filter(b=>b.status==='completed').length}</div><div class="stat-lbl">Terminés</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--amber)">${active.length ? (active.filter(b=>b.abv).reduce((s,b)=>s+b.abv,0) / (active.filter(b=>b.abv).length || 1)).toFixed(1)+'%' : '–'}</div><div class="stat-lbl">ABV moyen</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--info)">${active.length ? active.filter(b=>b.volume_brewed).reduce((s,b)=>s+(b.volume_brewed||0),0).toFixed(0)+'L' : '–'}</div><div class="stat-lbl">Volume total</div></div>`;
+
+  const list = document.getElementById('brew-list');
+  document.getElementById('brew-empty').style.display = shown.length ? 'none' : 'block';
+
+  if (!shown.length) { list.innerHTML = ''; }
+  else {
+    const STATUS_ORDER = ['planned', 'in_progress', 'fermenting', 'completed'];
+    const STATUS_ICONS = {
+      planned:     'fas fa-calendar-plus',
+      in_progress: 'fas fa-fire-flame-curved',
+      fermenting:  'fas fa-flask',
+      completed:   'fas fa-check-circle',
+    };
+
+    const _brewCardHtml = b => {
+      const sp = S.spindles.find(s => s.brew_id === b.id);
+      let spindleHtml = '';
+      let spindleBtn  = '';
+      if (sp) {
+        const gravStr = sp.last_gravity    != null ? sp.last_gravity.toFixed(3)    : null;
+        const tempStr = sp.last_temperature != null ? sp.last_temperature.toFixed(1) : null;
+        const ago     = _spindleAgo(sp.last_reading_at);
+        const isLive  = sp.last_reading_at && (Date.now() - new Date(sp.last_reading_at).getTime()) < 3_600_000;
+        spindleHtml = `
+          <div class="brew-spindle-badge">
+            ${isLive ? '<span class="bsb-live"></span>' : '<i class="fas fa-water" style="color:var(--info);font-size:.75rem"></i>'}
+            <span style="color:var(--muted);font-size:.78rem">${esc(sp.name)}</span>
+            ${gravStr ? `<span class="bsb-grav"><i class="fas fa-weight-hanging" style="font-size:.7rem"></i> ${gravStr}</span>` : ''}
+            ${tempStr ? `<span class="bsb-temp">${tempStr}°C</span>` : ''}
+            ${ago ? `<span class="bsb-ago">${ago}</span>` : ''}
+          </div>`;
+        spindleBtn = `<button class="btn btn-ghost btn-sm btn-icon" onclick="openSpindleChart(${sp.id})" title="Graphique densimètre — ${esc(sp.name)}"><i class="fas fa-water" style="color:var(--info)"></i></button>`;
+      }
+      return `
+      <div class="brew-card ${b.archived ? 'archived-item' : ''}">
+        <div class="brew-card-info">
+          <div class="brew-card-name">${esc(b.name)}</div>
+          <div class="brew-card-meta">
+            ${b.recipe_name ? `<i class="fas fa-scroll"></i> ${esc(b.recipe_name)} · ` : ''}
+            ${b.brew_date ? `<i class="fas fa-calendar"></i> ${b.brew_date} · ` : ''}
+            ${b.volume_brewed ? `${b.volume_brewed}L · ` : ''}
+            ${b.abv ? `<strong style="color:var(--amber)">${b.abv}% ABV</strong>` : ''}
+            ${b.og ? ` · OG ${b.og}` : ''}${b.fg ? ` → FG ${b.fg}` : ''}
+          </div>
+          ${b.notes ? `<div style="font-size:.78rem;color:var(--muted);margin-top:4px">${esc(b.notes)}</div>` : ''}
+          ${spindleHtml}
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          ${spindleBtn}
+          ${b.fermentation_count > 0 ? `<button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewFermentationChart(${b.id})" title="Historique fermentation (${b.fermentation_count} mesures)"><i class="fas fa-chart-line" style="color:var(--info)"></i></button>` : ''}
+          ${b.status === 'completed' ? `<button class="btn btn-sm btn-success" onclick="openAfterBrewModal(${b.id})" title="Ajouter à la cave"><i class="fas fa-beer-mug-empty"></i> Mettre en cave</button>` : ''}
+          <button class="btn btn-icon btn-ghost btn-sm" onclick="archiveItem('brew',${b.id},${b.archived?0:1})" title="${b.archived?'Désarchiver':'Archiver'}"><i class="fas fa-${b.archived?'box-open':'box-archive'}"></i></button>
+          <button class="btn btn-icon btn-ghost btn-sm" onclick="openBrewEditModal(${b.id})" title="Modifier"><i class="fas fa-pen"></i></button>
+          <button class="btn btn-icon btn-danger btn-sm" onclick="deleteBrew(${b.id})"><i class="fas fa-trash"></i></button>
+        </div>
+      </div>`;
+    };
+
+    const groups = STATUS_ORDER.map(status => ({
+      status,
+      brews: shown.filter(b => (b.status || 'planned') === status),
+    })).filter(g => g.brews.length > 0);
+
+    list.innerHTML = groups.map(g => {
+      const st = BREW_STATUS[g.status];
+      return `
+        <div class="brew-group">
+          <div class="brew-group-header">
+            <i class="${STATUS_ICONS[g.status]}" style="color:${st.color}"></i>
+            <span style="color:${st.color}">${st.label}</span>
+            <span class="brew-group-count">${g.brews.length}</span>
+          </div>
+          ${g.brews.map(_brewCardHtml).join('')}
+        </div>`;
+    }).join('');
+  }
+
+  // Archive button
+  const archBtn = document.getElementById('brew-arch-btn');
+  if (archBtn) {
+    const archCount = arch.length;
+    archBtn.textContent = showArchivedBrew ? 'Masquer archives' : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
+  }
+}
+
+function openBrewModal() {
+  // Populate recipe select
+  const sel = document.getElementById('brew-f-recipe');
+  sel.innerHTML = '<option value="">— Choisir une recette —</option>' +
+    S.recipes.filter(r => !r.archived).map(r => `<option value="${r.id}">${esc(r.name)} (${r.volume}L)</option>`).join('');
+  document.getElementById('brew-f-name').value = '';
+  document.getElementById('brew-f-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('brew-f-vol').value  = '';
+  document.getElementById('brew-f-og').value   = '';
+  document.getElementById('brew-f-fg').value   = '';
+  document.getElementById('brew-f-abv').value  = '';
+  document.getElementById('brew-f-notes').value= '';
+  document.getElementById('brew-ingredients-section').style.display = 'none';
+  showBrewAlert('');
+  openModal('brew-modal');
+}
+
+// Override the onclick to call openBrewModal
+document.querySelector('[onclick="openModal(\'brew-modal\')"]').onclick = openBrewModal;
+
+// Recettes nav : toujours revenir en mode liste
+document.getElementById('nav-recettes').onclick = () => { navigate('recettes'); showRecipeListOnly(); };
+
+function toBaseUnit(qty, unit) {
+  if (unit === 'kg') return qty * 1000;
+  if (unit === 'g')  return qty;
+  if (unit === 'L')  return qty * 1000;
+  if (unit === 'ml' || unit === 'mL') return qty;
+  return qty; // sachet, pièce
+}
+
+function onBrewRecipeChange() {
+  const recipeId = parseInt(document.getElementById('brew-f-recipe').value);
+  const recipe = S.recipes.find(r => r.id === recipeId);
+  const section = document.getElementById('brew-ingredients-section');
+  const list    = document.getElementById('brew-ing-list');
+
+  if (!recipe) { section.style.display='none'; return; }
+
+  // Auto-fill name and volume
+  if (!document.getElementById('brew-f-name').value)
+    document.getElementById('brew-f-name').value = recipe.name;
+  document.getElementById('brew-f-vol').value = recipe.volume;
+
+  section.style.display = '';
+  if (!recipe.ingredients.length) { list.innerHTML='<p style="color:var(--muted)">Aucun ingrédient dans cette recette.</p>'; return; }
+
+  list.innerHTML = recipe.ingredients.map(ing => {
+    const inv = ing.inventory_item_id ? S.inventory.find(i => i.id === ing.inventory_item_id) : null;
+    const stockBase  = inv ? toBaseUnit(inv.quantity, inv.unit) : null;
+    const neededBase = toBaseUnit(ing.quantity, ing.unit);
+    let sbcls='sb-na', stockTxt='Non lié';
+    if (stockBase !== null) {
+      if (stockBase >= neededBase) { sbcls='sb-ok'; stockTxt=`${inv.quantity} ${inv.unit} dispo`; }
+      else if (stockBase > 0)     { sbcls='sb-low'; stockTxt=`${inv.quantity} ${inv.unit} / besoin ${ing.quantity} ${ing.unit}`; }
+      else                        { sbcls='sb-empty'; stockTxt='Aucun stock'; }
+    }
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border)">
+      <div>
+        <span class="badge badge-${ing.category}" style="margin-right:8px">${catLabel(ing.category)}</span>
+        <strong>${esc(ing.name)}</strong> — ${ing.quantity} ${ing.unit}
+        ${ing.category==='houblon' ? (
+            ing.hop_type==='dryhop'    ? `<span style="color:var(--info);font-size:.8rem"> [Dry Hop${ing.hop_days!=null?' · '+ing.hop_days+' j':''}]</span>`
+          : ing.hop_type==='whirlpool' ? `<span style="color:var(--muted);font-size:.8rem"> [Whirlpool${ing.hop_time!=null?' −'+ing.hop_time+' min':''}]</span>`
+          : ing.hop_time!=null         ? `<span style="color:var(--muted);font-size:.8rem"> (−${ing.hop_time} min)</span>`
+          : '') : ''}
+      </div>
+      <span class="stock-badge ${sbcls}">${stockTxt}</span>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('brew-f-og').oninput = document.getElementById('brew-f-fg').oninput = function() {
+  const og = parseFloat(document.getElementById('brew-f-og').value);
+  const fg = parseFloat(document.getElementById('brew-f-fg').value);
+  if (og && fg) document.getElementById('brew-f-abv').value = ((og - fg) * 131.25).toFixed(2);
+};
+
+document.getElementById('bew-og').oninput = document.getElementById('bew-fg').oninput = function() {
+  const og = parseFloat(document.getElementById('bew-og').value);
+  const fg = parseFloat(document.getElementById('bew-fg').value);
+  if (og && fg) document.getElementById('bew-abv').value = ((og - fg) * 131.25).toFixed(2);
+};
+
+function showBrewAlert(msg, type='danger') {
+  const el = document.getElementById('brew-alert');
+  if (!msg) { el.classList.remove('show'); return; }
+  el.className = `alert alert-${type} show`;
+  el.textContent = msg;
+}
+
+async function confirmBrew(force = false) {
+  const recipeId = parseInt(document.getElementById('brew-f-recipe').value);
+  if (!recipeId) { showBrewAlert('Veuillez choisir une recette'); return; }
+  const name = document.getElementById('brew-f-name').value.trim();
+  if (!name) { showBrewAlert('Veuillez saisir un nom de brassin'); return; }
+
+  const payload = {
+    recipe_id: recipeId,
+    name, force,
+    deduct_stock:  document.getElementById('brew-deduct').checked,
+    brew_date:     document.getElementById('brew-f-date').value || null,
+    volume_brewed: parseFloat(document.getElementById('brew-f-vol').value) || null,
+    og:   parseFloat(document.getElementById('brew-f-og').value) || null,
+    fg:   parseFloat(document.getElementById('brew-f-fg').value) || null,
+    abv:  parseFloat(document.getElementById('brew-f-abv').value) || null,
+    notes: document.getElementById('brew-f-notes').value.trim() || null,
+    status: 'planned',
+  };
+  try {
+    const brew = await api('POST', '/api/brews', payload);
+    S.brews.unshift(brew);
+    // Refresh inventory after deduction
+    S.inventory = await api('GET', '/api/inventory');
+    renderInventaire();
+    renderBrassins();
+    closeModal('brew-modal');
+    closeModal('stock-warn-modal');
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast('Brassin enregistré !', 'success');
+  } catch(err) {
+    if (err.error === 'stock_insuffisant') {
+      const warnList = document.getElementById('stock-warn-list');
+      warnList.innerHTML = err.items.map(i =>
+        `<div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+          <strong>${esc(i.name)}</strong>
+          <span style="color:var(--danger)">Besoin: ${i.needed} ${i.unit} — Dispo: ${i.available} ${i.unit}</span>
+        </div>`).join('');
+      closeModal('brew-modal');
+      openModal('stock-warn-modal');
+    } else {
+      showBrewAlert('Erreur : ' + (err.error || err.message || JSON.stringify(err)));
+    }
+  }
+}
+
+async function deleteBrew(id) {
+  if (!confirm('Supprimer ce brassin ?')) return;
+  try {
+    await api('DELETE', `/api/brews/${id}`);
+    S.brews = S.brews.filter(b => b.id !== id);
+    renderBrassins();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast('Brassin supprimé', 'success');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+function showBrewEditAlert(msg, type='danger') {
+  const el = document.getElementById('brew-edit-alert');
+  if (!msg) { el.classList.remove('show'); return; }
+  el.className = `alert alert-${type} show`;
+  el.textContent = msg;
+}
+
+function openBrewEditModal(id) {
+  const b = S.brews.find(x => x.id === id);
+  if (!b) return;
+  document.getElementById('bew-id').value     = b.id;
+  document.getElementById('bew-name').value   = b.name || '';
+  document.getElementById('bew-status').value = b.status || 'planned';
+  document.getElementById('bew-date').value   = b.brew_date || '';
+  document.getElementById('bew-vol').value    = b.volume_brewed || '';
+  document.getElementById('bew-og').value     = b.og || '';
+  document.getElementById('bew-fg').value     = b.fg || '';
+  document.getElementById('bew-abv').value    = b.abv || '';
+  document.getElementById('bew-notes').value  = b.notes || '';
+  showBrewEditAlert('');
+  openModal('brew-edit-modal');
+}
+
+async function saveBrewEdit() {
+  const id = parseInt(document.getElementById('bew-id').value);
+  const payload = {
+    name:          document.getElementById('bew-name').value.trim() || null,
+    status:        document.getElementById('bew-status').value,
+    brew_date:     document.getElementById('bew-date').value || null,
+    volume_brewed: parseFloat(document.getElementById('bew-vol').value) || null,
+    og:            parseFloat(document.getElementById('bew-og').value) || null,
+    fg:            parseFloat(document.getElementById('bew-fg').value) || null,
+    abv:           parseFloat(document.getElementById('bew-abv').value) || null,
+    notes:         document.getElementById('bew-notes').value.trim() || null,
+  };
+  try {
+    const updated = await api('PUT', `/api/brews/${id}`, payload);
+    const idx = S.brews.findIndex(b => b.id === id);
+    if (idx !== -1) S.brews[idx] = updated;
+    renderBrassins();
+    closeModal('brew-edit-modal');
+    toast('Brassin mis à jour', 'success');
+  } catch(e) {
+    showBrewEditAlert('Erreur : ' + (e.error || e.message || JSON.stringify(e)));
+  }
+}
+
+function openAfterBrewModal(id) {
+  const b = S.brews.find(x => x.id === id);
+  if (!b) return;
+  const recipe = b.recipe_id ? S.recipes.find(r => r.id === b.recipe_id) : null;
+  document.getElementById('ab-brew-id').value  = b.id;
+  document.getElementById('ab-recipe-id').value= b.recipe_id || '';
+  document.getElementById('ab-name').value     = b.name;
+  document.getElementById('ab-type').value     = recipe ? (recipe.style || '') : '';
+  document.getElementById('ab-abv').value      = b.abv || '';
+  document.getElementById('ab-33').value       = 0;
+  document.getElementById('ab-75').value       = 0;
+  document.getElementById('ab-desc').value     = '';
+  document.getElementById('ab-brew-date').value     = b.brew_date || '';
+  document.getElementById('ab-bottling-date').value = new Date().toISOString().slice(0, 10);
+  openModal('after-brew-modal');
+}
+
+async function createBeerFromBrew() {
+  const payload = {
+    name:       document.getElementById('ab-name').value,
+    type:       document.getElementById('ab-type').value || null,
+    abv:        parseFloat(document.getElementById('ab-abv').value) || null,
+    stock_33cl: parseInt(document.getElementById('ab-33').value) || 0,
+    stock_75cl: parseInt(document.getElementById('ab-75').value) || 0,
+    description:  document.getElementById('ab-desc').value.trim() || null,
+    brew_id:      parseInt(document.getElementById('ab-brew-id').value) || null,
+    recipe_id:    parseInt(document.getElementById('ab-recipe-id').value) || null,
+    brew_date:    document.getElementById('ab-brew-date').value || null,
+    bottling_date:document.getElementById('ab-bottling-date').value || null,
+  };
+  try {
+    const beer = await api('POST', '/api/beers', payload);
+    S.beers.unshift(beer);
+    renderCave();
+    closeModal('after-brew-modal');
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    navigate('cave');
+    toast('Bière ajoutée à la cave !', 'success');
+  } catch(e) { toast('Erreur ajout cave', 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── CAVE ─────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function beerStockHtml(current, initial, label) {
+  const cur = current || 0;
+  const ini = initial || 0;
+  const consumed = ini > cur;
+  const pct = ini > 0 ? Math.round(cur / ini * 100) : 100;
+  // color: green if plenty, amber if below half, red if almost empty
+  const barColor = pct > 50 ? 'var(--success)' : pct > 20 ? '#f59e0b' : 'var(--danger)';
+  const initLabel = consumed
+    ? `<span style="color:var(--muted);font-size:.8rem">/${ini}</span>`
+    : '';
+  const bar = consumed
+    ? `<div class="bottle-bar"><div class="bottle-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>`
+    : '';
+  return `<div class="beer-stock-item">
+    <div class="beer-stock-row"><i class="fas fa-beer-mug-empty" style="font-size:.75rem"></i><span class="beer-stock-val">${cur}</span>${initLabel} <span>${label}</span></div>
+    ${bar}
+  </div>`;
+}
+
+function renderCave() {
+  const q = (document.getElementById('cave-search')?.value || '').toLowerCase();
+  const active = S.beers.filter(b => !b.archived);
+  const arch   = S.beers.filter(b => b.archived);
+  const shown  = (showArchivedCave ? [...active, ...arch] : active)
+    .filter(b => !q || b.name.toLowerCase().includes(q) || (b.type||'').toLowerCase().includes(q));
+
+  // Stats on active beers only
+  const total33 = active.reduce((s,b) => s + (b.stock_33cl||0), 0);
+  const total75 = active.reduce((s,b) => s + (b.stock_75cl||0), 0);
+  const totalL  = (total33 * 0.33 + total75 * 0.75).toFixed(1);
+  document.getElementById('cave-stats').innerHTML = `
+    <div class="stat"><div class="stat-val">${active.length}</div><div class="stat-lbl">Bières différentes</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--info)">${total33}</div><div class="stat-lbl">Bouteilles 33cl</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--amber)">${total75}</div><div class="stat-lbl">Bouteilles 75cl</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--success)">${totalL}</div><div class="stat-lbl">Litres totaux</div></div>`;
+
+  document.getElementById('cave-empty').style.display = shown.length ? 'none' : 'block';
+  const grid = document.getElementById('cave-grid');
+
+  const beerCardHtml = b => {
+    const photoHtml = b.photo
+      ? `<div class="beer-photo" style="cursor:zoom-in" onclick="openBeerLightbox(${b.id})"><img src="${b.photo}" alt="${esc(b.name)}"></div>`
+      : `<div class="beer-photo" style="display:flex;align-items:center;justify-content:center;background:var(--card2);color:var(--border);font-size:3rem;cursor:pointer" onclick="openBeerDetail(${b.id})">🍺</div>`;
+
+    // ── Calcul du prix par bouteille ──────────────────────────────────────────
+    let priceHtml = '';
+    if (b.recipe_id) {
+      const recipe = S.recipes.find(r => r.id === b.recipe_id);
+      if (recipe) {
+        const totalCost = recipeCost(recipe);
+        if (totalCost !== null) {
+          const brew   = b.brew_id ? S.brews.find(br => br.id === b.brew_id) : null;
+          const volume = (brew && brew.volume_brewed) ? brew.volume_brewed : recipe.volume;
+          if (volume > 0) {
+            const costPerL = totalCost / volume;
+            const p33 = (costPerL * 0.33).toFixed(2);
+            const p75 = (costPerL * 0.75).toFixed(2);
+            const volSrc = (brew && brew.volume_brewed) ? `brassin ${volume}L` : `recette ${volume}L`;
+            priceHtml = `
+              <div style="display:flex;flex-wrap:wrap;gap:3px 10px;align-items:center;font-size:.77rem;margin-bottom:7px;padding:5px 8px;background:rgba(34,197,94,.07);border-radius:7px;border:1px solid rgba(34,197,94,.18)">
+                <span style="color:var(--success);font-weight:700"><i class="fas fa-euro-sign" style="font-size:.65rem"></i> ${totalCost.toFixed(2)}€</span>
+                <span style="color:var(--border)">·</span>
+                <span style="color:var(--muted)">33cl <strong style="color:var(--success)">${p33}€</strong></span>
+                <span style="color:var(--border)">·</span>
+                <span style="color:var(--muted)">75cl <strong style="color:var(--success)">${p75}€</strong></span>
+                <span style="color:var(--border);margin-left:auto;font-size:.7rem;font-style:italic">${volSrc}</span>
+              </div>`;
+          }
+        }
+      }
+    }
+
+    return `
+      <div class="beer-card ${b.archived ? 'archived-item' : ''}">
+        ${photoHtml}
+        <div class="beer-body">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;cursor:pointer" onclick="openBeerDetail(${b.id})">
+            <div class="beer-name">${esc(b.name)}</div>
+            ${b.abv ? `<div class="beer-abv">${b.abv}%</div>` : ''}
+          </div>
+          <div class="beer-type" style="cursor:pointer" onclick="openBeerDetail(${b.id})">${b.type ? esc(b.type) : ''} ${b.recipe_name ? `· <i class="fas fa-scroll" style="font-size:.75rem"></i> ${esc(b.recipe_name)}` : ''}</div>
+          <div class="beer-stocks">
+            ${beerStockHtml(b.stock_33cl, b.initial_33cl, '33cl')}
+            ${beerStockHtml(b.stock_75cl, b.initial_75cl, '75cl')}
+          </div>
+          ${priceHtml}
+          ${b.description ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:8px;line-height:1.4">${esc(b.description).substring(0,100)}${b.description.length>100?'…':''}</div>` : ''}
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="archiveItem('cave',${b.id},${b.archived?0:1})" title="${b.archived?'Désarchiver':'Archiver'}"><i class="fas fa-${b.archived?'box-open':'box-archive'}"></i></button>
+            <button class="btn btn-sm btn-ghost" onclick="editBeer(${b.id})" style="flex:1"><i class="fas fa-pen"></i> Modifier</button>
+            <button class="btn btn-sm btn-ghost" onclick="adjustStock(${b.id},-1,0)" title="−1 bouteille 33cl"><i class="fas fa-minus"></i> 33</button>
+            <button class="btn btn-sm btn-ghost" onclick="adjustStock(${b.id},0,-1)" title="−1 bouteille 75cl"><i class="fas fa-minus"></i> 75</button>
+            <button class="btn btn-icon btn-danger btn-sm" onclick="deleteBeer(${b.id})"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+      </div>`;
+  };
+
+  const hasStock  = shown.filter(b => (b.stock_33cl || 0) + (b.stock_75cl || 0) > 0);
+  const noStock   = shown.filter(b => (b.stock_33cl || 0) + (b.stock_75cl || 0) === 0);
+  const needSplit = hasStock.length > 0 && noStock.length > 0;
+
+  const groupHeader = (label, icon, color, count) =>
+    `<div class="brew-group-header" style="grid-column:1/-1;color:${color}">
+       <i class="fas fa-${icon}"></i> ${label}
+       <span class="brew-group-count">${count}</span>
+     </div>`;
+
+  if (needSplit) {
+    grid.innerHTML =
+      groupHeader('En stock', 'check-circle', 'var(--success)', hasStock.length) +
+      hasStock.map(beerCardHtml).join('') +
+      groupHeader('Épuisées', 'wine-bottle', 'var(--muted)', noStock.length) +
+      noStock.map(beerCardHtml).join('');
+  } else {
+    grid.innerHTML = shown.map(beerCardHtml).join('');
+  }
+
+  // Archive button
+  const archBtn = document.getElementById('cave-arch-btn');
+  if (archBtn) {
+    const archCount = arch.length;
+    archBtn.textContent = showArchivedCave ? 'Masquer archives' : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
+  }
+}
+
+function openBeerLightbox(id) {
+  const b = S.beers.find(x => x.id === id);
+  if (!b || !b.photo) return;
+  const lb = document.getElementById('beer-lightbox');
+  document.getElementById('beer-lightbox-img').src  = b.photo;
+  document.getElementById('beer-lightbox-img').alt  = b.name || '';
+  document.getElementById('beer-lightbox-name').textContent = b.name || '';
+  lb.style.display = 'flex';
+  document.addEventListener('keydown', _lbKeyClose);
+}
+
+function closeBeerLightbox() {
+  document.getElementById('beer-lightbox').style.display = 'none';
+  document.getElementById('beer-lightbox-img').src = '';
+  document.removeEventListener('keydown', _lbKeyClose);
+}
+
+function _lbKeyClose(e) { if (e.key === 'Escape') closeBeerLightbox(); }
+
+let _beerDetailId = null;
+function _bdPhotoClick() { if (_beerDetailId) openBeerLightbox(_beerDetailId); }
+
+function openBeerDetail(id) {
+  const b = S.beers.find(x => x.id === id);
+  if (!b) return;
+  _beerDetailId = id;
+
+  // Ouvrir le modal en premier — le contenu est peuplé ensuite
+  openModal('beer-detail-modal');
+
+  try {
+    const get = elId => document.getElementById(elId);
+
+    get('bd-title').textContent = b.name || '';
+
+    // Photo
+    const photoWrap = get('bd-photo-wrap');
+    const photoImg  = get('bd-photo');
+    if (b.photo && photoWrap && photoImg) {
+      photoImg.src = b.photo;
+      photoImg.alt = b.name || '';
+      photoWrap.style.display = '';
+    } else if (photoWrap) {
+      photoWrap.style.display = 'none';
+    }
+
+    // Badges
+    const badges = [];
+    if (b.abv)         badges.push(`<span class="badge" style="background:var(--amber);color:#000;font-weight:700">${b.abv}% ABV</span>`);
+    if (b.type)        badges.push(`<span class="badge badge-info">${esc(b.type)}</span>`);
+    if (b.origin)      badges.push(`<span class="badge" style="background:var(--card2);color:var(--muted)"><i class="fas fa-map-marker-alt"></i> ${esc(b.origin)}</span>`);
+    if (b.recipe_name) badges.push(`<span class="badge" style="background:var(--card2);color:var(--hop)"><i class="fas fa-scroll"></i> ${esc(b.recipe_name)}</span>`);
+    const badgesEl = get('bd-badges');
+    if (badgesEl) badgesEl.innerHTML = badges.join('');
+
+    // Stocks
+    const stocksEl = get('bd-stocks');
+    if (stocksEl) stocksEl.innerHTML = `
+      <div style="background:var(--card2);border-radius:12px;padding:14px;text-align:center">
+        <div style="font-size:2rem;font-weight:800;color:var(--info)">${b.stock_33cl || 0}</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:2px">Bouteilles 33cl</div>
+        ${b.initial_33cl ? `<div style="font-size:.72rem;color:var(--muted);margin-top:4px">/ ${b.initial_33cl} initial</div>` : ''}
+      </div>
+      <div style="background:var(--card2);border-radius:12px;padding:14px;text-align:center">
+        <div style="font-size:2rem;font-weight:800;color:var(--amber)">${b.stock_75cl || 0}</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:2px">Bouteilles 75cl</div>
+        ${b.initial_75cl ? `<div style="font-size:.72rem;color:var(--muted);margin-top:4px">/ ${b.initial_75cl} initial</div>` : ''}
+      </div>`;
+
+    // Description
+    const descEl = get('bd-desc');
+    if (descEl) {
+      descEl.textContent = b.description || '';
+      descEl.style.display = b.description ? '' : 'none';
+    }
+
+    // Meta
+    const totalL = ((b.stock_33cl||0)*0.33 + (b.stock_75cl||0)*0.75).toFixed(2);
+    const metaParts = [`<i class="fas fa-wine-bottle"></i> ${totalL} L en cave`];
+    const fmtDate = d => d ? d.split('-').reverse().join('/') : null;
+    if (b.brew_date)     metaParts.push(`<i class="fas fa-fire-flame-curved"></i> Brassé le ${fmtDate(b.brew_date)}`);
+    if (b.bottling_date) metaParts.push(`<i class="fas fa-wine-bottle"></i> Embouteillé le ${fmtDate(b.bottling_date)}`);
+    const metaEl = get('bd-meta');
+    if (metaEl) metaEl.innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
+
+    // Bouton Modifier
+    const editBtn = get('bd-edit-btn');
+    if (editBtn) editBtn.onclick = () => { closeModal('beer-detail-modal'); editBeer(id); };
+
+  } catch(e) {
+    console.error('openBeerDetail:', e);
+  }
+}
+
+function openBeerModal(beer = null) {
+  document.getElementById('beer-f-id').value      = beer ? beer.id : '';
+  document.getElementById('beer-f-name').value    = beer ? beer.name : '';
+  document.getElementById('beer-f-type').value    = beer ? (beer.type||'') : '';
+  document.getElementById('beer-f-abv').value     = beer ? (beer.abv||'') : '';
+  document.getElementById('beer-f-33').value      = beer ? (beer.stock_33cl||0) : 0;
+  document.getElementById('beer-f-75').value      = beer ? (beer.stock_75cl||0) : 0;
+  document.getElementById('beer-f-origin').value  = beer ? (beer.origin||'') : '';
+  document.getElementById('beer-f-desc').value    = beer ? (beer.description||'') : '';
+  document.getElementById('beer-f-photo-b64').value= beer ? (beer.photo||'') : '';
+  document.getElementById('beer-f-photo-preview').style.display = beer && beer.photo ? 'block' : 'none';
+  if (beer && beer.photo) document.getElementById('beer-f-photo-preview').src = beer.photo;
+  document.getElementById('beer-f-brew-date').value     = beer ? (beer.brew_date||'') : '';
+  document.getElementById('beer-f-bottling-date').value = beer ? (beer.bottling_date||'') : '';
+  document.getElementById('beer-modal-title').textContent = beer ? 'Modifier la bière' : 'Ajouter une bière';
+  // Initial counts — shown only when editing
+  const initWrap = document.getElementById('beer-f-init-wrap');
+  if (beer) {
+    document.getElementById('beer-f-33-init').value = beer.initial_33cl || 0;
+    document.getElementById('beer-f-75-init').value = beer.initial_75cl || 0;
+    initWrap.style.display = '';
+  } else {
+    initWrap.style.display = 'none';
+  }
+  openModal('beer-modal');
+}
+
+function editBeer(id) { openBeerModal(S.beers.find(b => b.id === id)); }
+
+function previewBeerPhoto(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    // Compress
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const maxW = 800;
+      let w = img.width, h = img.height;
+      if (w > maxW) { h = h * maxW / w; w = maxW; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const b64 = canvas.toDataURL('image/jpeg', 0.75);
+      document.getElementById('beer-f-photo-b64').value = b64;
+      document.getElementById('beer-f-photo-preview').src = b64;
+      document.getElementById('beer-f-photo-preview').style.display = 'block';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveBeer() {
+  const name = document.getElementById('beer-f-name').value.trim();
+  if (!name) { toast('Le nom est requis', 'error'); return; }
+  const id = document.getElementById('beer-f-id').value;
+  const stock33 = parseInt(document.getElementById('beer-f-33').value) || 0;
+  const stock75 = parseInt(document.getElementById('beer-f-75').value) || 0;
+  const payload = {
+    name,
+    type:         document.getElementById('beer-f-type').value || null,
+    abv:          parseFloat(document.getElementById('beer-f-abv').value) || null,
+    stock_33cl:   stock33,
+    stock_75cl:   stock75,
+    // On edit: send the (possibly corrected) initial values; on create: not sent, backend uses stock as initial
+    ...(id ? {
+      initial_33cl: parseInt(document.getElementById('beer-f-33-init').value) || 0,
+      initial_75cl: parseInt(document.getElementById('beer-f-75-init').value) || 0,
+    } : {}),
+    origin:        document.getElementById('beer-f-origin').value.trim() || null,
+    description:   document.getElementById('beer-f-desc').value.trim() || null,
+    photo:         document.getElementById('beer-f-photo-b64').value || null,
+    brew_date:     document.getElementById('beer-f-brew-date').value || null,
+    bottling_date: document.getElementById('beer-f-bottling-date').value || null,
+  };
+  try {
+    if (id) {
+      const updated = await api('PUT', `/api/beers/${id}`, payload);
+      const idx = S.beers.findIndex(b => b.id === parseInt(id));
+      if (idx !== -1) S.beers[idx] = updated;
+    } else {
+      const created = await api('POST', '/api/beers', payload);
+      S.beers.unshift(created);
+    }
+    closeModal('beer-modal');
+    renderCave();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast(id ? 'Bière mise à jour' : 'Bière ajoutée à la cave', 'success');
+  } catch(e) { toast('Erreur sauvegarde bière', 'error'); }
+}
+
+async function adjustStock(id, d33, d75) {
+  const beer = S.beers.find(b => b.id === id);
+  if (!beer) return;
+  const payload = {
+    stock_33cl: Math.max(0, (beer.stock_33cl||0) + d33),
+    stock_75cl: Math.max(0, (beer.stock_75cl||0) + d75),
+  };
+  try {
+    const updated = await api('PATCH', `/api/beers/${id}/stock`, payload);
+    const idx = S.beers.findIndex(b => b.id === id);
+    if (idx !== -1) S.beers[idx] = { ...S.beers[idx], ...updated };
+    renderCave();
+  } catch(e) { toast('Erreur mise à jour stock', 'error'); }
+}
+
+async function deleteBeer(id) {
+  if (!confirm('Supprimer cette bière de la cave ?')) return;
+  try {
+    await api('DELETE', `/api/beers/${id}`);
+    S.beers = S.beers.filter(b => b.id !== id);
+    renderCave();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast('Bière supprimée', 'success');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STYLES COURANTS (cave + recettes) — noms simples uniquement
+// ══════════════════════════════════════════════════════════════════════════════
+const BEER_TYPES = {
+  'Ales': ['IPA','Session IPA','Double IPA','West Coast IPA','New England IPA','Hazy IPA','Pale Ale','American Pale Ale','Amber Ale','Brown Ale','Red Ale','Blonde Ale','Golden Ale'],
+  'Blondes & Blanches': ['Blonde','Blanche','Witbier','Weizen','Dunkelweizen','Weizenbock','Kristallweizen'],
+  'Ambrées & Brunes': ['Ambrée','Brune','Stout','Imperial Stout','Oatmeal Stout','Milk Stout','Sweet Stout','Dry Stout','Porter','Robust Porter','Baltic Porter'],
+  'Belges': ['Triple','Dubbel','Quadrupel','Saison','Abbaye','Trappiste','Belgian Pale Ale','Belgian Golden Strong','Belgian Dark Strong','Bière de Garde'],
+  'Lagers': ['Lager','Pilsner','Pils','Bock','Doppelbock','Maibock','Dunkel','Schwarzbier','Märzen','Festbier','Helles','Kölsch','Altbier','Vienna Lager','Exportbier'],
+  'Sours & Spécialités': ['Sour','Lambic','Gueuze','Kriek','Fruitée','Gose','Berliner Weisse','Flanders Red','Oud Bruin','Brett Beer','Fumée','Rauchbier','Barley Wine','Wheatwine','Scotch Ale','Wee Heavy','Old Ale'],
+  'Sans alcool': ['Sans alcool'],
+  'Autre': ['Autre'],
+};
+
+// ── Helpers groupement BJCP ───────────────────────────────────────────────────
+function _bjcpByCategory(filter) {
+  const bycat = {};
+  S.bjcp.filter(filter).forEach(s => {
+    if (!bycat[s.category]) bycat[s.category] = [];
+    bycat[s.category].push(s);
+  });
+  return bycat;
+}
+
+// ── Brew stats calculator (Brewfather-style) ──────────────────────────────────
+const CALC_PARAMS = {
+  og:  { label: 'OG',  unit: '',  dec: 3, min: 1.020, max: 1.130 },
+  fg:  { label: 'FG',  unit: '',  dec: 3, min: 1.002, max: 1.030 },
+  abv: { label: 'ABV', unit: '%', dec: 1, min: 0,     max: 14    },
+  ibu: { label: 'IBU', unit: '',  dec: 0, min: 0,     max: 120   },
+  ebc: { label: 'EBC', unit: '',  dec: 0, min: 0,     max: 120   },
+};
+
+function renderCalcBar(key, val, range, cfg) {
+  const span = cfg.max - cfg.min;
+  const hasRange = range && range[0] != null && range[1] != null;
+
+  let rangeHtml = '';
+  if (hasRange) {
+    const rL = Math.min(100, Math.max(0, (range[0] - cfg.min) / span * 100));
+    const rR = Math.min(100, Math.max(0, (range[1] - cfg.min) / span * 100));
+    rangeHtml = `<div class="calc-bar-range" style="left:${rL.toFixed(1)}%;width:${(rR - rL).toFixed(1)}%"></div>`;
+  }
+
+  let markerHtml = '';
+  let valColor = 'var(--amber)';
+  if (val != null) {
+    const pct = Math.min(100, Math.max(0, (val - cfg.min) / span * 100));
+    if (hasRange) valColor = (val >= range[0] && val <= range[1]) ? 'var(--success)' : 'var(--danger)';
+    markerHtml = `<div class="calc-bar-marker" style="left:${pct.toFixed(1)}%;background:${valColor}"></div>`;
+  }
+
+  const valStr    = val != null ? val.toFixed(cfg.dec) + (cfg.unit ? ' ' + cfg.unit : '') : '–';
+  const targetStr = hasRange ? `${range[0].toFixed(cfg.dec)}–${range[1].toFixed(cfg.dec)}${cfg.unit ? cfg.unit : ''}` : '';
+
+  return `<div class="calc-bar-row">
+    <div class="calc-bar-lbl">${cfg.label}</div>
+    <div class="calc-bar-track">${rangeHtml}${markerHtml}</div>
+    <div class="calc-bar-val" style="color:${valColor}">${valStr}</div>
+    <div class="calc-bar-target">${targetStr ? '⌖ ' + targetStr : ''}</div>
+  </div>`;
+}
+
+function calcBrewStats() {
+  const panel = document.getElementById('rec-calc-panel');
+  if (!panel) return;
+
+  const vol = parseFloat(document.getElementById('rec-volume').value) || 20;
+  const eff = parseFloat(document.getElementById('rec-efficiency').value) || 72;
+
+  // Selected BJCP style ranges
+  const styleName = (document.getElementById('rec-style').value || '').trim();
+  const bjcpStyle = S.bjcp.find(x => x.name === styleName) || null;
+
+  // ── OG (L°/kg metric) ───────────────────────────────────────────────────────
+  let ogPoints = 0;
+  recIngredients.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let guVal = m.gu != null ? m.gu : null;
+    if (guVal == null) {
+      const cat = S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase());
+      if (cat && cat.gu != null) guVal = cat.gu;
+    }
+    if (guVal == null) return;
+    const kg = m.unit === 'kg' ? m.quantity : m.quantity / 1000;
+    ogPoints += kg * guVal * (eff / 100);
+  });
+  const og = ogPoints > 0 ? 1 + ogPoints / vol / 1000 : null;
+
+  // ── FG (75% attenuation) ─────────────────────────────────────────────────────
+  const fg = og != null ? 1 + (og - 1) * 0.25 : null;
+
+  // ── ABV ──────────────────────────────────────────────────────────────────────
+  const abv = (og != null && fg != null) ? (og - fg) * 131.25 : null;
+
+  // ── IBU (Tinseth metric) ─────────────────────────────────────────────────────
+  const wortOG = og || 1.050;
+  let ibuTotal = 0;
+  recIngredients.filter(i => i.category === 'houblon').forEach(h => {
+    if (!h.quantity || !h.alpha) return;
+    const ht = h.hop_type || 'ebullition';
+    if (ht === 'dryhop') return;
+    const mins = ht === 'whirlpool' ? 15 : (h.hop_time != null ? h.hop_time : 60);
+    const grams     = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
+    const bigness   = 1.65 * Math.pow(0.000125, wortOG - 1);
+    const timeFact  = (1 - Math.exp(-0.04 * mins)) / 4.15;
+    ibuTotal += bigness * timeFact * (h.alpha / 100) * grams * 1000 / vol;
+  });
+  const ibuVal = ibuTotal > 0 ? ibuTotal : null;
+
+  // ── EBC (moyenne pondérée par poids de grain) ─────────────────────────────────
+  let ebcWtSum = 0, ebcKgSum = 0;
+  recIngredients.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let mEbc = m.ebc != null ? m.ebc : null;
+    if (mEbc == null) {
+      const cat = S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase());
+      if (cat && cat.ebc != null) mEbc = cat.ebc;
+    }
+    if (mEbc == null) return;
+    const kg = m.unit === 'kg' ? m.quantity : m.quantity / 1000;
+    ebcWtSum += kg * mEbc;
+    ebcKgSum += kg;
+  });
+  const ebcVal = ebcKgSum > 0 ? ebcWtSum / ebcKgSum : null;
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+  const rng = bjcpStyle ? {
+    og:  [bjcpStyle.og_min,  bjcpStyle.og_max],
+    fg:  [bjcpStyle.fg_min,  bjcpStyle.fg_max],
+    abv: [bjcpStyle.abv_min, bjcpStyle.abv_max],
+    ibu: [bjcpStyle.ibu_min, bjcpStyle.ibu_max],
+    ebc: [bjcpStyle.ebc_min, bjcpStyle.ebc_max],
+  } : {};
+
+  const styleLabel = bjcpStyle
+    ? `<span style="color:var(--muted);font-weight:400;font-size:.7rem;text-transform:none;letter-spacing:0"> — ${esc(bjcpStyle.name)}</span>`
+    : '';
+
+  // ── Coût total de la recette ──────────────────────────────────────────────
+  const CAT_COST_META = {
+    malt:    { label: 'Malts',    color: 'var(--malt)',  icon: 'fas fa-seedling' },
+    houblon: { label: 'Houblons', color: 'var(--hop)',   icon: 'fas fa-leaf' },
+    levure:  { label: 'Levures',  color: 'var(--yeast)', icon: 'fas fa-flask' },
+    autre:   { label: 'Autres',   color: 'var(--other)', icon: 'fas fa-box' },
+  };
+  const catCosts = { malt: 0, houblon: 0, levure: 0, autre: 0 };
+  let totalCost = 0, hasCost = false;
+  recIngredients.forEach(ing => {
+    const c = ingCost(ing);
+    if (c !== null) { catCosts[ing.category] = (catCosts[ing.category] || 0) + c; totalCost += c; hasCost = true; }
+  });
+  // Coût de l'eau (prix/L × volume total eau)
+  const waterPrice = (appSettings.water || {}).price;
+  let waterCost = null;
+  if (waterPrice != null) {
+    // totalWater est déjà calculé plus haut via recCalc — on le recalcule ici
+    const grainKg2 = recIngredients.filter(i=>i.category==='malt')
+      .reduce((s,i) => s + (i.unit==='kg' ? i.quantity : i.quantity/1000), 0);
+    const boil2  = parseFloat(document.getElementById('rec-boil-time').value) || 60;
+    const ratio2 = parseFloat(document.getElementById('rec-mash-ratio').value) || 3;
+    const evap2  = parseFloat(document.getElementById('rec-evap').value) || 3;
+    const abs2   = parseFloat(document.getElementById('rec-absorption').value) || 0.8;
+    const preboil2   = vol + evap2 * (boil2/60);
+    const totalWater2 = preboil2 + grainKg2 * abs2;
+    waterCost = totalWater2 * waterPrice;
+    totalCost += waterCost;
+    hasCost = true;
+  }
+
+  const costHtml = hasCost ? `
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)"><i class="fas fa-euro-sign"></i> Coût matières estimé</div>
+        <div style="display:flex;gap:16px;align-items:baseline">
+          <span style="font-size:1.1rem;font-weight:800;color:var(--success)">${totalCost.toFixed(2)} €</span>
+          <span style="font-size:.8rem;color:var(--muted)">${(totalCost / vol).toFixed(2)} €/L</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:${waterCost !== null ? '8px' : '0'}">
+        ${['malt','houblon','levure','autre'].map(cat => {
+          const m = CAT_COST_META[cat];
+          const c = catCosts[cat] || 0;
+          const pct = totalCost > 0 ? (c / totalCost * 100) : 0;
+          if (c === 0) return `<div style="background:var(--card2);border-radius:10px;padding:10px 12px;opacity:.35">
+            <div style="font-size:.72rem;color:${m.color};font-weight:600;margin-bottom:4px"><i class="${m.icon}"></i> ${m.label}</div>
+            <div style="font-size:.9rem;font-weight:700;color:var(--muted)">—</div>
+          </div>`;
+          return `<div style="background:var(--card2);border-radius:10px;padding:10px 12px;border-left:3px solid ${m.color}">
+            <div style="font-size:.72rem;color:${m.color};font-weight:600;margin-bottom:4px"><i class="${m.icon}"></i> ${m.label}</div>
+            <div style="font-size:.95rem;font-weight:700;color:var(--text)">${c.toFixed(2)} €</div>
+            <div style="font-size:.72rem;color:var(--muted);margin-top:2px">${pct.toFixed(0)}% du total</div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${waterCost !== null ? `
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 12px;background:var(--card2);border-radius:10px;border-left:3px solid var(--info)">
+        <i class="fas fa-droplet" style="color:var(--info);font-size:.8rem"></i>
+        <span style="font-size:.82rem;color:var(--muted);flex:1">Eau (${((appSettings.water||{}).price||0).toFixed(4)} €/L)</span>
+        <span style="font-size:.9rem;font-weight:700;color:var(--info)">${waterCost.toFixed(2)} €</span>
+        <span style="font-size:.75rem;color:var(--muted)">${(waterCost/totalCost*100).toFixed(0)}% du total</span>
+      </div>` : ''}
+    </div>` : '';
+
+  panel.innerHTML = `<div class="calc-panel">
+    <div class="calc-panel-title"><i class="fas fa-chart-bar"></i> Estimations${styleLabel}</div>
+    ${renderCalcBar('og',  og,     rng.og  || null, CALC_PARAMS.og)}
+    ${renderCalcBar('fg',  fg,     rng.fg  || null, CALC_PARAMS.fg)}
+    ${renderCalcBar('abv', abv,    rng.abv || null, CALC_PARAMS.abv)}
+    ${renderCalcBar('ibu', ibuVal, rng.ibu || null, CALC_PARAMS.ibu)}
+    ${renderCalcBar('ebc', ebcVal, rng.ebc || null, CALC_PARAMS.ebc)}
+    ${costHtml}
+  </div>`;
+}
+
+// ── BJCP search (champ style recette) ────────────────────────────────────────
+function bjcpSearch(input) {
+  const q   = input.value.toLowerCase().trim();
+  const sug = document.getElementById('bjcp-sug');
+  closeBjcpSuggest();
+  let html = '';
+  let count = 0;
+
+  // Styles courants en premier
+  const commonMatches = [];
+  for (const types of Object.values(BEER_TYPES)) {
+    types.forEach(t => { if (!q || t.toLowerCase().includes(q)) commonMatches.push(t); });
+  }
+  if (commonMatches.length) {
+    html += `<div class="ing-suggest-cat">Styles courants</div>`;
+    commonMatches.slice(0, q ? 30 : 10).forEach(t => {
+      html += `<div class="ing-suggest-item" onmousedown="selectBjcp(${JSON.stringify(t).replace(/"/g,'&quot;')},0)"><span>${esc(t)}</span></div>`;
+      count++;
+    });
+  }
+
+  // Styles BJCP depuis la DB
+  const bycat = _bjcpByCategory(s => !q || s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q));
+  for (const [cat, styles] of Object.entries(bycat)) {
+    html += `<div class="ing-suggest-cat" style="color:var(--gold)">BJCP — ${esc(cat)}</div>`;
+    styles.forEach(s => {
+      html += `<div class="ing-suggest-item" onmousedown="selectBjcp(${JSON.stringify(s.name).replace(/"/g,'&quot;')},${s.id})"><span style="font-size:.83rem">${esc(s.name)}</span></div>`;
+      count++;
+    });
+    if (!q && count > 50) break;
+  }
+  if (!html) return;
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+
+function closeBjcpSuggest() {
+  document.getElementById('bjcp-sug').classList.remove('open');
+}
+
+function selectBjcp(styleName, bjcpId) {
+  document.getElementById('rec-style').value = styleName;
+  closeBjcpSuggest();
+  calcBrewStats();
+}
+
+// ── TYPE BIÈRE (cave) ─────────────────────────────────────────────────────────
+function beerTypeSearch(input) {
+  const q   = input.value.toLowerCase().trim();
+  const sug = document.getElementById('beer-type-sug');
+  closeBeerTypeSuggest();
+  let html = '';
+
+  // Styles courants
+  for (const [grp, types] of Object.entries(BEER_TYPES)) {
+    const matches = types.filter(t => !q || t.toLowerCase().includes(q));
+    if (!matches.length) continue;
+    html += `<div class="ing-suggest-cat">${esc(grp)}</div>`;
+    matches.forEach(t => {
+      html += `<div class="ing-suggest-item" onmousedown="selectBeerType('${t.replace(/'/g,"\\'")}')"><span>${esc(t)}</span></div>`;
+    });
+  }
+
+  // Styles BJCP depuis la DB (uniquement si recherche active)
+  if (q) {
+    const bycat = _bjcpByCategory(s => s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q));
+    for (const [cat, styles] of Object.entries(bycat)) {
+      html += `<div class="ing-suggest-cat" style="color:var(--gold)">BJCP — ${esc(cat)}</div>`;
+      styles.forEach(s => {
+        html += `<div class="ing-suggest-item" onmousedown="selectBeerType('${s.name.replace(/'/g,"\\'")}')"><span style="font-size:.83rem">${esc(s.name)}</span></div>`;
+      });
+    }
+  }
+
+  if (!html) return;
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+
+function closeBeerTypeSuggest() {
+  const sug = document.getElementById('beer-type-sug');
+  if (sug) sug.classList.remove('open');
+}
+
+function selectBeerType(type) {
+  document.getElementById('beer-f-type').value = type;
+  closeBeerTypeSuggest();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SPINDLES
+// ══════════════════════════════════════════════════════════════════════════════
+let _spindleChart = null;
+
+function spindleAge(dateStr) {
+  if (!dateStr) return { color: 'var(--muted)', label: 'Aucune donnée', fresh: false };
+  const d = new Date(dateStr.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return { color: 'var(--muted)', label: '—', fresh: false };
+  const mins = (Date.now() - d.getTime()) / 60000;
+  const hrs  = mins / 60;
+  let label;
+  if (mins < 2)       label = 'À l\'instant';
+  else if (mins < 60) label = Math.round(mins) + ' min';
+  else if (hrs < 5)   label = Math.round(hrs) + ' h ' + (Math.round(mins) % 60 ? Math.round(mins) % 60 + ' min' : '');
+  else                label = Math.round(hrs) + ' h';
+  const color = hrs < 1 ? 'var(--success)' : hrs < 5 ? '#f59e0b' : 'var(--danger)';
+  return { color, label: label.trim(), fresh: hrs < 1 };
+}
+
+function renderSpindles() {
+  const grid  = document.getElementById('spindle-grid');
+  const empty = document.getElementById('spindle-empty');
+  const statsEl = document.getElementById('spin-stats');
+  const nb = document.getElementById('nb-spin');
+  if (nb) nb.textContent = S.spindles.length;
+
+  const linked = S.spindles.filter(s => s.brew_id).length;
+  const total  = S.spindles.reduce((a, s) => a + (s.reading_count || 0), 0);
+  statsEl.innerHTML = `
+    <div class="stat"><div class="stat-val">${S.spindles.length}</div><div class="stat-lbl">Densimètres</div></div>
+    <div class="stat"><div class="stat-val">${linked}</div><div class="stat-lbl">Liés à un brassin</div></div>
+    <div class="stat"><div class="stat-val">${total}</div><div class="stat-lbl">Mesures totales</div></div>`;
+
+  if (!S.spindles.length) {
+    grid.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  grid.innerHTML = S.spindles.map(s => {
+    const batV   = s.last_battery;
+    const batPct = batV != null ? Math.min(100, Math.max(0, Math.round((batV - 3.0) / (4.2 - 3.0) * 100))) : null;
+    const batColor = batPct == null ? 'var(--muted)' : batPct > 50 ? 'var(--success)' : batPct > 20 ? '#f59e0b' : 'var(--danger)';
+    const lastAt = fmtReadingDate(s.last_reading_at);
+    const gravStr = s.last_gravity    != null ? s.last_gravity.toFixed(3)    : '—';
+    const tempStr = s.last_temperature != null ? s.last_temperature.toFixed(1) + '°' : '—';
+    const batStr  = batV != null ? batV.toFixed(2) + 'V' : '—';
+    const batBar  = batPct != null
+      ? `<div class="battery-bar"><div class="battery-fill" style="width:${batPct}%;background:${batColor}"></div></div>`
+      : '';
+
+    const age = spindleAge(s.last_reading_at);
+    const otherLinkedIds = new Set(S.spindles.filter(sp => sp.brew_id && sp.id !== s.id).map(sp => sp.brew_id));
+    const activeBrews = S.brews.filter(b => !b.archived && b.status !== 'completed' && !otherLinkedIds.has(b.id));
+    return `
+      <div class="spindle-card" style="border-color:${age.color}44">
+        <div class="spindle-card-head">
+          <div class="spindle-name"><i class="fas fa-water" style="color:var(--info);margin-right:7px"></i>${esc(s.name)}</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="spindle-age-badge${age.fresh ? ' spindle-age-pulse' : ''}" style="color:${age.color};background:${age.color}1a;border-color:${age.color}55" title="Dernière réception : ${lastAt}">
+              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${age.color};flex-shrink:0"></span>
+              ${age.label}
+            </span>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="showSpindleToken(${s.id})" title="Voir le token / URL iSpindel"><i class="fas fa-key"></i></button>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="openSpindleChart(${s.id})" title="Voir le graphique"><i class="fas fa-chart-line"></i></button>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="openSpindleEditModal(${s.id})" title="Modifier"><i class="fas fa-pen"></i></button>
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSpindle(${s.id})" title="Supprimer"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+        <div class="spindle-metrics">
+          <div class="spindle-metric">
+            <div class="spindle-metric-val">${gravStr}</div>
+            <div class="spindle-metric-lbl">Gravité</div>
+          </div>
+          <div class="spindle-metric">
+            <div class="spindle-metric-val">${tempStr}</div>
+            <div class="spindle-metric-lbl">Température</div>
+          </div>
+          <div class="spindle-metric">
+            <div class="spindle-metric-val" style="font-size:1rem">${batBar}${batStr}</div>
+            <div class="spindle-metric-lbl">Batterie</div>
+          </div>
+        </div>
+        <div class="spindle-brew-link">
+          <i class="fas fa-link" style="color:var(--info);flex-shrink:0"></i>
+          <select style="flex:1;border:none;background:transparent;color:var(--text);font-family:inherit;font-size:.85rem;cursor:pointer"
+                  onchange="linkSpindleBrew(${s.id}, this.value)">
+            <option value="">— Non lié à un brassin —</option>
+            ${activeBrews.map(b => `<option value="${b.id}" ${s.brew_id == b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="font-size:.78rem;color:var(--muted)">
+          <i class="fas fa-clock"></i> Dernière mesure : ${lastAt}
+          &nbsp;·&nbsp;<i class="fas fa-database"></i> ${s.reading_count || 0} mesure${s.reading_count !== 1 ? 's' : ''}
+        </div>
+      </div>`;
+  }).join('');
+  loadSpindleStats();
+}
+
+async function openBrewFermentationChart(brewId) {
+  const brew = S.brews.find(b => b.id === brewId);
+  document.getElementById('spindle-chart-title').textContent =
+    `Fermentation — ${brew ? esc(brew.name) : ''}`;
+  openModal('spindle-chart-modal');
+
+  if (_spindleChart) { _spindleChart.destroy(); _spindleChart = null; }
+  const stale = Chart.getChart('spindle-chart-canvas');
+  if (stale) stale.destroy();
+  document.getElementById('spindle-chart-table').innerHTML =
+    '<p style="text-align:center;color:var(--muted);padding:20px 0"><i class="fas fa-spinner fa-spin"></i> Chargement…</p>';
+
+  try {
+    const readings = await api('GET', `/api/brews/${brewId}/fermentation`);
+
+    if (!readings.length) {
+      document.getElementById('spindle-chart-table').innerHTML =
+        '<p style="text-align:center;color:var(--muted);padding:30px 0">Aucune mesure de fermentation enregistrée.</p>';
+      return;
+    }
+
+    const labels    = readings.map(r => fmtReadingDate(r.recorded_at));
+    const gravities = readings.map(r => r.gravity);
+    const temps     = readings.map(r => r.temperature);
+    const ptRadius  = readings.length > 60 ? 0 : 3;
+
+    const canvas = document.getElementById('spindle-chart-canvas');
+    canvas.style.width  = '100%';
+    canvas.style.height = '100%';
+    _spindleChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Gravité', data: gravities, borderColor: '#ff9500',
+            backgroundColor: 'rgba(255,149,0,.12)', yAxisID: 'yGrav',
+            tension: 0.35, pointRadius: ptRadius, fill: true },
+          { label: 'Température (°C)', data: temps, borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59,130,246,.08)', yAxisID: 'yTemp',
+            tension: 0.35, pointRadius: ptRadius, fill: false },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { labels: { color: '#ccc', font: { size: 12 } } } },
+        scales: {
+          x: { ticks: { color: '#888', maxTicksLimit: 10, font: { size: 11 } }, grid: { color: '#2a2a2a' } },
+          yGrav: { type: 'linear', position: 'left',
+            ticks: { color: '#ff9500', font: { size: 11 } }, grid: { color: '#2a2a2a' },
+            title: { display: true, text: 'Gravité', color: '#ff9500', font: { size: 11 } } },
+          yTemp: { type: 'linear', position: 'right',
+            ticks: { color: '#3b82f6', font: { size: 11 } }, grid: { drawOnChartArea: false },
+            title: { display: true, text: '°C', color: '#3b82f6', font: { size: 11 } } },
+        },
+      },
+    });
+
+    const recent = readings.slice(-10).reverse();
+    document.getElementById('spindle-chart-table').innerHTML = `
+      <h4 style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">${readings.length} mesures archivées · 10 dernières</h4>
+      <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+        <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:5px 8px">Date / Heure</th>
+          <th style="text-align:center;padding:5px 8px">Gravité</th>
+          <th style="text-align:center;padding:5px 8px">Temp. (°C)</th>
+          <th style="text-align:center;padding:5px 8px">Batterie</th>
+          <th style="text-align:center;padding:5px 8px">Angle</th>
+        </tr></thead>
+        <tbody>
+          ${recent.map(r => `
+            <tr style="border-bottom:1px solid rgba(255,255,255,.04)">
+              <td style="padding:5px 8px;color:var(--muted)">${fmtReadingDate(r.recorded_at)}</td>
+              <td style="text-align:center;padding:5px 8px;color:var(--amber);font-weight:600">${r.gravity != null ? r.gravity.toFixed(3) : '—'}</td>
+              <td style="text-align:center;padding:5px 8px;color:#3b82f6">${r.temperature != null ? r.temperature.toFixed(1) + '°' : '—'}</td>
+              <td style="text-align:center;padding:5px 8px;color:var(--muted)">${r.battery != null ? r.battery.toFixed(2) + 'V' : '—'}</td>
+              <td style="text-align:center;padding:5px 8px;color:var(--muted)">${r.angle != null ? r.angle.toFixed(1) + '°' : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('spindle-chart-table').innerHTML =
+      '<p style="text-align:center;color:var(--danger);padding:30px 0">Erreur de chargement.</p>';
+  }
+}
+
+let _editSpindleId = null;
+
+function openSpindleModal() {
+  _editSpindleId = null;
+  document.getElementById('spindle-modal-title').textContent = 'Ajouter un densimètre';
+  document.getElementById('spin-f-name').value = '';
+  document.getElementById('spin-f-notes').value = '';
+  document.getElementById('spindle-token-section').style.display = 'none';
+  document.getElementById('spindle-save-btn').innerHTML = '<i class="fas fa-plus"></i> Créer';
+  openModal('spindle-modal');
+}
+
+function openSpindleEditModal(id) {
+  const sp = S.spindles.find(s => s.id === id);
+  if (!sp) return;
+  _editSpindleId = id;
+  document.getElementById('spindle-modal-title').textContent = `Modifier — ${sp.name}`;
+  document.getElementById('spin-f-name').value  = sp.name;
+  document.getElementById('spin-f-notes').value = sp.notes || '';
+  document.getElementById('spindle-token-section').style.display = 'none';
+  document.getElementById('spindle-save-btn').innerHTML = '<i class="fas fa-floppy-disk"></i> Enregistrer';
+  openModal('spindle-modal');
+}
+
+async function saveSpindle() {
+  const name = document.getElementById('spin-f-name').value.trim();
+  if (!name) { toast('Nom requis', 'error'); return; }
+  const notes = document.getElementById('spin-f-notes').value.trim() || null;
+
+  // ── Mode édition ──
+  if (_editSpindleId !== null) {
+    try {
+      const updated = await api('PATCH', `/api/spindles/${_editSpindleId}`, { name, notes });
+      const idx = S.spindles.findIndex(s => s.id === _editSpindleId);
+      if (idx !== -1) S.spindles[idx] = updated;
+      renderSpindles();
+      closeModal('spindle-modal');
+      toast('Densimètre mis à jour', 'success');
+    } catch(e) { toast('Erreur mise à jour', 'error'); }
+    return;
+  }
+
+  // ── Mode création ──
+  try {
+    const sp = await api('POST', '/api/spindles', { name, notes });
+    S.spindles.unshift(sp);
+    renderSpindles();
+    document.getElementById('spindle-token-display').textContent = sp.token;
+    const host = window.location.origin;
+    document.getElementById('spindle-token-url').textContent = `POST ${host}/api/spindle/data?token=${sp.token}`;
+    document.getElementById('spindle-token-section').style.display = '';
+    document.getElementById('spindle-save-btn').style.display = 'none';
+    toast('Densimètre créé', 'success');
+  } catch(e) { toast('Erreur création densimètre', 'error'); }
+}
+
+function copySpindleToken() {
+  const t = document.getElementById('spindle-token-display').textContent;
+  navigator.clipboard.writeText(t).then(() => toast('Token copié !', 'success'));
+}
+
+function showSpindleToken(spindleId) {
+  const sp = S.spindles.find(s => s.id === spindleId);
+  if (!sp) return;
+  document.getElementById('stm-spindle-name').textContent = sp.name;
+  document.getElementById('stm-token').textContent = sp.token;
+  const url = `POST ${window.location.origin}/api/spindle/data?token=${sp.token}`;
+  document.getElementById('stm-url').textContent = url;
+  openModal('spindle-token-modal');
+}
+
+function copyStmToken() {
+  const t = document.getElementById('stm-token').textContent;
+  navigator.clipboard.writeText(t).then(() => toast('Token copié !', 'success'));
+}
+
+function copyStmUrl() {
+  // Copie seulement l'URL (sans le préfixe "POST ")
+  const raw = document.getElementById('stm-url').textContent.replace(/^POST\s+/, '');
+  navigator.clipboard.writeText(raw).then(() => toast('URL copiée !', 'success'));
+}
+
+async function linkSpindleBrew(spindleId, brewId) {
+  try {
+    const updated = await api('PATCH', `/api/spindles/${spindleId}`, {
+      brew_id: brewId ? parseInt(brewId) : null,
+    });
+    const idx = S.spindles.findIndex(s => s.id === spindleId);
+    if (idx !== -1) S.spindles[idx] = updated;
+    renderSpindles();
+    toast(brewId ? 'Brassin lié' : 'Lien supprimé', 'success');
+  } catch(e) { toast('Erreur liaison brassin', 'error'); }
+}
+
+async function deleteSpindle(id) {
+  if (!confirm('Supprimer ce densimètre et toutes ses mesures ?')) return;
+  try {
+    await api('DELETE', `/api/spindles/${id}`);
+    S.spindles = S.spindles.filter(s => s.id !== id);
+    renderSpindles();
+    toast('Densimètre supprimé', 'success');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+async function openSpindleChart(spindleId) {
+  const sp = S.spindles.find(s => s.id === spindleId);
+  document.getElementById('spindle-chart-title').textContent = `Suivi — ${sp ? esc(sp.name) : ''}`;
+  openModal('spindle-chart-modal');
+
+  // Détruire tout chart existant sur ce canvas (y compris les instances orphelines)
+  if (_spindleChart) { _spindleChart.destroy(); _spindleChart = null; }
+  const _staleChart = Chart.getChart('spindle-chart-canvas');
+  if (_staleChart) _staleChart.destroy();
+  document.getElementById('spindle-chart-table').innerHTML = '';
+
+  try {
+    const readings = await api('GET', `/api/spindles/${spindleId}/readings?limit=500`);
+
+    if (!readings.length) {
+      document.getElementById('spindle-chart-table').innerHTML =
+        '<p style="text-align:center;color:var(--muted);padding:30px 0">Aucune mesure enregistrée pour ce densimètre.</p>';
+      return;
+    }
+
+    const labels = readings.map(r => fmtReadingDate(r.recorded_at));
+    const gravities = readings.map(r => r.gravity);
+    const temps     = readings.map(r => r.temperature);
+    const ptRadius  = readings.length > 60 ? 0 : 3;
+
+    const canvas = document.getElementById('spindle-chart-canvas');
+    // Forcer les dimensions pour éviter un canvas 0×0 si le modal est encore en transition
+    canvas.style.width  = '100%';
+    canvas.style.height = '100%';
+    const ctx = canvas.getContext('2d');
+    _spindleChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Gravité',
+            data: gravities,
+            borderColor: '#ff9500',
+            backgroundColor: 'rgba(255,149,0,.12)',
+            yAxisID: 'yGrav',
+            tension: 0.35,
+            pointRadius: ptRadius,
+            fill: true,
+          },
+          {
+            label: 'Température (°C)',
+            data: temps,
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59,130,246,.08)',
+            yAxisID: 'yTemp',
+            tension: 0.35,
+            pointRadius: ptRadius,
+            fill: false,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#ccc', font: { size: 12 } } },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#888', maxTicksLimit: 10, font: { size: 11 } },
+            grid:  { color: '#2a2a2a' },
+          },
+          yGrav: {
+            type: 'linear', position: 'left',
+            ticks: { color: '#ff9500', font: { size: 11 } },
+            grid:  { color: '#2a2a2a' },
+            title: { display: true, text: 'Gravité', color: '#ff9500', font: { size: 11 } },
+          },
+          yTemp: {
+            type: 'linear', position: 'right',
+            ticks: { color: '#3b82f6', font: { size: 11 } },
+            grid:  { drawOnChartArea: false },
+            title: { display: true, text: '°C', color: '#3b82f6', font: { size: 11 } },
+          },
+        },
+      },
+    });
+
+    // Tableau des 10 dernières mesures
+    const recent = readings.slice(-10).reverse();
+    document.getElementById('spindle-chart-table').innerHTML = `
+      <h4 style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">10 dernières mesures</h4>
+      <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+        <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:5px 8px">Date / Heure</th>
+          <th style="text-align:center;padding:5px 8px">Gravité</th>
+          <th style="text-align:center;padding:5px 8px">Temp. (°C)</th>
+          <th style="text-align:center;padding:5px 8px">Batterie</th>
+          <th style="text-align:center;padding:5px 8px">Angle</th>
+        </tr></thead>
+        <tbody>
+          ${recent.map(r => `
+            <tr style="border-bottom:1px solid rgba(255,255,255,.04)">
+              <td style="padding:5px 8px;color:var(--muted)">${fmtReadingDate(r.recorded_at)}</td>
+              <td style="text-align:center;padding:5px 8px;color:var(--amber);font-weight:600">${r.gravity != null ? r.gravity.toFixed(3) : '—'}</td>
+              <td style="text-align:center;padding:5px 8px;color:#3b82f6">${r.temperature != null ? r.temperature.toFixed(1) + '°' : '—'}</td>
+              <td style="text-align:center;padding:5px 8px;color:var(--muted)">${r.battery != null ? r.battery.toFixed(2) + 'V' : '—'}</td>
+              <td style="text-align:center;padding:5px 8px;color:var(--muted)">${r.angle != null ? r.angle.toFixed(1) + '°' : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  } catch(e) { toast('Erreur chargement données', 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FUSEAU HORAIRE
+// ══════════════════════════════════════════════════════════════════════════════
+function getTzOffset() {
+  return parseFloat((appSettings.tz_offset !== undefined ? appSettings.tz_offset : 0)) || 0;
+}
+function fmtReadingDate(dateStr) {
+  if (!dateStr) return '—';
+  // SQLite renvoie '2024-01-15 14:30:00' — remplacer l'espace par T pour un parsing ISO fiable
+  const d = new Date(dateStr.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return dateStr;
+  d.setHours(d.getHours() + getTzOffset());
+  return d.toLocaleString('fr-FR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+}
+function saveTzOffset() {
+  const v = parseFloat(document.getElementById('tz-offset')?.value);
+  appSettings.tz_offset = isNaN(v) ? 0 : v;
+  saveSettings();
+  renderSpindles();
+  renderBrassins();
+  toast('Fuseau horaire enregistré', 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DONNÉES DENSIMÈTRES — STATS ET PURGE
+// ══════════════════════════════════════════════════════════════════════════════
+async function loadSpindleStats() {
+  try {
+    const stats = await api('GET', '/api/spindle/readings/stats');
+    const el = document.getElementById('spin-db-stats');
+    if (!el) return;
+    const kb = Math.round((stats.db_size || 0) / 1024);
+    const size = kb > 1024 ? (kb / 1024).toFixed(1) + ' Mo' : kb + ' Ko';
+    const oldest = stats.oldest ? new Date(stats.oldest).toLocaleDateString('fr-FR') : '—';
+    el.textContent = `${(stats.total || 0).toLocaleString('fr-FR')} mesures · ${size} · depuis le ${oldest}`;
+  } catch(e) {}
+}
+
+async function purgeReadings() {
+  const days = parseInt(document.getElementById('purge-days')?.value || '30');
+  if (!confirm(`Supprimer toutes les mesures de plus de ${days} jour(s) ?`)) return;
+  try {
+    const r = await api('DELETE', `/api/spindle/readings/purge?days=${days}`);
+    toast(`${r.deleted} mesure(s) supprimée(s), ${r.remaining} restante(s)`, 'success');
+    S.spindles = await api('GET', '/api/spindles');
+    renderSpindles();
+    loadSpindleStats();
+  } catch(e) { toast('Erreur lors de la purge', 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// IMPORT / EXPORT
+// ══════════════════════════════════════════════════════════════════════════════
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+async function exportInventory() {
+  const data = await api('GET', '/api/export/inventory');
+  downloadJson(data, `inventaire_${new Date().toISOString().slice(0,10)}.json`);
+  toast('Inventaire exporté', 'success');
+}
+
+async function exportRecipes() {
+  const data = await api('GET', '/api/export/recipes');
+  downloadJson(data, `recettes_${new Date().toISOString().slice(0,10)}.json`);
+  toast('Recettes exportées', 'success');
+}
+
+function triggerImport(inputId) {
+  document.getElementById(inputId).click();
+}
+
+async function importInventory(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const data = JSON.parse(await file.text());
+  const items = Array.isArray(data) ? data : [data];
+  try {
+    const r = await api('POST', '/api/import/inventory', items);
+    toast(`${r.imported} ingrédient(s) importé(s)`, 'success');
+    S.inventory = await api('GET', '/api/inventory');
+    renderInventaire();
+  } catch(e) { toast('Erreur import inventaire', 'error'); }
+  input.value = '';
+}
+
+async function importRecipes(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const data = JSON.parse(await file.text());
+  const items = Array.isArray(data) ? data : [data];
+  try {
+    const r = await api('POST', '/api/import/recipes', items);
+    toast(`${r.imported} recette(s) importée(s)`, 'success');
+    S.recipes = await api('GET', '/api/recipes');
+    renderRecipeList();
+  } catch(e) { toast('Erreur import recettes', 'error'); }
+  input.value = '';
+}
+
+async function exportBeers() {
+  const data = await api('GET', '/api/export/beers');
+  downloadJson(data, `cave_${new Date().toISOString().slice(0,10)}.json`);
+  toast('Cave exportée', 'success');
+}
+
+async function importBeers(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const data = JSON.parse(await file.text());
+  const items = Array.isArray(data) ? data : [data];
+  try {
+    const r = await api('POST', '/api/import/beers', items);
+    toast(`${r.imported} bière(s) importée(s)`, 'success');
+    S.beers = await api('GET', '/api/beers');
+    renderCave();
+  } catch(e) { toast('Erreur import cave', 'error'); }
+  input.value = '';
+}
+
+async function exportBrews() {
+  const data = await api('GET', '/api/export/brews');
+  downloadJson(data, `brassins_${new Date().toISOString().slice(0,10)}.json`);
+  toast('Brassins exportés', 'success');
+}
+
+async function importBrews(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const data = JSON.parse(await file.text());
+  const items = Array.isArray(data) ? data : [data];
+  try {
+    const r = await api('POST', '/api/import/brews', items);
+    toast(`${r.imported} brassin(s) importé(s)`, 'success');
+    S.brews = await api('GET', '/api/brews');
+    renderBrassins();
+  } catch(e) { toast('Erreur import brassins', 'error'); }
+  input.value = '';
+}
+
+async function exportSpindles() {
+  const data = await api('GET', '/api/export/spindles');
+  downloadJson(data, `densimetres_${new Date().toISOString().slice(0,10)}.json`);
+  toast('Densimètres exportés', 'success');
+}
+
+async function importSpindles(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const data = JSON.parse(await file.text());
+  const items = Array.isArray(data) ? data : [data];
+  try {
+    const r = await api('POST', '/api/import/spindles', items);
+    toast(`${r.imported} densimètre(s) importé(s)`, 'success');
+    S.spindles = await api('GET', '/api/spindles');
+    renderSpindles();
+  } catch(e) { toast('Erreur import densimètres', 'error'); }
+  input.value = '';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WATER CORRECTION
+// ══════════════════════════════════════════════════════════════════════════════
+
+// mg of each ion contributed per gram of mineral added to 1 L
+const WC_MINERAL_FX = {
+  'Sulfate de calcium':    { ca: 232.8, mg: 0,    na: 0,     so4: 557.9,  cl: 0,     hco3: 0      },
+  'Sulfate de magnésium':  { ca: 0,     mg: 98.6, na: 0,     so4: 389.8,  cl: 0,     hco3: 0      },
+  'Chlorure de calcium':   { ca: 361.2, mg: 0,    na: 0,     so4: 0,      cl: 638.9, hco3: 0      },
+  'Chlorure de sodium':    { ca: 0,     mg: 0,    na: 393.3, so4: 0,      cl: 606.5, hco3: 0      },
+  'Carbonate de calcium':  { ca: 400.4, mg: 0,    na: 0,     so4: 0,      cl: 0,     hco3: 1218.0 },
+  'Bicarbonate de sodium': { ca: 0,     mg: 0,    na: 273.7, so4: 0,      cl: 0,     hco3: 726.4  },
+};
+
+// mL of acid needed to neutralize 1 mEq of total alkalinity
+// mEq_total = Δ_HCO3_ppm * volume_L / 61.0
+const WC_ACID_FX = {
+  'Acide lactique 80%':     0.09306,
+  'Acide lactique 88%':     0.08461,
+  'Acide phosphorique 75%': 0.08277,
+  'Acide phosphorique 85%': 0.06826,
+};
+
+// Classic water profiles (mg/L)
+const WC_PRESETS = {
+  neutre:     { ca: 0,   mg: 0,  na: 0,  so4: 0,   cl: 0,   hco3: 0   },
+  pilsen:     { ca: 7,   mg: 3,  na: 2,  so4: 5,   cl: 5,   hco3: 15  },
+  munich:     { ca: 75,  mg: 18, na: 5,  so4: 45,  cl: 40,  hco3: 200 },
+  vienne:     { ca: 200, mg: 60, na: 8,  so4: 120, cl: 12,  hco3: 120 },
+  dortmund:   { ca: 225, mg: 40, na: 60, so4: 120, cl: 60,  hco3: 180 },
+  london:     { ca: 90,  mg: 5,  na: 15, so4: 50,  cl: 50,  hco3: 140 },
+  burton:     { ca: 275, mg: 40, na: 25, so4: 610, cl: 35,  hco3: 270 },
+  dublin:     { ca: 118, mg: 12, na: 12, so4: 54,  cl: 19,  hco3: 315 },
+  edinburgh:  { ca: 100, mg: 20, na: 55, so4: 140, cl: 60,  hco3: 280 },
+  equilibre:  { ca: 75,  mg: 5,  na: 25, so4: 75,  cl: 75,  hco3: 50  },
+  ipa:        { ca: 150, mg: 10, na: 10, so4: 300, cl: 55,  hco3: 0   },
+  stout:      { ca: 100, mg: 10, na: 35, so4: 50,  cl: 75,  hco3: 300 },
+};
+
+function toggleWaterCorrection() {
+  const panel = document.getElementById('rec-wc-panel');
+  const btn   = document.getElementById('btn-wc');
+  const open  = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : '';
+  btn.classList.toggle('open', !open);
+  if (!open) renderWaterCorrection();
+}
+
+function renderWaterCorrection() {
+  const w = appSettings.water || {};
+  const srcEl = document.getElementById('wc-source-display');
+  const hasSrc = ['ca','mg','na','so4','cl','hco3'].some(k => w[k] != null && w[k] !== '');
+  if (!hasSrc) {
+    srcEl.innerHTML = '<span style="color:var(--danger)"><i class="fas fa-triangle-exclamation"></i> Aucun profil configuré — <strong>Paramètres → Eau</strong></span>';
+  } else {
+    const fmt = (v, u) => `<strong>${parseFloat(v) || 0}</strong><span style="color:var(--muted);font-size:.72rem"> ${u}</span>`;
+    srcEl.innerHTML = [
+      `pH ${fmt(w.ph, '')}`,
+      `Ca²⁺ ${fmt(w.ca, 'mg/L')}`,
+      `Mg²⁺ ${fmt(w.mg, 'mg/L')}`,
+      `Na⁺ ${fmt(w.na, 'mg/L')}`,
+      `SO₄²⁻ ${fmt(w.so4, 'mg/L')}`,
+      `Cl⁻ ${fmt(w.cl, 'mg/L')}`,
+      `HCO₃⁻ ${fmt(w.hco3, 'mg/L')}`,
+    ].join(' &nbsp;·&nbsp; ');
+  }
+  // Auto-fill volume from recipe calculation
+  const volEl = document.getElementById('wc-volume');
+  if (!volEl.value) {
+    const totalEl = document.getElementById('rw-total');
+    const v = totalEl ? parseFloat(totalEl.textContent) : NaN;
+    volEl.value = !isNaN(v) ? v.toFixed(1) : (parseFloat(document.getElementById('rec-volume')?.value) || 20);
+  }
+  calcWaterCorrection();
+}
+
+function wcPreset(name) {
+  const p = WC_PRESETS[name];
+  if (!p) return;
+  ['ca','mg','na','so4','cl','hco3'].forEach(k => {
+    const el = document.getElementById(`wc-t-${k}`);
+    if (el) el.value = p[k];
+  });
+  calcWaterCorrection();
+}
+
+function calcWaterCorrection() {
+  const vol = parseFloat(document.getElementById('wc-volume')?.value) || 0;
+  if (vol <= 0) return;
+
+  const w = appSettings.water || {};
+  const s = { ca: parseFloat(w.ca)||0, mg: parseFloat(w.mg)||0, na: parseFloat(w.na)||0,
+               so4: parseFloat(w.so4)||0, cl: parseFloat(w.cl)||0, hco3: parseFloat(w.hco3)||0 };
+
+  const readT = id => { const v = parseFloat(document.getElementById(id)?.value); return isNaN(v) ? null : v; };
+  const t = { ca: readT('wc-t-ca'), mg: readT('wc-t-mg'), na: readT('wc-t-na'),
+              so4: readT('wc-t-so4'), cl: readT('wc-t-cl'), hco3: readT('wc-t-hco3'),
+              ph: readT('wc-t-ph') };
+
+  if (!['ca','mg','na','so4','cl','hco3'].some(k => t[k] !== null)) {
+    document.getElementById('wc-results').style.display = 'none';
+    return;
+  }
+
+  const IONS = ['ca','mg','na','so4','cl','hco3'];
+  const delta = {};
+  IONS.forEach(k => { delta[k] = t[k] !== null ? t[k] - s[k] : 0; });
+
+  // Remaining deficits (minerals can only add ions, not remove)
+  const rem = {};
+  IONS.forEach(k => { rem[k] = Math.max(0, delta[k]); });
+
+  const doses = {
+    'Sulfate de magnésium': 0, 'Sulfate de calcium': 0,
+    'Chlorure de calcium':  0, 'Chlorure de sodium': 0,
+    'Bicarbonate de sodium':0, 'Carbonate de calcium': 0,
+  };
+
+  // Step 1 – Mg deficit → MgSO4 (also contributes SO4)
+  if (rem.mg > 0) {
+    const gPL = rem.mg / 98.6;
+    doses['Sulfate de magnésium'] = gPL * vol;
+    rem.so4 = Math.max(0, rem.so4 - gPL * 389.8);
+    rem.mg  = 0;
+  }
+  // Step 2 – SO4 deficit → CaSO4 (also contributes Ca)
+  if (rem.so4 > 0) {
+    const gPL = rem.so4 / 557.9;
+    doses['Sulfate de calcium'] = gPL * vol;
+    rem.ca  = Math.max(0, rem.ca - gPL * 232.8);
+    rem.so4 = 0;
+  }
+  // Step 3 – Ca deficit → CaCl2 (also contributes Cl)
+  if (rem.ca > 0) {
+    const gPL = rem.ca / 361.2;
+    doses['Chlorure de calcium'] = gPL * vol;
+    rem.cl = Math.max(0, rem.cl - gPL * 638.9);
+    rem.ca = 0;
+  }
+  // Step 4 – Cl deficit → NaCl (also contributes Na)
+  if (rem.cl > 0) {
+    const gPL = rem.cl / 606.5;
+    doses['Chlorure de sodium'] = gPL * vol;
+    rem.na = Math.max(0, rem.na - gPL * 393.3);
+    rem.cl = 0;
+  }
+  // Step 5 – HCO3 deficit: prefer NaHCO3 when Na also deficient, then CaCO3
+  if (rem.hco3 > 0) {
+    if (rem.na > 0) {
+      const use = Math.min(rem.hco3, rem.na / 273.7 * 726.4);
+      const gPL = use / 726.4;
+      doses['Bicarbonate de sodium'] = gPL * vol;
+      rem.na   = Math.max(0, rem.na - gPL * 273.7);
+      rem.hco3 -= use;
+    }
+    if (rem.hco3 > 0) {
+      doses['Carbonate de calcium'] = (rem.hco3 / 1218.0) * vol;
+      rem.hco3 = 0;
+    }
+  }
+  // Step 6 – Na still deficient → NaHCO3 (adds bonus HCO3)
+  if (rem.na > 0) {
+    doses['Bicarbonate de sodium'] += (rem.na / 273.7) * vol;
+    rem.na = 0;
+  }
+
+  // Acid for HCO3 excess (target < source → need to acidify)
+  const hco3Excess = t.hco3 !== null ? Math.max(0, s.hco3 - t.hco3) : 0;
+  const acidDoses = {};
+  if (hco3Excess > 0) {
+    const totalMeq = hco3Excess * vol / 61.0;
+    Object.entries(WC_ACID_FX).forEach(([acid, mlPerMeq]) => {
+      acidDoses[acid] = totalMeq * mlPerMeq;
+    });
+  }
+
+  // Resulting profile
+  const result = { ...s };
+  Object.entries(doses).forEach(([mineral, totalG]) => {
+    if (totalG <= 0) return;
+    const gPL = totalG / vol;
+    const fx  = WC_MINERAL_FX[mineral];
+    IONS.forEach(k => { result[k] += gPL * fx[k]; });
+  });
+  if (hco3Excess > 0) result.hco3 = Math.max(0, result.hco3 - hco3Excess);
+
+  _renderWCResults(s, t, delta, doses, acidDoses, result);
+}
+
+function _renderWCResults(s, t, delta, doses, acidDoses, result) {
+  const ION_META = [
+    { k: 'ca',   label: 'Ca²⁺'  },
+    { k: 'mg',   label: 'Mg²⁺'  },
+    { k: 'na',   label: 'Na⁺'   },
+    { k: 'so4',  label: 'SO₄²⁻' },
+    { k: 'cl',   label: 'Cl⁻'   },
+    { k: 'hco3', label: 'HCO₃⁻' },
+  ];
+
+  // ── Ion balance table ──
+  let html = `
+    <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px">Bilan ionique (mg/L)</div>
+    <div style="overflow-x:auto;margin-bottom:14px">
+    <table style="width:100%;font-size:.8rem;border-collapse:collapse;min-width:380px">
+      <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:3px 8px">Ion</th>
+        <th style="text-align:right;padding:3px 8px">Source</th>
+        <th style="text-align:right;padding:3px 8px">Cible</th>
+        <th style="text-align:right;padding:3px 8px">Δ</th>
+        <th style="text-align:right;padding:3px 8px">Résultant</th>
+      </tr></thead><tbody>`;
+
+  ION_META.forEach(({ k, label }) => {
+    const src = s[k] ?? 0;
+    const tgt = t[k];
+    const res = result[k] ?? 0;
+    const hasTgt = tgt !== null;
+    const d = hasTgt ? delta[k] : null;
+    const dStr  = d === null ? '–' : (d >= 0 ? `+${d.toFixed(0)}` : d.toFixed(0));
+    const dCol  = d === null ? '' : d > 0 ? 'color:var(--info)' : d < 0 ? 'color:var(--danger)' : '';
+    const diff  = hasTgt ? Math.abs(res - tgt) : null;
+    const resCol= diff === null ? '' : diff < 5 ? 'color:var(--success)' : diff < 15 ? 'color:var(--amber)' : 'color:var(--danger)';
+    // Warning when source already exceeds target
+    const exceeded = hasTgt && tgt !== null && src > tgt + 1;
+    html += `
+      <tr style="border-bottom:1px solid var(--border)22">
+        <td style="padding:3px 8px;font-weight:600">${label}</td>
+        <td style="text-align:right;padding:3px 8px">${src.toFixed(0)}</td>
+        <td style="text-align:right;padding:3px 8px">${hasTgt ? tgt.toFixed(0) : '–'}</td>
+        <td style="text-align:right;padding:3px 8px;${dCol}">${dStr}${exceeded ? ' <i class="fas fa-circle-exclamation" style="color:var(--amber);font-size:.7rem" title="Source dépasse la cible — dilution nécessaire"></i>' : ''}</td>
+        <td style="text-align:right;padding:3px 8px;font-weight:700;${resCol}">${res.toFixed(1)}</td>
+      </tr>`;
+  });
+
+  // SO4/Cl ratio
+  const ratioVal  = (result.cl > 0) ? result.so4 / result.cl : result.so4;
+  const ratioLbl  = ratioVal > 2 ? 'Houblons favorisés' : ratioVal < 0.5 ? 'Malts favorisés' : 'Équilibré';
+  const ratioCol  = ratioVal > 2 ? 'var(--hop)' : ratioVal < 0.5 ? 'var(--malt)' : 'var(--success)';
+  html += `
+    <tr style="border-top:1px solid var(--border);background:rgba(255,255,255,.03)">
+      <td colspan="4" style="padding:3px 8px;font-size:.74rem;color:var(--muted)">Ratio SO₄/Cl</td>
+      <td style="text-align:right;padding:3px 8px;font-weight:700;color:${ratioCol}">${ratioVal.toFixed(2)} — ${ratioLbl}</td>
+    </tr>`;
+  html += `</tbody></table></div>`;
+
+  // ── Mineral doses ──
+  const activeMinerals = Object.entries(doses).filter(([, g]) => g >= 0.05);
+  html += `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px"><i class="fas fa-flask"></i> Minéraux à ajouter</div>`;
+  if (!activeMinerals.length) {
+    html += `<p style="font-size:.8rem;color:var(--muted);font-style:italic;margin-bottom:12px">Aucun ajout minéral nécessaire.</p>`;
+  } else {
+    html += `<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">`;
+    activeMinerals.forEach(([mineral, grams]) => {
+      html += `
+        <div style="display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:5px 10px">
+          <span style="flex:1;font-size:.83rem">${mineral}</span>
+          <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${grams.toFixed(2)} g</span>
+          <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
+            onclick="wcAddToRecipe('${mineral}',${grams.toFixed(2)},'g')">
+            <i class="fas fa-plus"></i> Recette
+          </button>
+        </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // ── Acid doses ──
+  const activeAcids = Object.entries(acidDoses).filter(([, mL]) => mL >= 0.05);
+  if (activeAcids.length) {
+    html += `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--danger);margin-bottom:6px"><i class="fas fa-vial"></i> Acides pour réduire l'alcalinité — <em style="font-style:normal;color:var(--muted)">choisir un seul</em></div>`;
+    html += `<div style="display:flex;flex-direction:column;gap:5px">`;
+    activeAcids.forEach(([acid, mL]) => {
+      html += `
+        <div style="display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:5px 10px">
+          <span style="flex:1;font-size:.83rem">${acid}</span>
+          <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${mL.toFixed(1)} mL</span>
+          <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
+            onclick="wcAddToRecipe('${acid}',${mL.toFixed(1)},'mL')">
+            <i class="fas fa-plus"></i> Recette
+          </button>
+        </div>`;
+    });
+    html += `</div>`;
+  }
+
+  const div = document.getElementById('wc-results');
+  div.innerHTML = html;
+  div.style.display = 'block';
+}
+
+function wcAddToRecipe(name, qty, unit) {
+  // Update if already present, otherwise add new row
+  const existing = recIngredients.find(i => i.name === name && i.category === 'autre');
+  if (existing) {
+    existing.quantity = qty;
+    existing.unit     = unit;
+    renderIngredientRows();
+    toast(`${name} mis à jour dans les ingrédients`, 'info');
+    return;
+  }
+  const rid = ++ingRowId;
+  recIngredients.push({
+    _rid: rid, category: 'autre', inventory_item_id: null,
+    name, quantity: qty, unit,
+    hop_type: null, other_type: 'ebullition', other_time: null, notes: '',
+  });
+  renderIngredientRows();
+  toast(`${name} ajouté aux ingrédients`, 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GITHUB EXPORT
+// ══════════════════════════════════════════════════════════════════════════════
+
+function renderSettingsGithub() {
+  const gh = appSettings.github || {};
+  const v  = gh.vitrine || {};
+  const d  = gh.data    || {};
+  document.getElementById('gh-vit-repo').value   = v.repo   || '';
+  document.getElementById('gh-vit-branch').value = v.branch || 'main';
+  document.getElementById('gh-vit-pat').value    = v.pat    || '';
+  document.getElementById('gh-dat-repo').value   = d.repo   || '';
+  document.getElementById('gh-dat-branch').value = d.branch || 'main';
+  document.getElementById('gh-dat-pat').value    = d.pat    || '';
+}
+
+function saveGithubSettings() {
+  appSettings.github = {
+    vitrine: {
+      repo:   document.getElementById('gh-vit-repo').value.trim(),
+      branch: document.getElementById('gh-vit-branch').value.trim() || 'main',
+      pat:    document.getElementById('gh-vit-pat').value.trim(),
+    },
+    data: {
+      repo:   document.getElementById('gh-dat-repo').value.trim(),
+      branch: document.getElementById('gh-dat-branch').value.trim() || 'main',
+      pat:    document.getElementById('gh-dat-pat').value.trim(),
+    },
+  };
+  saveSettings();
+  toast('Config GitHub enregistrée', 'success');
+}
+
+function togglePat(inputId) {
+  const el = document.getElementById(inputId);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+// binary=true : content est déjà du base64 pur (image), pas besoin d'encoder
+async function pushToGithub(repo, pat, branch, filePath, content, message, binary = false) {
+  const base = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+  const headers = {
+    'Authorization': `Bearer ${pat}`,
+    'Accept': 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+  };
+
+  // Récupérer le SHA si le fichier existe déjà
+  let sha;
+  try {
+    const getRes = await fetch(`${base}?ref=${encodeURIComponent(branch)}`, { headers });
+    if (getRes.ok) { sha = (await getRes.json()).sha; }
+  } catch(_) {}
+
+  const encoded = binary ? content : btoa(unescape(encodeURIComponent(content)));
+  const body = { message, content: encoded, branch };
+  if (sha) body.sha = sha;
+
+  const putRes = await fetch(base, { method: 'PUT', headers, body: JSON.stringify(body) });
+  if (!putRes.ok) {
+    const err = await putRes.json().catch(() => ({ message: putRes.statusText }));
+    throw new Error(err.message || putRes.statusText);
+  }
+  return putRes.json();
+}
+
+// Extrait le base64 pur et l'extension depuis un data URL (ex: data:image/jpeg;base64,...)
+function _parsePhotoDataUrl(dataUrl) {
+  if (!dataUrl) return null;
+  const m = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/s);
+  if (!m) return null;
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  return { ext, b64: m[2] };
+}
+
+function _vEsc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _vDate(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' }); }
+  catch(_) { return iso; }
+}
+
+function generateVitrineHtml(beers, photoMap) {
+  const date   = new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' });
+  const total33 = beers.reduce((s, b) => s + (b.stock_33cl || 0), 0);
+  const total75 = beers.reduce((s, b) => s + (b.stock_75cl || 0), 0);
+
+  const cards = beers.map(b => {
+    const photo  = photoMap && photoMap[b.id];
+    const imgSrc = photo ? `images/beer-${b.id}.${photo.ext}` : null;
+    const abv    = b.abv != null ? `${parseFloat(b.abv).toFixed(1)} %` : null;
+    const s33    = b.stock_33cl  ?? 0;
+    const s75    = b.stock_75cl  ?? 0;
+    const i33    = b.initial_33cl > 0 ? b.initial_33cl : 0;
+    const i75    = b.initial_75cl > 0 ? b.initial_75cl : 0;
+    const pct33  = i33 > 0 ? Math.round(Math.min(100, s33 / i33 * 100)) : -1;
+    const pct75  = i75 > 0 ? Math.round(Math.min(100, s75 / i75 * 100)) : -1;
+
+    const cls33  = s33 === 0 ? 'zero' : pct33 >= 0 && pct33 <= 40 ? 'low' : 'ok';
+    const cls75  = s75 === 0 ? 'zero' : pct75 >= 0 && pct75 <= 40 ? 'low' : 'ok';
+
+    const stockItem = (count, label, cls, pct) => `
+      <div class="si ${cls}">
+        <div class="si-n">${count > 0 ? count : '–'}</div>
+        <div class="si-l">${label}</div>
+        ${count > 0 && pct >= 0 ? `<div class="si-bar"><div class="si-fill" style="width:${pct}%"></div></div>` : ''}
+        ${count === 0 ? `<div class="si-empty">épuisé</div>` : ''}
+      </div>`;
+
+    const brewInfo = [
+      b.brew_date     ? `🍺 Brassé le ${_vDate(b.brew_date)}`          : '',
+      b.bottling_date ? `🍾 Embouteillé le ${_vDate(b.bottling_date)}` : '',
+      b.recipe_name   ? `📋 ${_vEsc(b.recipe_name)}`                   : '',
+    ].filter(Boolean);
+
+    return `
+    <div class="card">
+      ${imgSrc
+        ? `<img class="card-img" src="${imgSrc}" loading="lazy" alt="${_vEsc(b.name)}" onclick="openLb(this,'${_vEsc(b.name)}')">`
+        : `<div class="card-img-ph">🍺</div>`}
+      <div class="card-body">
+        <div class="card-name">${_vEsc(b.name)}</div>
+        ${b.type ? `<div class="card-type">${_vEsc(b.type)}</div>` : ''}
+        ${abv    ? `<div class="card-abv">ABV <strong>${abv}</strong></div>` : ''}
+        <div class="stock-row">
+          ${stockItem(s33, '33 cl', cls33, pct33)}
+          <div class="stock-sep"></div>
+          ${stockItem(s75, '75 cl', cls75, pct75)}
+        </div>
+        ${b.origin      ? `<div class="card-origin">📍 ${_vEsc(b.origin)}</div>` : ''}
+        ${b.description ? `<p class="card-desc">${_vEsc(b.description)}</p>` : ''}
+        ${brewInfo.length ? `<div class="card-foot">${brewInfo.join('<span class="sep">·</span>')}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ma cave à bières</title>
+<style>
+:root{--bg:#0f0f0f;--card:#1a1a1a;--border:#272727;--text:#e8e0d0;--muted:#888;--amber:#f5a623;--hop:#7ec845;--info:#60a5fa}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+header{text-align:center;padding:48px 16px 28px}
+h1{font-size:2.2rem;font-weight:900;color:var(--amber);letter-spacing:-.03em;margin-bottom:6px}
+.subtitle{font-size:.85rem;color:var(--muted)}
+.stats{display:flex;justify-content:center;gap:32px;margin:22px 0 40px;flex-wrap:wrap}
+.stat-val{font-size:1.7rem;font-weight:800;color:var(--amber);line-height:1}
+.stat-lbl{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-top:3px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:22px;max-width:1200px;margin:0 auto;padding:0 16px 60px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:transform .18s,box-shadow .18s}
+.card:hover{transform:translateY(-4px);box-shadow:0 16px 48px rgba(0,0,0,.55)}
+.card-img{width:100%;height:210px;object-fit:cover;display:block;cursor:zoom-in;transition:opacity .15s}.card-img:hover{opacity:.9}
+.card-img-ph{height:110px;background:linear-gradient(135deg,#1e1e1e,#262626);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#333}
+#lb{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;cursor:zoom-out;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px}
+#lb.open{display:flex}
+#lb img{max-width:92vw;max-height:82vh;object-fit:contain;border-radius:10px;box-shadow:0 24px 80px rgba(0,0,0,.7)}
+#lb-caption{font-size:.9rem;color:#ccc;max-width:80vw;text-align:center}
+#lb-close{position:fixed;top:16px;right:20px;font-size:1.6rem;color:#aaa;cursor:pointer;background:none;border:none;line-height:1;padding:4px 8px}
+#lb-close:hover{color:#fff}
+.card-body{padding:16px;flex:1;display:flex;flex-direction:column;gap:9px}
+.card-name{font-size:1.08rem;font-weight:700;line-height:1.3}
+.card-type{font-size:.79rem;color:var(--amber);font-style:italic}
+.card-abv{font-size:.8rem;color:#999}
+.card-abv strong{color:var(--hop);font-size:.95rem}
+.stock-row{display:flex;background:#111;border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.stock-sep{width:1px;background:var(--border);flex-shrink:0}
+.si{flex:1;padding:10px 12px;display:flex;flex-direction:column;align-items:center;gap:2px}
+.si-n{font-size:2rem;font-weight:800;line-height:1}
+.si-l{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.si-bar{width:80%;height:4px;background:#2a2a2a;border-radius:2px;margin-top:5px}
+.si-fill{height:100%;border-radius:2px}
+.si-empty{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.si.ok  .si-n{color:#4ade80}.si.ok  .si-fill{background:#4ade80}
+.si.low .si-n{color:#f59e0b}.si.low .si-fill{background:#f59e0b}
+.si.zero .si-n{color:#333}.si.zero .si-empty{color:#c0392b}
+.card-origin{font-size:.75rem;color:var(--muted)}
+.card-desc{font-size:.82rem;color:#aaa;line-height:1.55;flex:1}
+.card-foot{font-size:.71rem;color:#555;display:flex;gap:6px;flex-wrap:wrap;margin-top:2px;padding-top:8px;border-top:1px solid var(--border);align-items:center}
+.sep{color:#333}
+.empty{text-align:center;color:var(--muted);padding:80px 20px;grid-column:1/-1}
+footer{text-align:center;padding:20px;font-size:.74rem;color:#444;border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🍺 Ma cave à bières</h1>
+  <div class="subtitle">Mise à jour le ${date}</div>
+  <div class="stats">
+    <div><div class="stat-val">${beers.length}</div><div class="stat-lbl">Bières</div></div>
+    <div><div class="stat-val">${total33}</div><div class="stat-lbl">Bouteilles 33 cl</div></div>
+    <div><div class="stat-val">${total75}</div><div class="stat-lbl">Bouteilles 75 cl</div></div>
+  </div>
+</header>
+<div class="grid">
+  ${beers.length ? cards : '<div class="empty">Aucune bière disponible pour le moment.</div>'}
+</div>
+<footer>Généré par BrewHome</footer>
+
+<div id="lb" onclick="closeLb()">
+  <button id="lb-close" onclick="closeLb()" title="Fermer">✕</button>
+  <img id="lb-img" src="" alt="">
+  <div id="lb-caption"></div>
+</div>
+<script>
+function openLb(el, name) {
+  document.getElementById('lb-img').src = el.src;
+  document.getElementById('lb-caption').textContent = name;
+  document.getElementById('lb').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeLb() {
+  document.getElementById('lb').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLb(); });
+<\/script>
+</body>
+</html>`;
+}
+
+async function pushVitrine() {
+  saveGithubSettings();
+  const cfg = (appSettings.github || {}).vitrine || {};
+  if (!cfg.repo || !cfg.pat) { toast('Renseignez le dépôt et le PAT vitrine', 'error'); return; }
+
+  // S'assurer que les bières sont chargées
+  if (!S.beers.length) {
+    try { S.beers = await api('GET', '/api/beers'); } catch(e) {}
+  }
+  const beers   = S.beers.filter(b => !b.archived);
+  const dateStr = new Date().toISOString().slice(0, 10);
+
+  // Construire la map des photos (id → {ext, b64})
+  const photoMap = {};
+  beers.forEach(b => {
+    const p = _parsePhotoDataUrl(b.photo);
+    if (p) photoMap[b.id] = p;
+  });
+
+  const html = generateVitrineHtml(beers, photoMap);
+  const json = JSON.stringify(beers, null, 2);
+
+  // Les fichiers sont poussés séquentiellement : chaque push crée un commit et
+  // déplace le ref de la branche ; un push parallèle recevrait un SHA périmé.
+  try {
+    const files = [
+      { path: 'index.html', content: html, msg: `vitrine: mise à jour ${dateStr}` },
+      { path: 'beers.json', content: json, msg: `vitrine: beers.json ${dateStr}` },
+      ...Object.entries(photoMap).map(([id, { ext, b64 }]) => ({
+        path: `images/beer-${id}.${ext}`, content: b64,
+        msg: `vitrine: photo bière #${id}`, binary: true,
+      })),
+    ];
+    for (const f of files) {
+      await pushToGithub(cfg.repo, cfg.pat, cfg.branch, f.path, f.content, f.msg, f.binary || false);
+    }
+    const nPhotos = Object.keys(photoMap).length;
+    toast(`Vitrine poussée ✓ — ${beers.length} bière(s)${nPhotos ? `, ${nPhotos} photo(s)` : ''}`, 'success');
+  } catch(e) {
+    toast(`Erreur vitrine : ${e.message}`, 'error');
+  }
+}
+
+async function pushGithubData() {
+  saveGithubSettings();
+  const cfg = (appSettings.github || {}).data || {};
+  if (!cfg.repo || !cfg.pat) {
+    toast('Renseignez le dépôt et le PAT données', 'error');
+    return;
+  }
+  const dateStr = new Date().toISOString().slice(0,10);
+  try {
+    // Fetch all data in parallel (pas de conflit GitHub ici)
+    const [inv, rec, brews, beers, spindles] = await Promise.all([
+      api('GET', '/api/export/inventory'),
+      api('GET', '/api/export/recipes'),
+      api('GET', '/api/export/brews'),
+      api('GET', '/api/export/beers'),
+      api('GET', '/api/export/spindles'),
+    ]);
+    // Push séquentiel pour éviter les conflits de SHA sur la même branche
+    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'inventaire.json',  JSON.stringify(inv,      null, 2), `backup: inventaire ${dateStr}`);
+    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'recettes.json',    JSON.stringify(rec,      null, 2), `backup: recettes ${dateStr}`);
+    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'brassins.json',    JSON.stringify(brews,    null, 2), `backup: brassins ${dateStr}`);
+    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'cave.json',        JSON.stringify(beers,    null, 2), `backup: cave ${dateStr}`);
+    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'densimetres.json', JSON.stringify(spindles, null, 2), `backup: densimètres ${dateStr}`);
+    toast('Données poussées sur GitHub ✓ (inventaire, recettes, brassins, cave, densimètres)', 'success');
+  } catch(e) {
+    toast(`Erreur données : ${e.message}`, 'error');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THÈME
+// ══════════════════════════════════════════════════════════════════════════════
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('brewhome-theme', next);
+  _updateThemeBtn(next);
+}
+function _updateThemeBtn(theme) {
+  const btn = document.getElementById('btn-theme');
+  if (!btn) return;
+  if (theme === 'light') {
+    btn.innerHTML = '<i class="fas fa-moon"></i>';
+    btn.title = 'Passer en thème sombre';
+  } else {
+    btn.innerHTML = '<i class="fas fa-sun"></i>';
+    btn.title = 'Passer en thème clair';
+  }
+}
+
+// UTILS
+// ══════════════════════════════════════════════════════════════════════════════
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════════
+(async () => {
+  // Appliquer le thème sauvegardé et mettre à jour le bouton
+  const savedTheme = localStorage.getItem('brewhome-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+  _updateThemeBtn(savedTheme);
+
+  await loadAll();
+  clearRecipeForm();
+  // Set today's date for brew
+  document.getElementById('brew-f-date').value = new Date().toISOString().split('T')[0];
+})();
+</script>
+</body>
+</html>

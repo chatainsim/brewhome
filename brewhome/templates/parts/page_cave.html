@@ -1,0 +1,19 @@
+<div class="page" id="page-cave">
+  <div class="section-head">
+    <h2>Ma cave à bières</h2>
+    <div class="actions">
+      <button class="btn btn-ghost btn-sm" id="cave-arch-btn" onclick="toggleShowArchived('cave')"></button>
+      <input type="text" id="cave-search" placeholder="🔍 Rechercher..." style="width:220px" oninput="renderCave()">
+      <button class="btn btn-primary" onclick="openBeerModal()"><i class="fas fa-plus"></i> Ajouter</button>
+    </div>
+  </div>
+
+  <div class="grid-4" style="margin-bottom:20px" id="cave-stats"></div>
+
+  <div class="beer-grid" id="cave-grid"></div>
+  <div class="empty" id="cave-empty" style="display:none"><i class="fas fa-beer-mug-empty"></i><p>Votre cave est vide</p></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PAGE : DENSIMÈTRES
+═══════════════════════════════════════════════════════════════════════════ -->

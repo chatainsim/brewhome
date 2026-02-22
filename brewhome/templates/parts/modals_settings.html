@@ -1,0 +1,291 @@
+<div class="modal-overlay" id="modal-settings" onclick="if(event.target===this)closeSettings()">
+  <div class="modal modal-lg">
+    <div class="modal-head">
+      <h3><i class="fas fa-gear" style="color:var(--amber)"></i> Paramètres avancés</h3>
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Onglets -->
+      <div class="stabs">
+        <button class="stab active" data-tab="catalogue" onclick="settingsTab('catalogue')"><i class="fas fa-book"></i> Catalogue</button>
+        <button class="stab" data-tab="thresholds" onclick="settingsTab('thresholds')"><i class="fas fa-gauge-high"></i> Seuils</button>
+        <button class="stab" data-tab="water" onclick="settingsTab('water')"><i class="fas fa-droplet"></i> Eau</button>
+        <button class="stab" data-tab="import" onclick="settingsTab('import')"><i class="fas fa-file-import"></i> Import / Export</button>
+        <button class="stab" data-tab="github" onclick="settingsTab('github')"><i class="fa-brands fa-github"></i> GitHub</button>
+      </div>
+
+      <!-- TAB CATALOGUE -->
+      <div id="stab-catalogue">
+        <div class="cat-chips" id="settings-cat-chips">
+          <button class="cat-chip active" data-cat="malt" onclick="renderSettingsCatalog('malt')" style="color:var(--malt);border-color:var(--malt)"><i class="fas fa-seedling"></i> Malts</button>
+          <button class="cat-chip" data-cat="houblon" onclick="renderSettingsCatalog('houblon')" style="color:var(--hop)"><i class="fas fa-leaf"></i> Houblons</button>
+          <button class="cat-chip" data-cat="levure" onclick="renderSettingsCatalog('levure')" style="color:var(--yeast)"><i class="fas fa-flask"></i> Levures</button>
+          <button class="cat-chip" data-cat="autre" onclick="renderSettingsCatalog('autre')" style="color:var(--other)"><i class="fas fa-box"></i> Autres</button>
+        </div>
+        <div class="catalog-list" id="settings-catalog-list"></div>
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+          <div style="font-weight:700;margin-bottom:12px;font-size:.9rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Ajouter au catalogue</div>
+          <div class="form-row cols-2" style="margin-bottom:10px">
+            <div class="field"><label>Nom <span class="req">*</span></label><input type="text" id="scat-name" placeholder="Ex : Maris Otter"></div>
+            <div class="field"><label>Sous-catégorie</label><input type="text" id="scat-sub" placeholder="Ex : Base, Aromatique…"></div>
+          </div>
+          <div class="form-row cols-3" style="margin-bottom:10px">
+            <div class="field" id="scat-ebc-wrap"><label>EBC</label><input type="number" id="scat-ebc" step="0.1" placeholder="Ex : 6.5"></div>
+            <div class="field" id="scat-maxpct-wrap" style="display:none"><label>% max recette</label><input type="number" id="scat-maxpct" step="1" min="0" max="100" placeholder="Ex : 15"></div>
+            <div class="field" id="scat-alpha-wrap" style="display:none"><label>Alpha (%)</label><input type="number" id="scat-alpha" step="0.1" placeholder="Ex : 12.5"></div>
+            <div class="field" id="scat-ytype-wrap" style="display:none"><label>Type levure</label><input type="text" id="scat-ytype" placeholder="Ex : Ale, Lager…"></div>
+            <div class="field"><label>Unité défaut</label>
+              <select id="scat-unit"><option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="mL">mL</option><option value="unité">unité</option></select>
+            </div>
+          </div>
+          <!-- Champs spécifiques levure -->
+          <div id="scat-yeast-wrap" style="display:none;margin-bottom:10px">
+            <div class="form-row cols-3" style="margin-bottom:8px">
+              <div class="field"><label>T° min ferment. (°C)</label><input type="number" id="scat-tmin" step="0.5" placeholder="Ex : 18"></div>
+              <div class="field"><label>T° max ferment. (°C)</label><input type="number" id="scat-tmax" step="0.5" placeholder="Ex : 22"></div>
+              <div class="field"><label>Dosage (g/L)</label><input type="number" id="scat-dosage" step="0.01" placeholder="Ex : 0.5"></div>
+            </div>
+            <div class="form-row cols-3">
+              <div class="field"><label>Atténuation min (%)</label><input type="number" id="scat-attmin" step="1" placeholder="Ex : 72"></div>
+              <div class="field"><label>Atténuation max (%)</label><input type="number" id="scat-attmax" step="1" placeholder="Ex : 80"></div>
+              <div class="field"><label>Tolérance alcool (%)</label><input type="number" id="scat-alctol" step="0.5" placeholder="Ex : 12"></div>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addCatalogItem()"><i class="fas fa-plus"></i> Ajouter</button>
+        </div>
+      </div>
+
+      <!-- TAB SEUILS DE STOCK -->
+      <div id="stab-thresholds" style="display:none">
+        <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px">Définissez à partir de quelle quantité un ingrédient passe en "stock faible" (affiché en orange). Les valeurs sont en grammes pour les poudres, ou ajustez selon votre unité de référence.</p>
+        <div class="thresh-row">
+          <span class="thresh-lbl" style="color:var(--malt)"><i class="fas fa-seedling"></i> Malts</span>
+          <input type="number" id="thresh-malt" value="1000" min="0" step="100" style="width:110px">
+          <span style="font-size:.9rem;color:var(--muted)">g</span>
+          <span class="thresh-hint">= 1 kg — en dessous de cette valeur, le stock est signalé en orange</span>
+        </div>
+        <div class="thresh-row">
+          <span class="thresh-lbl" style="color:var(--hop)"><i class="fas fa-leaf"></i> Houblons</span>
+          <input type="number" id="thresh-houblon" value="50" min="0" step="10" style="width:110px">
+          <span style="font-size:.9rem;color:var(--muted)">g</span>
+          <span class="thresh-hint">Seuil d'alerte en grammes</span>
+        </div>
+        <div class="thresh-row">
+          <span class="thresh-lbl" style="color:var(--yeast)"><i class="fas fa-flask"></i> Levures</span>
+          <input type="number" id="thresh-levure" value="2" min="0" step="1" style="width:110px">
+          <span style="font-size:.9rem;color:var(--muted)">sachet(s)</span>
+          <span class="thresh-hint">Nombre de sachets en dessous duquel le stock est signalé en orange</span>
+        </div>
+        <div class="thresh-row" style="align-items:flex-start">
+          <span class="thresh-lbl" style="color:var(--other);padding-top:6px"><i class="fas fa-box"></i> Autres</span>
+          <div style="flex:1">
+            <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Seuil par unité — laisser vide pour désactiver l'alerte sur cette unité</p>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <label style="width:52px;font-size:.85rem;color:var(--muted)">g</label>
+                <input type="number" id="tau-g"      min="0" step="1"    placeholder="—" style="width:80px">
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <label style="width:52px;font-size:.85rem;color:var(--muted)">kg</label>
+                <input type="number" id="tau-kg"     min="0" step="0.1"  placeholder="—" style="width:80px">
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <label style="width:52px;font-size:.85rem;color:var(--muted)">mL</label>
+                <input type="number" id="tau-mL"     min="0" step="1"    placeholder="—" style="width:80px">
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <label style="width:52px;font-size:.85rem;color:var(--muted)">L</label>
+                <input type="number" id="tau-L"      min="0" step="0.1"  placeholder="—" style="width:80px">
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <label style="width:52px;font-size:.85rem;color:var(--muted)">pièce(s)</label>
+                <input type="number" id="tau-pièce"  min="0" step="1"    placeholder="—" style="width:80px">
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <label style="width:52px;font-size:.85rem;color:var(--muted)">sachet(s)</label>
+                <input type="number" id="tau-sachet" min="0" step="1"    placeholder="—" style="width:80px">
+              </div>
+            </div>
+          </div>
+      </div>
+      </div><!-- /stab-thresholds -->
+
+      <!-- TAB EAU -->
+      <div id="stab-water" style="display:none">
+        <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px">Profil de votre eau de brassage. Ces données sont utilisées à titre indicatif et pour estimer le coût de l'eau dans le calcul de recette.</p>
+
+        <!-- Prix -->
+        <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-euro-sign"></i> Coût</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <label style="font-size:.88rem;color:var(--muted);white-space:nowrap">Prix au litre</label>
+            <input type="number" id="water-price" min="0" step="0.0001" placeholder="Ex : 0.003" style="width:120px">
+            <span style="font-size:.85rem;color:var(--muted)">€/L</span>
+            <span style="font-size:.78rem;color:var(--muted)">(inclus dans le coût matières de la recette)</span>
+          </div>
+        </div>
+
+        <!-- Profil minéral -->
+        <div>
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-flask"></i> Profil minéral (mg/L)</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+            <div class="field"><label>pH</label><input type="number" id="water-ph" min="0" max="14" step="0.1" placeholder="Ex : 7.2"></div>
+            <div class="field"><label>Ca²⁺ (mg/L)</label><input type="number" id="water-ca" min="0" step="1" placeholder="Ex : 80"></div>
+            <div class="field"><label>Mg²⁺ (mg/L)</label><input type="number" id="water-mg" min="0" step="1" placeholder="Ex : 10"></div>
+            <div class="field"><label>Na⁺ (mg/L)</label><input type="number" id="water-na" min="0" step="1" placeholder="Ex : 20"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+            <div class="field"><label>SO₄²⁻ (mg/L)</label><input type="number" id="water-so4" min="0" step="1" placeholder="Ex : 60"></div>
+            <div class="field"><label>Cl⁻ (mg/L)</label><input type="number" id="water-cl" min="0" step="1" placeholder="Ex : 50"></div>
+            <div class="field"><label>HCO₃⁻ (mg/L)</label><input type="number" id="water-hco3" min="0" step="1" placeholder="Ex : 120"></div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px">
+          <button class="btn btn-primary btn-sm" onclick="saveWaterSettings()"><i class="fas fa-floppy-disk"></i> Enregistrer</button>
+        </div>
+      </div>
+
+      <!-- TAB IMPORT / EXPORT -->
+      <div id="stab-import" style="display:none">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px">
+
+          <!-- Inventaire -->
+          <div style="background:rgba(217,119,6,.06);border:1px solid rgba(217,119,6,.2);border-radius:10px;padding:14px">
+            <h4 style="font-size:.82rem;font-weight:700;margin-bottom:12px;color:var(--malt);text-transform:uppercase;letter-spacing:.05em"><i class="fas fa-boxes-stacked"></i> Inventaire</h4>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="exportInventory()"><i class="fas fa-file-export"></i> Exporter (JSON)</button>
+              <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-inv-file')"><i class="fas fa-file-import"></i> Importer (JSON)</button>
+              <input type="file" id="import-inv-file" accept=".json" style="display:none" onchange="importInventory(this)">
+              <p style="font-size:.72rem;color:var(--muted);margin:0">Ingrédients avec name, category, quantity, unit…</p>
+            </div>
+          </div>
+
+          <!-- Recettes -->
+          <div style="background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:14px">
+            <h4 style="font-size:.82rem;font-weight:700;margin-bottom:12px;color:var(--hop);text-transform:uppercase;letter-spacing:.05em"><i class="fas fa-scroll"></i> Recettes</h4>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="exportRecipes()"><i class="fas fa-file-export"></i> Exporter (JSON)</button>
+              <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-rec-file')"><i class="fas fa-file-import"></i> Importer (JSON)</button>
+              <input type="file" id="import-rec-file" accept=".json" style="display:none" onchange="importRecipes(this)">
+              <p style="font-size:.72rem;color:var(--muted);margin:0">Recettes avec name, ingredients[]…</p>
+            </div>
+          </div>
+
+          <!-- Cave -->
+          <div style="background:rgba(255,149,0,.06);border:1px solid rgba(255,149,0,.2);border-radius:10px;padding:14px">
+            <h4 style="font-size:.82rem;font-weight:700;margin-bottom:12px;color:var(--amber);text-transform:uppercase;letter-spacing:.05em"><i class="fas fa-beer-mug-empty"></i> Cave</h4>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="exportBeers()"><i class="fas fa-file-export"></i> Exporter (JSON)</button>
+              <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-beer-file')"><i class="fas fa-file-import"></i> Importer (JSON)</button>
+              <input type="file" id="import-beer-file" accept=".json" style="display:none" onchange="importBeers(this)">
+              <p style="font-size:.72rem;color:var(--muted);margin:0">Bières avec name, type, abv, stocks…</p>
+            </div>
+          </div>
+
+          <!-- Brassins -->
+          <div style="background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:14px">
+            <h4 style="font-size:.82rem;font-weight:700;margin-bottom:12px;color:var(--danger);text-transform:uppercase;letter-spacing:.05em"><i class="fas fa-fire-burner"></i> Brassins</h4>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="exportBrews()"><i class="fas fa-file-export"></i> Exporter (JSON)</button>
+              <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-brew-file')"><i class="fas fa-file-import"></i> Importer (JSON)</button>
+              <input type="file" id="import-brew-file" accept=".json" style="display:none" onchange="importBrews(this)">
+              <p style="font-size:.72rem;color:var(--muted);margin:0">Brassins avec fermentation[], recette liée par nom.</p>
+            </div>
+          </div>
+
+          <!-- Densimètres -->
+          <div style="background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:10px;padding:14px">
+            <h4 style="font-size:.82rem;font-weight:700;margin-bottom:12px;color:var(--info);text-transform:uppercase;letter-spacing:.05em"><i class="fas fa-water"></i> Densimètres</h4>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="exportSpindles()"><i class="fas fa-file-export"></i> Exporter (JSON)</button>
+              <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-spindle-file')"><i class="fas fa-file-import"></i> Importer (JSON)</button>
+              <input type="file" id="import-spindle-file" accept=".json" style="display:none" onchange="importSpindles(this)">
+              <p style="font-size:.72rem;color:var(--muted);margin:0">Densimètres avec readings[], nouveau token généré.</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- TAB GITHUB -->
+      <div id="stab-github" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+
+          <!-- VITRINE -->
+          <div>
+            <h4 style="font-size:.9rem;font-weight:700;margin-bottom:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">
+              <i class="fas fa-globe" style="color:var(--amber)"></i> Vitrine (GitHub Pages)
+            </h4>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div class="field">
+                <label>Dépôt <span style="font-size:.78rem;color:var(--muted)">(owner/repo)</span></label>
+                <input type="text" id="gh-vit-repo" placeholder="ex : monpseudo/ma-vitrine">
+              </div>
+              <div class="field">
+                <label>Branche</label>
+                <input type="text" id="gh-vit-branch" placeholder="main" value="main">
+              </div>
+              <div class="field">
+                <label>Personal Access Token</label>
+                <div style="display:flex;gap:6px">
+                  <input type="password" id="gh-vit-pat" placeholder="ghp_…" style="flex:1">
+                  <button class="btn btn-ghost btn-sm btn-icon" onclick="togglePat('gh-vit-pat')" title="Afficher/masquer"><i class="fas fa-eye"></i></button>
+                </div>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="pushVitrine()">
+                <i class="fa-brands fa-github"></i> Pousser la vitrine
+              </button>
+              <p style="font-size:.73rem;color:var(--muted);margin:0">Pousse <code>index.html</code> + <code>beers.json</code> vers ce dépôt.</p>
+            </div>
+          </div>
+
+          <!-- DONNÉES -->
+          <div>
+            <h4 style="font-size:.9rem;font-weight:700;margin-bottom:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">
+              <i class="fas fa-database" style="color:var(--info)"></i> Données (backup)
+            </h4>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div class="field">
+                <label>Dépôt <span style="font-size:.78rem;color:var(--muted)">(owner/repo)</span></label>
+                <input type="text" id="gh-dat-repo" placeholder="ex : monpseudo/mes-donnees">
+              </div>
+              <div class="field">
+                <label>Branche</label>
+                <input type="text" id="gh-dat-branch" placeholder="main" value="main">
+              </div>
+              <div class="field">
+                <label>Personal Access Token</label>
+                <div style="display:flex;gap:6px">
+                  <input type="password" id="gh-dat-pat" placeholder="ghp_…" style="flex:1">
+                  <button class="btn btn-ghost btn-sm btn-icon" onclick="togglePat('gh-dat-pat')" title="Afficher/masquer"><i class="fas fa-eye"></i></button>
+                </div>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="pushGithubData()">
+                <i class="fa-brands fa-github"></i> Pousser les données
+              </button>
+              <div style="font-size:.73rem;color:var(--muted);line-height:1.6">
+                Pousse les fichiers suivants vers ce dépôt :
+                <ul style="margin:4px 0 0 14px;padding:0">
+                  <li><code>inventaire.json</code> — stocks ingrédients</li>
+                  <li><code>recettes.json</code> — recettes &amp; ingrédients</li>
+                  <li><code>brassins.json</code> — brassins &amp; fermentation</li>
+                  <li><code>cave.json</code> — bières en cave</li>
+                  <li><code>densimetres.json</code> — densimètres &amp; lectures</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /stab-github -->
+
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeSettings()">Fermer</button>
+      <button class="btn btn-primary" id="settings-save-btn" onclick="saveThresholds()" style="display:none"><i class="fas fa-floppy-disk"></i> Enregistrer les seuils</button>
+      <button class="btn btn-success" id="github-save-btn" onclick="saveGithubSettings()" style="display:none"><i class="fas fa-floppy-disk"></i> Enregistrer la config GitHub</button>
+    </div>
+  </div>
+</div>
+

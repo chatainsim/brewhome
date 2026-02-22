@@ -1,0 +1,20 @@
+<div class="page" id="page-brassins">
+  <div class="section-head">
+    <h2>Sessions de brassage</h2>
+    <div class="actions">
+      <button class="btn btn-ghost btn-sm" id="brew-arch-btn" onclick="toggleShowArchived('brew')"></button>
+      <button class="btn btn-primary" onclick="openModal('brew-modal')"><i class="fas fa-fire-burner"></i> Lancer un brassin</button>
+    </div>
+  </div>
+
+  <div class="grid-4" style="margin-bottom:20px" id="brew-stats"></div>
+
+  <div class="card">
+    <div id="brew-list"></div>
+    <div class="empty" id="brew-empty"><i class="fas fa-fire-burner"></i><p>Aucun brassin enregistré</p></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PAGE : CAVE
+═══════════════════════════════════════════════════════════════════════════ -->

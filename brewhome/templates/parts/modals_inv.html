@@ -1,0 +1,44 @@
+
+<!-- Modal Inventaire -->
+<div class="modal-overlay" id="inv-modal" onclick="if(event.target===this)closeModal('inv-modal')">
+  <div class="modal">
+    <div class="modal-head"><h3 id="inv-modal-title">Ajouter un ingrédient</h3><button class="modal-close" onclick="closeModal('inv-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row cols-2">
+        <div class="field" style="position:relative">
+          <label>Nom <span class="req">*</span></label>
+          <input type="text" id="inv-f-name" placeholder="Ex : Pilsner Malt" autocomplete="off"
+            oninput="invNameSuggest(this)" onfocus="invNameSuggest(this)" onblur="setTimeout(()=>closeInvSuggest(),200)">
+          <div id="inv-name-sug" class="ing-suggest"></div>
+        </div>
+        <div class="field"><label>Catégorie <span class="req">*</span></label>
+          <select id="inv-f-cat" onchange="invCatChange()">
+            <option value="malt">Malt</option><option value="houblon">Houblon</option>
+            <option value="levure">Levure</option><option value="autre">Autre</option>
+          </select></div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="field"><label>Quantité</label><input type="number" id="inv-f-qty" value="0" min="0" step="0.001"></div>
+        <div class="field"><label>Unité</label>
+          <select id="inv-f-unit">
+            <option value="kg">kg</option><option value="g">g</option>
+            <option value="L">L</option><option value="ml">ml</option>
+            <option value="sachet">sachet</option><option value="pièce">pièce</option>
+          </select></div>
+      </div>
+      <div class="form-row cols-3">
+        <div class="field" id="inv-f-ebc-wrap"><label>EBC (couleur)</label><input type="number" id="inv-f-ebc" step="0.5" placeholder="Ex : 5"></div>
+        <div class="field" id="inv-f-alpha-wrap" style="display:none"><label>Alpha acides (%)</label><input type="number" id="inv-f-alpha" step="0.1" placeholder="Ex : 10.5"></div>
+        <div class="field"><label>Origine / Producteur</label><input type="text" id="inv-f-origin" placeholder="Ex : Belgique, Weyermann..."></div>
+        <div class="field"><label id="inv-f-price-lbl">Prix (€/kg)</label><input type="number" id="inv-f-price" step="0.01" min="0" placeholder="Ex : 2.50"></div>
+      </div>
+      <div class="field"><label>Notes</label><textarea id="inv-f-notes" placeholder="Variété, profil aromatique..."></textarea></div>
+      <input type="hidden" id="inv-f-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('inv-modal')">Annuler</button>
+      <button class="btn btn-primary" onclick="saveInventoryItem()"><i class="fas fa-floppy-disk"></i> Enregistrer</button>
+    </div>
+  </div>
+</div>
+

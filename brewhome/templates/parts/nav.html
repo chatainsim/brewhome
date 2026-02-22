@@ -1,0 +1,31 @@
+
+<!-- ══ NAV ══════════════════════════════════════════════════════════════════ -->
+<nav>
+  <div class="nav-brand">Brew<span>Home</span></div>
+  <div class="nav-links">
+    <button class="nav-btn active" onclick="navigate('inventaire')" id="nav-inventaire">
+      <i class="fas fa-boxes-stacked"></i> Inventaire <span class="nav-badge" id="nb-inv">0</span>
+    </button>
+    <button class="nav-btn" onclick="navigate('recettes')" id="nav-recettes">
+      <i class="fas fa-scroll"></i> Recettes <span class="nav-badge" id="nb-rec">0</span>
+    </button>
+    <button class="nav-btn" onclick="navigate('brassins')" id="nav-brassins">
+      <i class="fas fa-fire-burner"></i> Brassins <span class="nav-badge" id="nb-bra">0</span>
+    </button>
+    <button class="nav-btn" onclick="navigate('cave')" id="nav-cave">
+      <i class="fas fa-beer-mug-empty"></i> Cave <span class="nav-badge" id="nb-cav">0</span>
+    </button>
+    <button class="nav-btn" onclick="navigate('spindles')" id="nav-spindles">
+      <i class="fas fa-water"></i> Densimètres <span class="nav-badge" id="nb-spin">0</span>
+    </button>
+  </div>
+  <div style="display:flex;gap:2px;margin-left:auto">
+    <button class="nav-btn" id="btn-theme" onclick="toggleTheme()" style="padding:8px 14px;color:var(--muted)">
+      <i class="fas fa-sun"></i>
+    </button>
+    <button class="nav-btn" onclick="openSettings()" title="Paramètres avancés" style="padding:8px 14px;color:var(--muted)">
+      <i class="fas fa-gear"></i>
+    </button>
+  </div>
+</nav>
+
