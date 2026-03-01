@@ -22,15 +22,17 @@
       <button class="filter-tab" data-cat="levure" onclick="setInvFilter('levure',this)">Levure</button>
       <button class="filter-tab" data-cat="autre" onclick="setInvFilter('autre',this)">Autre</button>
     </div>
+    <div class="inv-table-wrap">
     <table id="inv-table">
       <thead>
         <tr>
-          <th>Ingrédient</th><th>Catégorie</th><th>Origine</th>
-          <th>Specs</th><th style="text-align:right">Quantité</th><th style="text-align:right">Actions</th>
+          <th style="width:18px"></th><th>Ingrédient</th><th>Catégorie</th><th class="col-hide-sm">Origine</th>
+          <th class="col-hide-sm">Specs</th><th style="text-align:right">Quantité</th><th style="text-align:right">Actions</th>
         </tr>
       </thead>
       <tbody id="inv-body"></tbody>
     </table>
+    </div>
     <div class="empty" id="inv-empty" style="display:none">
       <i class="fas fa-box-open"></i><p>Aucun ingrédient en stock</p>
     </div>

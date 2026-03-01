@@ -2,7 +2,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════════════════════════════
-const S = { inventory: [], recipes: [], brews: [], beers: [], catalog: [], bjcp: [], spindles: [] };
+const S = { inventory: [], recipes: [], brews: [], beers: [], catalog: [], bjcp: [], spindles: [], tempSensors: [] };
 let invFilter = 'all';
 let showArchivedInv=false, showArchivedRec=false, showArchivedBrew=false, showArchivedCave=false;
 let appSettings = JSON.parse(localStorage.getItem('brewSettings') || '{}');
@@ -25,6 +25,67 @@ let recViewMode  = 'edit'; // 'view' | 'edit'
 let recIngredients = []; // [{id,category,inventory_item_id,name,quantity,unit,...}]
 let _invSugItems = []; // cache for inventory suggest clicks
 let _rSugItems   = []; // cache for recipe ingredient suggest clicks
+
+// ══════════════════════════════════════════════════════════════════════════════
+// I18N
+// ══════════════════════════════════════════════════════════════════════════════
+const LOCALES = {
+  fr: {
+    _meta: { name: 'Français', flag: '🇫🇷', code: 'fr' },
+    nav: { inventaire: 'Inventaire', recettes: 'Recettes', brassins: 'Brassins', cave: 'Cave', spindles: 'Capteurs' },
+    cat: { all: 'Tous', malt: 'Malt', houblon: 'Houblon', levure: 'Levure', autre: 'Autre',
+           malts: 'Malts', houblons: 'Houblons', levures: 'Levures', autres: 'Autres' },
+    settings: { tabs: { catalogue: 'Catalogue', thresholds: 'Seuils', water: 'Eau', import: 'Import / Export', github: 'GitHub', lang: 'Langue' } },
+    lang: {
+      title: 'Langue & Traductions',
+      current: 'Langue active',
+      contribute: 'Contribuer une traduction',
+      export_template: 'Exporter le modèle (JSON)',
+      import_translation: 'Importer une traduction (JSON)',
+      import_hint: 'Importez un fichier JSON pour ajouter une langue temporairement (session en cours). Le fichier doit avoir la même structure que le modèle exporté.',
+    },
+    inv:  { title: 'Inventaire', add: 'Ajouter un ingrédient', col_ingredient: 'Ingrédient', col_qty: 'Quantité', col_unit: 'Unité', col_cat: 'Catégorie', col_actions: 'Actions', show_archived: 'Voir archivés', hide_archived: 'Masquer archivés', low_stock: 'Stock faible' },
+    rec:  { title: 'Recettes' },
+    brew: { title: 'Brassins' },
+    cave: { title: 'Cave' },
+    spin: { title: 'Capteurs' },
+  },
+  en: {
+    _meta: { name: 'English', flag: '🇬🇧', code: 'en' },
+    nav: { inventaire: 'Inventory', recettes: 'Recipes', brassins: 'Brews', cave: 'Cellar', spindles: 'Sensors' },
+    cat: { all: 'All', malt: 'Malt', houblon: 'Hop', levure: 'Yeast', autre: 'Other',
+           malts: 'Malts', houblons: 'Hops', levures: 'Yeasts', autres: 'Others' },
+    settings: { tabs: { catalogue: 'Catalogue', thresholds: 'Thresholds', water: 'Water', import: 'Import / Export', github: 'GitHub', lang: 'Language' } },
+    lang: {
+      title: 'Language & Translations',
+      current: 'Active language',
+      contribute: 'Contribute a translation',
+      export_template: 'Export template (JSON)',
+      import_translation: 'Import a translation (JSON)',
+      import_hint: 'Import a JSON file to temporarily add a language (current session). The file must follow the same structure as the exported template.',
+    },
+    inv:  { title: 'Inventory', add: 'Add an ingredient', col_ingredient: 'Ingredient', col_qty: 'Quantity', col_unit: 'Unit', col_cat: 'Category', col_actions: 'Actions', show_archived: 'Show archived', hide_archived: 'Hide archived', low_stock: 'Low stock' },
+    rec:  { title: 'Recipes' },
+    brew: { title: 'Brews' },
+    cave: { title: 'Cellar' },
+    spin: { title: 'Hydrometers' },
+  },
+};
+
+let _lang   = localStorage.getItem('brewLang') || 'fr';
+let _locale = LOCALES[_lang] || LOCALES.fr;
+
+function t(key, fallback) {
+  const val = key.split('.').reduce((o, k) => o?.[k], _locale);
+  return val ?? fallback ?? key;
+}
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const val = t(el.dataset.i18n, el.textContent);
+    el.textContent = val;
+  });
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // API
@@ -61,17 +122,22 @@ async function _refreshPage(page) {
       S.recipes = await api('GET', '/api/recipes');
       renderRecipeList();
     } else if (page === 'brassins') {
-      [S.brews, S.spindles] = await Promise.all([
+      [S.brews, S.spindles, S.tempSensors] = await Promise.all([
         api('GET', '/api/brews'),
         api('GET', '/api/spindles'),
+        api('GET', '/api/temperature'),
       ]);
       renderBrassins();
     } else if (page === 'cave') {
       S.beers = await api('GET', '/api/beers');
       renderCave();
     } else if (page === 'spindles') {
-      S.spindles = await api('GET', '/api/spindles');
+      [S.spindles, S.tempSensors] = await Promise.all([
+        api('GET', '/api/spindles'),
+        api('GET', '/api/temperature'),
+      ]);
       renderSpindles();
+      renderTempSensors();
     }
     const stats = await api('GET', '/api/stats');
     updateNavBadges(stats);
@@ -123,17 +189,22 @@ function openSettings() {
 function closeSettings() { document.getElementById('modal-settings').classList.remove('open'); }
 
 function settingsTab(tab) {
-  document.querySelectorAll('#modal-settings .stab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('#modal-settings .stab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.getElementById('stab-catalogue').style.display  = tab === 'catalogue'  ? '' : 'none';
   document.getElementById('stab-thresholds').style.display = tab === 'thresholds' ? '' : 'none';
   document.getElementById('stab-water').style.display      = tab === 'water'      ? '' : 'none';
   document.getElementById('stab-import').style.display     = tab === 'import'     ? '' : 'none';
   document.getElementById('stab-github').style.display     = tab === 'github'     ? '' : 'none';
-  document.getElementById('settings-save-btn').style.display = tab === 'thresholds' ? '' : 'none';
-  document.getElementById('github-save-btn').style.display   = tab === 'github'     ? '' : 'none';
+  document.getElementById('stab-lang').style.display       = tab === 'lang'       ? '' : 'none';
+  document.getElementById('stab-apparence').style.display  = tab === 'apparence'  ? '' : 'none';
+  document.getElementById('settings-save-btn').style.display  = tab === 'thresholds' ? '' : 'none';
+  document.getElementById('github-save-btn').style.display    = tab === 'github'     ? '' : 'none';
+  document.getElementById('apparence-save-btn').style.display = tab === 'apparence'  ? '' : 'none';
   if (tab === 'thresholds') renderSettingsThresholds();
   if (tab === 'water')      renderSettingsWater();
   if (tab === 'github')     renderSettingsGithub();
+  if (tab === 'lang')       renderSettingsLang();
+  if (tab === 'apparence')  renderSettingsApparence();
 }
 
 function renderSettingsCatalog(cat) {
@@ -324,7 +395,156 @@ function renderSettingsWater() {
     const el = document.getElementById(`water-${k}`);
     if (el) el.value = w[k] != null ? w[k] : '';
   });
+  const gasEl  = document.getElementById('energy-gas');
+  if (gasEl)  gasEl.value  = appSettings.energy?.gas_per_brew  != null ? appSettings.energy.gas_per_brew  : '';
+  const elecEl = document.getElementById('energy-elec');
+  if (elecEl) elecEl.value = appSettings.energy?.elec_per_brew != null ? appSettings.energy.elec_per_brew : '';
+  // Restaurer la sélection HubEau
+  const hub = appSettings.hubeau || {};
+  const deptEl = document.getElementById('hubeau-dept');
+  if (deptEl && hub.dept) {
+    deptEl.value = hub.dept;
+    hubEauDeptChange(hub.commune || null);
+  }
 }
+
+// ══ HubEau – récupération automatique profil eau ═══════════════════════════
+
+const HUBEAU_PARAMS = [
+  { code: '1302', field: 'water-ph',   label: 'pH',           unit: '',      convert: v => Math.round(v * 10) / 10 },
+  { code: '1374', field: 'water-ca',   label: 'Calcium',      unit: 'mg/L',  convert: v => Math.round(v) },
+  { code: '1372', field: 'water-mg',   label: 'Magnésium',    unit: 'mg/L',  convert: v => Math.round(v) },
+  { code: '1337', field: 'water-cl',   label: 'Chlorures',    unit: 'mg/L',  convert: v => Math.round(v) },
+  { code: '1338', field: 'water-so4',  label: 'Sulfates',     unit: 'mg/L',  convert: v => Math.round(v) },
+  // 1347 = TAC (Titre Alcalimétrique Complet) en °f → HCO₃⁻ mg/L (×12.2)
+  { code: '1347', field: 'water-hco3', label: 'Bicarbonates (via TAC)', unit: 'mg/L', convert: v => Math.round(v * 12.2) },
+];
+
+async function hubEauDeptChange(preselect) {
+  const dept = document.getElementById('hubeau-dept').value;
+  const communeEl = document.getElementById('hubeau-commune');
+  const fetchBtn  = document.getElementById('hubeau-fetch-btn');
+  document.getElementById('hubeau-result').style.display = 'none';
+  communeEl.disabled = true;
+  fetchBtn.disabled  = true;
+  communeEl.innerHTML = '<option value="">— Commune —</option>';
+  if (!dept) { appSettings.hubeau = {}; saveSettings(); return; }
+  // Sauvegarder le département (conserver la commune si on est en cours de restauration)
+  appSettings.hubeau = { ...(appSettings.hubeau || {}), dept, commune: preselect || null };
+  saveSettings();
+  communeEl.innerHTML = '<option value="">Chargement…</option>';
+  try {
+    const url = `https://hubeau.eaufrance.fr/api/v1/qualite_eau_potable/resultats_dis?code_departement=${encodeURIComponent(dept)}&code_parametre=1302&size=5000&fields=code_commune,nom_commune`;
+    const json = await fetch(url).then(r => r.json());
+    const seen = new Set();
+    const communes = (json.data || []).filter(c => {
+      if (!c.nom_commune || seen.has(c.code_commune)) return false;
+      seen.add(c.code_commune); return true;
+    }).sort((a, b) => a.nom_commune.localeCompare(b.nom_commune, 'fr'));
+    if (!communes.length) {
+      communeEl.innerHTML = '<option value="">Aucune commune trouvée</option>';
+      return;
+    }
+    communeEl.innerHTML = '<option value="">— Commune —</option>' +
+      communes.map(c => `<option value="${c.code_commune}">${c.nom_commune}</option>`).join('');
+    // Restaurer la commune sauvegardée si elle est dans la liste
+    if (preselect && communes.some(c => c.code_commune === preselect)) {
+      communeEl.value = preselect;
+      fetchBtn.disabled = false;
+    }
+    communeEl.disabled = false;
+    communeEl.onchange = () => {
+      const code = communeEl.value;
+      fetchBtn.disabled = !code;
+      document.getElementById('hubeau-result').style.display = 'none';
+      // Sauvegarder la commune sélectionnée
+      appSettings.hubeau = { ...(appSettings.hubeau || {}), commune: code || null };
+      saveSettings();
+    };
+  } catch (e) {
+    communeEl.innerHTML = '<option value="">Erreur de chargement</option>';
+  }
+}
+
+async function hubEauFetch() {
+  const commune = document.getElementById('hubeau-commune').value;
+  if (!commune) return;
+  const btn = document.getElementById('hubeau-fetch-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Chargement…';
+  const resultDiv = document.getElementById('hubeau-result');
+  resultDiv.style.display = 'none';
+  try {
+    const BASE = 'https://hubeau.eaufrance.fr/api/v1/qualite_eau_potable/resultats_dis';
+    const fetched = {};
+    await Promise.all(HUBEAU_PARAMS.map(async p => {
+      const url = `${BASE}?code_commune=${commune}&code_parametre=${p.code}&size=1&fields=resultat_numerique,date_prelevement`;
+      const json = await fetch(url).then(r => r.json());
+      if (json.data && json.data.length > 0) {
+        const d = json.data[0];
+        if (d.resultat_numerique != null) {
+          fetched[p.code] = { raw: d.resultat_numerique, date: (d.date_prelevement || '').slice(0, 10) };
+        }
+      }
+    }));
+
+    if (!Object.keys(fetched).length) {
+      resultDiv.innerHTML = `<p style="font-size:.85rem;color:var(--muted)"><i class="fas fa-circle-info"></i> Aucune donnée minérale trouvée pour cette commune dans HubEau.</p>`;
+    } else {
+      let rows = '';
+      HUBEAU_PARAMS.forEach(p => {
+        if (!fetched[p.code]) return;
+        const converted = p.convert(fetched[p.code].raw);
+        const curRaw    = document.getElementById(p.field)?.value;
+        const current   = curRaw !== '' && curRaw != null ? parseFloat(curRaw) : null;
+        const changed   = current === null || current !== converted;
+        rows += `<tr data-field="${p.field}" data-value="${converted}">
+          <td style="padding:5px 8px;font-size:.83rem">${p.label}</td>
+          <td style="padding:5px 8px;font-size:.83rem;color:var(--muted)">${current !== null ? current + (p.unit ? ' ' + p.unit : '') : '—'}</td>
+          <td style="padding:5px 8px;font-size:.83rem;font-weight:${changed ? '700' : '400'};color:${changed ? 'var(--success)' : 'inherit'}">${converted}${p.unit ? ' ' + p.unit : ''}</td>
+          <td style="padding:5px 8px;font-size:.78rem;color:var(--muted)">${fetched[p.code].date}</td>
+          <td style="padding:5px 8px;text-align:center"><input type="checkbox" class="hubeau-chk" ${changed ? 'checked' : ''} style="width:15px;height:15px;cursor:pointer"></td>
+        </tr>`;
+      });
+      resultDiv.innerHTML = `
+        <p style="font-size:.78rem;color:var(--muted);margin-bottom:8px"><i class="fas fa-circle-info"></i> Les valeurs en vert diffèrent de vos saisies actuelles. Cochez celles à appliquer.</p>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
+          <thead>
+            <tr style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">
+              <th style="padding:4px 8px;text-align:left;font-weight:600">Paramètre</th>
+              <th style="padding:4px 8px;text-align:left;font-weight:600">Actuel</th>
+              <th style="padding:4px 8px;text-align:left;font-weight:600">HubEau</th>
+              <th style="padding:4px 8px;text-align:left;font-weight:600">Date</th>
+              <th style="padding:4px 8px;text-align:center;font-weight:600">Appliquer</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary btn-sm" onclick="hubEauApply()"><i class="fas fa-check"></i> Appliquer la sélection</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('hubeau-result').style.display='none'">Fermer</button>
+        </div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<p style="font-size:.85rem;color:var(--danger)"><i class="fas fa-triangle-exclamation"></i> Erreur lors de la récupération : ${e.message}</p>`;
+  }
+  resultDiv.style.display = 'block';
+  btn.disabled  = false;
+  btn.innerHTML = '<i class="fas fa-satellite-dish"></i> Récupérer';
+}
+
+function hubEauApply() {
+  document.querySelectorAll('#hubeau-result tr[data-field]').forEach(row => {
+    const chk = row.querySelector('.hubeau-chk');
+    if (chk && chk.checked) {
+      const input = document.getElementById(row.dataset.field);
+      if (input) input.value = row.dataset.value;
+    }
+  });
+  document.getElementById('hubeau-result').style.display = 'none';
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 
 function saveWaterSettings() {
   const w = {};
@@ -333,8 +553,14 @@ function saveWaterSettings() {
     w[k] = v !== '' && v != null ? parseFloat(v) : null;
   });
   appSettings.water = w;
+  const gasVal  = document.getElementById('energy-gas')?.value;
+  const elecVal = document.getElementById('energy-elec')?.value;
+  appSettings.energy = {
+    gas_per_brew:  gasVal  !== '' && gasVal  != null ? parseFloat(gasVal)  : null,
+    elec_per_brew: elecVal !== '' && elecVal != null ? parseFloat(elecVal) : null,
+  };
   saveSettings();
-  toast('Profil eau enregistré', 'success');
+  toast('Paramètres eau & énergie enregistrés', 'success');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -347,7 +573,7 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 // LOAD ALL DATA
 // ══════════════════════════════════════════════════════════════════════════════
 async function loadAll() {
-  const [inv, rec, bra, beerList, stats, catalog, bjcp, spindles] = await Promise.all([
+  const [inv, rec, bra, beerList, stats, catalog, bjcp, spindles, tempSensors, serverAppSettings] = await Promise.all([
     api('GET', '/api/inventory'),
     api('GET', '/api/recipes'),
     api('GET', '/api/brews'),
@@ -356,20 +582,28 @@ async function loadAll() {
     api('GET', '/api/catalog'),
     api('GET', '/api/bjcp'),
     api('GET', '/api/spindles'),
+    api('GET', '/api/temperature'),
+    api('GET', '/api/app-settings').catch(() => ({})),
   ]);
-  S.inventory = inv;
-  S.recipes   = rec;
-  S.brews     = bra;
-  S.beers     = beerList;
-  S.catalog   = catalog;
-  S.bjcp      = bjcp;
-  S.spindles  = spindles;
+  // Fusionner les paramètres d'apparence depuis le serveur (priorité sur localStorage)
+  if (serverAppSettings.app_name     != null) appSettings.appName     = serverAppSettings.app_name     || null;
+  if (serverAppSettings.accent_color != null) appSettings.accentColor = serverAppSettings.accent_color || null;
+  if (serverAppSettings.app_icon     != null) appSettings.appIcon     = serverAppSettings.app_icon     || null;
+  S.inventory    = inv;
+  S.recipes      = rec;
+  S.brews        = bra;
+  S.beers        = beerList;
+  S.catalog      = catalog;
+  S.bjcp         = bjcp;
+  S.spindles     = spindles;
+  S.tempSensors  = tempSensors;
   updateNavBadges(stats);
   renderInventaire();
   renderRecipeList();
   renderBrassins();
   renderCave();
   renderSpindles();
+  renderTempSensors();
 }
 
 function updateNavBadges(stats) {
@@ -382,7 +616,7 @@ function updateNavBadges(stats) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── INVENTAIRE ───────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function catLabel(c) { return {malt:'Malt',houblon:'Houblon',levure:'Levure',autre:'Autre'}[c] || c; }
+function catLabel(c) { return t('cat.' + c, {malt:'Malt',houblon:'Houblon',levure:'Levure',autre:'Autre'}[c] || c); }
 
 function renderInventaire() {
   const filtered = S.inventory.filter(i => invFilter === 'all' || i.category === invFilter);
@@ -420,11 +654,12 @@ function renderInventaire() {
     const qtyColor = isEmpty ? 'var(--danger)' : isLow ? '#f59e0b' : 'var(--text)';
     const archIcon = item.archived ? 'box-open' : 'box-archive';
     tbody.insertAdjacentHTML('beforeend', `
-      <tr class="${item.archived ? 'archived-item' : ''}">
+      <tr class="inv-row ${item.archived ? 'archived-item' : ''}" draggable="true" data-id="${item.id}">
+        <td class="inv-drag-handle"><i class="fas fa-grip-vertical"></i></td>
         <td><strong>${esc(item.name)}</strong>${item.notes ? `<div style="font-size:.78rem;color:var(--muted)">${esc(item.notes)}</div>` : ''}</td>
         <td><span class="badge badge-${item.category}">${catLabel(item.category)}</span></td>
-        <td style="color:var(--muted);font-size:.85rem">${esc(item.origin||'')}</td>
-        <td>${specs.join(' ')}</td>
+        <td class="col-hide-sm" style="color:var(--muted);font-size:.85rem">${esc(item.origin||'')}</td>
+        <td class="col-hide-sm">${specs.join(' ')}</td>
         <td style="text-align:right">
           <div style="display:inline-flex;align-items:center;gap:6px">
             <div class="qty-ctrl">
@@ -444,6 +679,36 @@ function renderInventaire() {
           </div>
         </td>
       </tr>`);
+  });
+
+  // Drag-and-drop reorder
+  let invDragSrcIdx = null;
+  tbody.querySelectorAll('tr.inv-row').forEach((row, idx) => {
+    row.addEventListener('dragstart', e => {
+      invDragSrcIdx = idx;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(idx));
+    });
+    row.addEventListener('dragend', () => { row.classList.remove('dragging'); invDragSrcIdx = null; });
+    row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('drag-over'); });
+    row.addEventListener('dragleave', e => { if (!row.contains(e.relatedTarget)) row.classList.remove('drag-over'); });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      if (invDragSrcIdx === null || invDragSrcIdx === idx) return;
+      const srcIdx = invDragSrcIdx;
+      const [moved] = shown.splice(srcIdx, 1);
+      shown.splice(idx, 0, moved);
+      // Mettre à jour sort_order dans S.inventory ET retrier le tableau
+      shown.forEach((item, i) => {
+        const si = S.inventory.findIndex(x => x.id === item.id);
+        if (si !== -1) S.inventory[si].sort_order = i;
+      });
+      S.inventory.sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+      saveInvOrder();
+      renderInventaire();
+    });
   });
 
   // Stats (active only)
@@ -471,6 +736,13 @@ function renderInventaire() {
     const archCount = S.inventory.filter(i => i.archived).length;
     archBtn.textContent = showArchivedInv ? 'Masquer archives' : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
   }
+}
+
+async function saveInvOrder() {
+  try {
+    await api('PUT', '/api/inventory/reorder',
+      S.inventory.map(item => ({ id: item.id, sort_order: item.sort_order ?? 9999 })));
+  } catch(e) { toast('Erreur sauvegarde ordre', 'error'); }
 }
 
 function setInvFilter(cat, btn) {
@@ -680,6 +952,10 @@ function recipeCost(r) {
     const c = ingCost(ing);
     if (c !== null) { total += c; has = true; }
   });
+  const gas  = parseFloat(appSettings.energy?.gas_per_brew)  || 0;
+  const elec = parseFloat(appSettings.energy?.elec_per_brew) || 0;
+  if (gas  > 0) { total += gas;  has = true; }
+  if (elec > 0) { total += elec; has = true; }
   return has ? total : null;
 }
 
@@ -753,8 +1029,12 @@ function renderRecipeList() {
         statusHtml = `<span style="font-size:.72rem;color:var(--muted);font-style:italic"><i class="fas fa-circle-info"></i> Aucun brassin actif · Pas de stock</span>`;
       }
 
+      const dragHandle = recSort === 'recent'
+        ? `<span class="rec-drag-handle" onclick="event.stopPropagation()" title="Glisser pour réorganiser"><i class="fas fa-grip-vertical"></i></span>`
+        : '';
       return `
-      <div class="recipe-item ${r.archived?'archived-item':''} ${recEditingId===r.id?'active':''}" onclick="loadRecipeForm(${r.id})">
+      <div class="recipe-item ${r.archived?'archived-item':''} ${recEditingId===r.id?'active':''}" data-id="${r.id}" ${recSort==='recent'?'draggable="true"':''} onclick="loadRecipeForm(${r.id})">
+        ${dragHandle}
         <div style="min-width:0;flex:1">
           <div class="recipe-item-name">${esc(r.name)}</div>
           <div class="recipe-item-meta" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -778,6 +1058,52 @@ function renderRecipeList() {
     const archCount = arch.length;
     archWrap.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="toggleShowArchived('rec')">${showArchivedRec ? 'Masquer archives' : '\uD83D\uDDC3\uFE0F Archives (' + archCount + ')'}</button>`;
   }
+
+  // ── Drag & drop reorder (mode "Récent" uniquement) ──
+  if (recSort === 'recent') {
+    let dragSrcIdx = null;
+    c.querySelectorAll('.recipe-item[draggable]').forEach((item, idx) => {
+      item.addEventListener('dragstart', e => {
+        dragSrcIdx = idx;
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      item.addEventListener('dragend', () => {
+        item.classList.remove('dragging');
+        c.querySelectorAll('.recipe-item').forEach(el => el.classList.remove('drag-over'));
+      });
+      item.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        c.querySelectorAll('.recipe-item').forEach(el => el.classList.remove('drag-over'));
+        if (dragSrcIdx !== idx) item.classList.add('drag-over');
+      });
+      item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+      item.addEventListener('drop', e => {
+        e.preventDefault();
+        if (dragSrcIdx === null || dragSrcIdx === idx) return;
+        // Reorder within shown list (active only or active+archived)
+        const items = [...c.querySelectorAll('.recipe-item[draggable]')];
+        const movedId = parseInt(items[dragSrcIdx].dataset.id);
+        const targetId = parseInt(items[idx].dataset.id);
+        const mi = S.recipes.findIndex(r => r.id === movedId);
+        const ti = S.recipes.findIndex(r => r.id === targetId);
+        if (mi === -1 || ti === -1) return;
+        const [moved] = S.recipes.splice(mi, 1);
+        S.recipes.splice(ti, 0, moved);
+        dragSrcIdx = null;
+        saveRecipeOrder();
+        renderRecipeList();
+      });
+    });
+  }
+}
+
+async function saveRecipeOrder() {
+  try {
+    await api('PUT', '/api/recipes/reorder',
+      S.recipes.map((r, i) => ({ id: r.id, sort_order: i })));
+  } catch(e) { toast('Erreur sauvegarde ordre', 'error'); }
 }
 
 function clearRecipeForm() {
@@ -873,10 +1199,13 @@ function recCalc() {
   document.getElementById('rw-preboil').textContent= fmtL(preboil);
   document.getElementById('rw-total').textContent  = hasGrain ? fmtL(totalWater) : '–';
   calcBrewStats();
-  // Sync water correction panel volume if open
-  if (hasGrain && document.getElementById('rec-wc-panel')?.style.display !== 'none') {
-    const wcVol = document.getElementById('wc-volume');
-    if (wcVol) { wcVol.value = totalWater.toFixed(1); calcWaterCorrection(); }
+  // Sync water correction panel volumes (always)
+  if (hasGrain) {
+    const wcMash   = document.getElementById('wc-volume-mash');
+    const wcSparge = document.getElementById('wc-volume-sparge');
+    if (wcMash)   wcMash.value   = mashWater.toFixed(1);
+    if (wcSparge) wcSparge.value = sparge.toFixed(1);
+    if (document.getElementById('rec-wc-panel')?.style.display !== 'none') calcWaterCorrection();
   }
 }
 
@@ -985,7 +1314,7 @@ function renderIngredientRows() {
       }
       if (cat === 'autre') {
         const ot = ing.other_type || 'ebullition';
-        const OTHER_LABELS = {empatage:'Empâtage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
+        const OTHER_LABELS = {empatage:'Empâtage',sparge:'Eau de rinçage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
         const needsMinutes = ot === 'ebullition' || ot === 'whirlpool';
         const needsDays    = ot === 'dryhop';
         const timeField = needsMinutes ? `
@@ -1319,7 +1648,7 @@ function renderRecipeView() {
   }
 
   // Levures + Autres
-  const OTHER_TYPE_LABELS = {empatage:'Empâtage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
+  const OTHER_TYPE_LABELS = {empatage:'Empâtage',sparge:'Eau de rinçage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
   let otherHtml = '';
   [{ cat: 'levure', label: 'Levures', color: 'var(--yeast)' }, { cat: 'autre', label: 'Autres', color: 'var(--other)' }].forEach(({ cat, label, color }) => {
     const items = recIngredients.filter(i => i.category === cat);
@@ -1559,7 +1888,7 @@ function printRecipe() {
   ['malt','houblon','levure','autre'].forEach(cat => {
     const items = (r.ingredients || []).filter(i => i.category === cat);
     if (!items.length) return;
-    const PRINT_OT_LABELS = {empatage:'Empâtage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
+    const PRINT_OT_LABELS = {empatage:'Empâtage',sparge:'Eau de rinçage',ebullition:'Ébullition',flameout:'Flameout',whirlpool:'Whirlpool',dryhop:'Dry Hop',fermentation:'Fermentation',packaging:'Mise en bouteille'};
     let cols = '<th>Ingrédient</th><th>Qté</th>';
     if (cat === 'malt')    cols += '<th style="text-align:right">%</th><th>EBC</th>';
     if (cat === 'houblon') cols += '<th>Alpha</th><th>Type</th><th>Durée</th>';
@@ -1711,9 +2040,12 @@ function renderBrassins() {
     };
 
     const _brewCardHtml = b => {
-      const sp = S.spindles.find(s => s.brew_id === b.id);
+      const sp  = S.spindles.find(s => s.brew_id === b.id);
+      const ts  = S.tempSensors.find(s => s.brew_id === b.id);
       let spindleHtml = '';
       let spindleBtn  = '';
+      let tempBadge   = '';
+      let tempBtn     = '';
       if (sp) {
         const gravStr = sp.last_gravity    != null ? sp.last_gravity.toFixed(3)    : null;
         const tempStr = sp.last_temperature != null ? sp.last_temperature.toFixed(1) : null;
@@ -1729,8 +2061,22 @@ function renderBrassins() {
           </div>`;
         spindleBtn = `<button class="btn btn-ghost btn-sm btn-icon" onclick="openSpindleChart(${sp.id})" title="Graphique densimètre — ${esc(sp.name)}"><i class="fas fa-water" style="color:var(--info)"></i></button>`;
       }
+      if (ts) {
+        const tVal = ts.last_temperature != null ? ts.last_temperature.toFixed(1) + '°C' : null;
+        const ago  = _spindleAgo(ts.last_reading_at);
+        const isLive = ts.last_reading_at && (Date.now() - new Date(ts.last_reading_at).getTime()) < 3_600_000;
+        tempBadge = `
+          <div class="brew-spindle-badge" style="border-color:#ef444440">
+            ${isLive ? '<span class="bsb-live" style="background:#ef4444"></span>' : '<i class="fas fa-thermometer-half" style="color:#ef4444;font-size:.75rem"></i>'}
+            <span style="color:var(--muted);font-size:.78rem">${esc(ts.name)}</span>
+            ${tVal ? `<span class="bsb-temp" style="color:#ef4444">${tVal}</span>` : ''}
+            ${ago ? `<span class="bsb-ago">${ago}</span>` : ''}
+          </div>`;
+        tempBtn = `<button class="btn btn-ghost btn-sm btn-icon" onclick="openTempChart(${ts.id})" title="Graphique température — ${esc(ts.name)}"><i class="fas fa-thermometer-half" style="color:#ef4444"></i></button>`;
+      }
       return `
-      <div class="brew-card ${b.archived ? 'archived-item' : ''}">
+      <div class="brew-card ${b.archived ? 'archived-item' : ''}" data-id="${b.id}" draggable="true">
+        <span class="brew-drag-handle" title="Glisser pour réorganiser"><i class="fas fa-grip-vertical"></i></span>
         <div class="brew-card-info">
           <div class="brew-card-name">${esc(b.name)}</div>
           <div class="brew-card-meta">
@@ -1741,10 +2087,10 @@ function renderBrassins() {
             ${b.og ? ` · OG ${b.og}` : ''}${b.fg ? ` → FG ${b.fg}` : ''}
           </div>
           ${b.notes ? `<div style="font-size:.78rem;color:var(--muted);margin-top:4px">${esc(b.notes)}</div>` : ''}
-          ${spindleHtml}
+          ${spindleHtml}${tempBadge}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
-          ${spindleBtn}
+          ${spindleBtn}${tempBtn}
           ${b.fermentation_count > 0 ? `<button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewFermentationChart(${b.id})" title="Historique fermentation (${b.fermentation_count} mesures)"><i class="fas fa-chart-line" style="color:var(--info)"></i></button>` : ''}
           ${b.status === 'completed' ? `<button class="btn btn-sm btn-success" onclick="openAfterBrewModal(${b.id})" title="Ajouter à la cave"><i class="fas fa-beer-mug-empty"></i> Mettre en cave</button>` : ''}
           <button class="btn btn-icon btn-ghost btn-sm" onclick="archiveItem('brew',${b.id},${b.archived?0:1})" title="${b.archived?'Désarchiver':'Archiver'}"><i class="fas fa-${b.archived?'box-open':'box-archive'}"></i></button>
@@ -1779,6 +2125,51 @@ function renderBrassins() {
     const archCount = arch.length;
     archBtn.textContent = showArchivedBrew ? 'Masquer archives' : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
   }
+
+  // ── Drag & drop reorder (within each status group) ──
+  list.querySelectorAll('.brew-group').forEach(group => {
+    group.querySelectorAll('.brew-card[draggable]').forEach(card => {
+      card.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', card.dataset.id);
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => card.classList.add('dragging'), 0);
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        group.querySelectorAll('.brew-card').forEach(c => c.classList.remove('drag-over'));
+      });
+      card.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        group.querySelectorAll('.brew-card').forEach(c => c.classList.remove('drag-over'));
+        const srcId = parseInt(e.dataTransfer.getData('text/plain'));
+        if (srcId !== parseInt(card.dataset.id)) card.classList.add('drag-over');
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+      card.addEventListener('drop', e => {
+        e.preventDefault();
+        const srcId = parseInt(e.dataTransfer.getData('text/plain'));
+        const tgtId = parseInt(card.dataset.id);
+        if (!srcId || srcId === tgtId) return;
+        const mi = S.brews.findIndex(b => b.id === srcId);
+        const ti = S.brews.findIndex(b => b.id === tgtId);
+        if (mi === -1 || ti === -1) return;
+        // Only reorder within the same status group
+        if (S.brews[mi].status !== S.brews[ti].status) return;
+        const [moved] = S.brews.splice(mi, 1);
+        S.brews.splice(ti, 0, moved);
+        saveBrewOrder();
+        renderBrassins();
+      });
+    });
+  });
+}
+
+async function saveBrewOrder() {
+  try {
+    await api('PUT', '/api/brews/reorder',
+      S.brews.map((b, i) => ({ id: b.id, sort_order: i })));
+  } catch(e) { toast('Erreur sauvegarde ordre', 'error'); }
 }
 
 function openBrewModal() {
@@ -2095,7 +2486,8 @@ function renderCave() {
     }
 
     return `
-      <div class="beer-card ${b.archived ? 'archived-item' : ''}">
+      <div class="beer-card ${b.archived ? 'archived-item' : ''}" data-id="${b.id}" draggable="true" style="position:relative">
+        <span class="beer-drag-handle" title="Glisser pour réorganiser"><i class="fas fa-grip-vertical"></i></span>
         ${photoHtml}
         <div class="beer-body">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;cursor:pointer" onclick="openBeerDetail(${b.id})">
@@ -2109,12 +2501,15 @@ function renderCave() {
           </div>
           ${priceHtml}
           ${b.description ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:8px;line-height:1.4">${esc(b.description).substring(0,100)}${b.description.length>100?'…':''}</div>` : ''}
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-icon btn-ghost btn-sm" onclick="archiveItem('cave',${b.id},${b.archived?0:1})" title="${b.archived?'Désarchiver':'Archiver'}"><i class="fas fa-${b.archived?'box-open':'box-archive'}"></i></button>
+          <div style="display:flex;gap:5px;margin-bottom:5px">
+            <button class="btn btn-sm btn-ghost" onclick="adjustStock(${b.id},-1,0)" title="−1 bouteille 33cl" style="flex:1"><i class="fas fa-minus"></i> 33cl</button>
+            <button class="btn btn-sm btn-ghost" onclick="adjustStock(${b.id},0,-1)" title="−1 bouteille 75cl" style="flex:1"><i class="fas fa-minus"></i> 75cl</button>
+          </div>
+          <div style="display:flex;gap:5px">
             <button class="btn btn-sm btn-ghost" onclick="editBeer(${b.id})" style="flex:1"><i class="fas fa-pen"></i> Modifier</button>
-            <button class="btn btn-sm btn-ghost" onclick="adjustStock(${b.id},-1,0)" title="−1 bouteille 33cl"><i class="fas fa-minus"></i> 33</button>
-            <button class="btn btn-sm btn-ghost" onclick="adjustStock(${b.id},0,-1)" title="−1 bouteille 75cl"><i class="fas fa-minus"></i> 75</button>
-            <button class="btn btn-icon btn-danger btn-sm" onclick="deleteBeer(${b.id})"><i class="fas fa-trash"></i></button>
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="archiveItem('cave',${b.id},${b.archived?0:1})" title="${b.archived?'Désarchiver':'Archiver'}"><i class="fas fa-${b.archived?'box-open':'box-archive'}"></i></button>
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="event.stopPropagation();printBeerLabel(${b.id})" title="Imprimer étiquette"><i class="fas fa-tag"></i></button>
+            <button class="btn btn-icon btn-danger btn-sm" onclick="deleteBeer(${b.id})" title="Supprimer"><i class="fas fa-trash"></i></button>
           </div>
         </div>
       </div>`;
@@ -2146,6 +2541,55 @@ function renderCave() {
     const archCount = arch.length;
     archBtn.textContent = showArchivedCave ? 'Masquer archives' : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
   }
+
+  // ── Drag & drop reorder (within same stock group) ──
+  const hasStockIds = new Set(hasStock.map(b => b.id));
+  const noStockIds  = new Set(noStock.map(b => b.id));
+
+  grid.querySelectorAll('.beer-card[draggable]').forEach(card => {
+    card.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', card.dataset.id);
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => card.classList.add('dragging'), 0);
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      grid.querySelectorAll('.beer-card').forEach(c => c.classList.remove('drag-over'));
+    });
+    card.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      grid.querySelectorAll('.beer-card').forEach(c => c.classList.remove('drag-over'));
+      const srcId = parseInt(e.dataTransfer.getData('text/plain'));
+      if (srcId !== parseInt(card.dataset.id)) card.classList.add('drag-over');
+    });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      const srcId = parseInt(e.dataTransfer.getData('text/plain'));
+      const tgtId = parseInt(card.dataset.id);
+      if (!srcId || srcId === tgtId) return;
+      // Only reorder within same group (en stock ↔ en stock, épuisée ↔ épuisée)
+      const sameGroup = (hasStockIds.has(srcId) && hasStockIds.has(tgtId))
+                     || (noStockIds.has(srcId)   && noStockIds.has(tgtId))
+                     || (!needSplit);
+      if (!sameGroup) return;
+      const mi = S.beers.findIndex(b => b.id === srcId);
+      const ti = S.beers.findIndex(b => b.id === tgtId);
+      if (mi === -1 || ti === -1) return;
+      const [moved] = S.beers.splice(mi, 1);
+      S.beers.splice(ti, 0, moved);
+      saveCaveOrder();
+      renderCave();
+    });
+  });
+}
+
+async function saveCaveOrder() {
+  try {
+    await api('PUT', '/api/beers/reorder',
+      S.beers.map((b, i) => ({ id: b.id, sort_order: i })));
+  } catch(e) { toast('Erreur sauvegarde ordre', 'error'); }
 }
 
 function openBeerLightbox(id) {
@@ -2233,6 +2677,10 @@ function openBeerDetail(id) {
     const metaEl = get('bd-meta');
     if (metaEl) metaEl.innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
 
+    // Bouton Étiquette
+    const printBtn = get('bd-print-btn');
+    if (printBtn) printBtn.onclick = () => printBeerLabel(id);
+
     // Bouton Modifier
     const editBtn = get('bd-edit-btn');
     if (editBtn) editBtn.onclick = () => { closeModal('beer-detail-modal'); editBeer(id); };
@@ -2270,6 +2718,102 @@ function openBeerModal(beer = null) {
 }
 
 function editBeer(id) { openBeerModal(S.beers.find(b => b.id === id)); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── ÉTIQUETTES ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+let _labelBeerId = null;
+
+function printBeerLabel(id) {
+  _labelBeerId = id;
+  document.getElementById('label-copies').value = 1;
+  renderLabelPreview();
+  openModal('label-modal');
+}
+
+function _buildOneLabelHtml(b, recipe) {
+  const accentColor = appSettings.accentColor || '#ff9500';
+  // Calcule si le texte doit être noir ou blanc selon la luminosité du fond
+  const _lum = hex => { const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return (0.299*r+0.587*g+0.114*b)/255; };
+  const headerTextColor = _lum(accentColor) > 0.55 ? '#111' : '#fff';
+  const fmtDate = d => d ? d.split('-').reverse().join('/') : null;
+  const fmtQty = i => esc(i.name) + (i.hop_type === 'dryhop' ? ' <span style="color:#888;font-style:italic">(DH)</span>' : '');
+
+  // Ingrédients groupés (Autres : seulement sucre, miel, lactose)
+  const AUTRES_LABEL = ['sucre', 'miel', 'lactose', 'épice', 'epice', 'cannelle', 'coriandre', 'gingembre', 'vanille', 'cardamome', 'poivre', 'cumin', 'anis', 'muscade', 'piment', 'zeste'];
+  let ingHtml = '';
+  if (recipe && recipe.ingredients && recipe.ingredients.length) {
+    const groups = [
+      { cat: 'malt',    label: 'Malts',    filter: null },
+      { cat: 'houblon', label: 'Houblons', filter: null },
+      { cat: 'autre',   label: 'Autres',   filter: i => AUTRES_LABEL.some(k => i.name.toLowerCase().includes(k)) },
+    ];
+    groups.forEach(({ cat, label, filter }) => {
+      let items = recipe.ingredients.filter(i => i.category === cat);
+      if (filter) items = items.filter(filter);
+      // Dédoublonnage : unique par (nom, dry hop)
+      const seen = new Set();
+      items = items.filter(i => {
+        const key = i.name.toLowerCase() + '|' + (i.hop_type === 'dryhop' ? '1' : '0');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (!items.length) return;
+      ingHtml += `<div class="beer-label-section">${label}</div>
+        <div>${items.map(fmtQty).join(', ')}</div>`;
+    });
+  } else {
+    ingHtml = '<div style="color:#aaa;font-size:6.5pt;font-style:italic">Aucune recette liée</div>';
+  }
+
+  const subtitle = [b.type, b.abv ? `${b.abv}% ABV` : null].filter(Boolean).join(' · ');
+  const photoSection = b.photo
+    ? `<img class="beer-label-photo" src="${b.photo}" alt="${esc(b.name)}">`
+    : `<div class="beer-label-nophoto">🍺</div>`;
+
+  const footLeft = [
+    b.brew_date     ? `🍺\u202f${fmtDate(b.brew_date)}`     : null,
+    b.bottling_date ? `🍾\u202f${fmtDate(b.bottling_date)}` : null,
+  ].filter(Boolean).join(' · ');
+
+  return `
+    <div class="beer-label">
+      <div class="beer-label-header" style="background:${accentColor};color:${headerTextColor}">
+        <div class="beer-label-title">${esc(b.name)}</div>
+        ${subtitle ? `<div class="beer-label-sub">${subtitle}</div>` : ''}
+      </div>
+      ${photoSection}
+      <div class="beer-label-body">
+        ${ingHtml}
+      </div>
+      <div class="beer-label-footer">
+        <span>${footLeft}</span>
+        <span style="font-weight:800;color:#f59e0b;letter-spacing:.02em">${esc(appSettings.appName || 'BrewHome')}</span>
+      </div>
+    </div>`;
+}
+
+function renderLabelPreview() {
+  const b = S.beers.find(x => x.id === _labelBeerId);
+  if (!b) return;
+  const recipe  = b.recipe_id ? S.recipes.find(r => r.id === b.recipe_id) : null;
+  const copies  = Math.max(1, Math.min(30, parseInt(document.getElementById('label-copies')?.value || '1', 10)));
+  const preview = document.getElementById('label-preview-wrap');
+  if (preview) preview.innerHTML = Array.from({ length: copies }, () => _buildOneLabelHtml(b, recipe)).join('');
+}
+
+function doPrintLabel() {
+  const b = S.beers.find(x => x.id === _labelBeerId);
+  if (!b) return;
+  const recipe = b.recipe_id ? S.recipes.find(r => r.id === b.recipe_id) : null;
+  const copies = Math.max(1, Math.min(30, parseInt(document.getElementById('label-copies')?.value || '1', 10)));
+  const html   = Array.from({ length: copies }, () => _buildOneLabelHtml(b, recipe)).join('');
+  const area   = document.getElementById('label-print-area');
+  if (area) { area.innerHTML = html; area.style.display = 'flex'; }
+  window.print();
+  setTimeout(() => { if (area) { area.innerHTML = ''; area.style.display = 'none'; } }, 800);
+}
 
 function previewBeerPhoto(event) {
   const file = event.target.files[0];
@@ -2531,6 +3075,11 @@ function calcBrewStats() {
     totalCost += waterCost;
     hasCost = true;
   }
+  // Coût gaz (montant fixe par brassin)
+  const gasCost  = parseFloat(appSettings.energy?.gas_per_brew)  || 0;
+  const elecCost = parseFloat(appSettings.energy?.elec_per_brew) || 0;
+  if (gasCost  > 0) { totalCost += gasCost;  hasCost = true; }
+  if (elecCost > 0) { totalCost += elecCost; hasCost = true; }
 
   const costHtml = hasCost ? `
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
@@ -2563,6 +3112,20 @@ function calcBrewStats() {
         <span style="font-size:.82rem;color:var(--muted);flex:1">Eau (${((appSettings.water||{}).price||0).toFixed(4)} €/L)</span>
         <span style="font-size:.9rem;font-weight:700;color:var(--info)">${waterCost.toFixed(2)} €</span>
         <span style="font-size:.75rem;color:var(--muted)">${(waterCost/totalCost*100).toFixed(0)}% du total</span>
+      </div>` : ''}
+      ${gasCost > 0 ? `
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 12px;background:var(--card2);border-radius:10px;border-left:3px solid var(--amber)">
+        <i class="fas fa-fire-flame-curved" style="color:var(--amber);font-size:.8rem"></i>
+        <span style="font-size:.82rem;color:var(--muted);flex:1">Gaz (coût fixe / brassin)</span>
+        <span style="font-size:.9rem;font-weight:700;color:var(--amber)">${gasCost.toFixed(2)} €</span>
+        <span style="font-size:.75rem;color:var(--muted)">${(gasCost/totalCost*100).toFixed(0)}% du total</span>
+      </div>` : ''}
+      ${elecCost > 0 ? `
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 12px;background:var(--card2);border-radius:10px;border-left:3px solid var(--gold)">
+        <i class="fas fa-bolt" style="color:var(--gold);font-size:.8rem"></i>
+        <span style="font-size:.82rem;color:var(--muted);flex:1">Électricité (coût fixe / brassin)</span>
+        <span style="font-size:.9rem;font-weight:700;color:var(--gold)">${elecCost.toFixed(2)} €</span>
+        <span style="font-size:.75rem;color:var(--muted)">${(elecCost/totalCost*100).toFixed(0)}% du total</span>
       </div>` : ''}
     </div>` : '';
 
@@ -2670,6 +3233,7 @@ function selectBeerType(type) {
 // SPINDLES
 // ══════════════════════════════════════════════════════════════════════════════
 let _spindleChart = null;
+let _spindleChartId = null;
 
 function spindleAge(dateStr) {
   if (!dateStr) return { color: 'var(--muted)', label: 'Aucune donnée', fresh: false };
@@ -2723,15 +3287,21 @@ function renderSpindles() {
     const otherLinkedIds = new Set(S.spindles.filter(sp => sp.brew_id && sp.id !== s.id).map(sp => sp.brew_id));
     const activeBrews = S.brews.filter(b => !b.archived && b.status !== 'completed' && !otherLinkedIds.has(b.id));
     return `
-      <div class="spindle-card" style="border-color:${age.color}44">
+      <div class="spindle-card" data-id="${s.id}" draggable="true" style="border-color:${age.color}44">
         <div class="spindle-card-head">
-          <div class="spindle-name"><i class="fas fa-water" style="color:var(--info);margin-right:7px"></i>${esc(s.name)}</div>
+          <div style="display:flex;align-items:center;gap:4px;min-width:0">
+            <span class="spin-drag-handle" title="Glisser pour réorganiser"><i class="fas fa-grip-vertical"></i></span>
+            <div class="spindle-name">
+              <i class="fas fa-water" style="color:var(--info);margin-right:7px"></i>${esc(s.name)}
+              ${(() => { const di = DEVICE_INFO[s.device_type] || DEVICE_INFO.generic; return `<span style="font-size:.68rem;margin-left:7px;padding:1px 7px;border-radius:10px;background:${di.color}22;color:${di.color};font-weight:700;vertical-align:middle">${di.label}</span>`; })()}
+            </div>
+          </div>
           <div style="display:flex;align-items:center;gap:6px">
             <span class="spindle-age-badge${age.fresh ? ' spindle-age-pulse' : ''}" style="color:${age.color};background:${age.color}1a;border-color:${age.color}55" title="Dernière réception : ${lastAt}">
               <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${age.color};flex-shrink:0"></span>
               ${age.label}
             </span>
-            <button class="btn btn-ghost btn-sm btn-icon" onclick="showSpindleToken(${s.id})" title="Voir le token / URL iSpindel"><i class="fas fa-key"></i></button>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="showSpindleToken(${s.id})" title="Voir le token / URL de configuration"><i class="fas fa-key"></i></button>
             <button class="btn btn-ghost btn-sm btn-icon" onclick="openSpindleChart(${s.id})" title="Voir le graphique"><i class="fas fa-chart-line"></i></button>
             <button class="btn btn-ghost btn-sm btn-icon" onclick="openSpindleEditModal(${s.id})" title="Modifier"><i class="fas fa-pen"></i></button>
             <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSpindle(${s.id})" title="Supprimer"><i class="fas fa-trash"></i></button>
@@ -2765,13 +3335,52 @@ function renderSpindles() {
         </div>
       </div>`;
   }).join('');
+
+  // ── Drag & drop reorder ──
+  let dragSrcIdx = null;
+  grid.querySelectorAll('.spindle-card').forEach((card, idx) => {
+    card.addEventListener('dragstart', e => {
+      dragSrcIdx = idx;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      grid.querySelectorAll('.spindle-card').forEach(c => c.classList.remove('drag-over'));
+    });
+    card.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      grid.querySelectorAll('.spindle-card').forEach(c => c.classList.remove('drag-over'));
+      if (dragSrcIdx !== idx) card.classList.add('drag-over');
+    });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      if (dragSrcIdx === null || dragSrcIdx === idx) return;
+      const [moved] = S.spindles.splice(dragSrcIdx, 1);
+      S.spindles.splice(idx, 0, moved);
+      dragSrcIdx = null;
+      saveSpindleOrder();
+      renderSpindles();
+    });
+  });
+
   loadSpindleStats();
+}
+
+async function saveSpindleOrder() {
+  try {
+    await api('PUT', '/api/spindles/reorder',
+      S.spindles.map((s, i) => ({ id: s.id, sort_order: i })));
+  } catch(e) { toast('Erreur sauvegarde ordre', 'error'); }
 }
 
 async function openBrewFermentationChart(brewId) {
   const brew = S.brews.find(b => b.id === brewId);
   document.getElementById('spindle-chart-title').textContent =
     `Fermentation — ${brew ? esc(brew.name) : ''}`;
+  document.getElementById('spindle-chart-range').style.display = 'none';
   openModal('spindle-chart-modal');
 
   if (_spindleChart) { _spindleChart.destroy(); _spindleChart = null; }
@@ -2794,6 +3403,10 @@ async function openBrewFermentationChart(brewId) {
     const temps     = readings.map(r => r.temperature);
     const ptRadius  = readings.length > 60 ? 0 : 3;
 
+    const og = Math.max(...gravities.filter(g => g != null));
+    const abvData = gravities.map(g => g != null ? parseFloat(((og - g) * 131.25).toFixed(2)) : null);
+    const abvFinal = abvData[abvData.length - 1];
+
     const canvas = document.getElementById('spindle-chart-canvas');
     canvas.style.width  = '100%';
     canvas.style.height = '100%';
@@ -2805,6 +3418,9 @@ async function openBrewFermentationChart(brewId) {
           { label: 'Gravité', data: gravities, borderColor: '#ff9500',
             backgroundColor: 'rgba(255,149,0,.12)', yAxisID: 'yGrav',
             tension: 0.35, pointRadius: ptRadius, fill: true },
+          { label: 'ABV est. (%)', data: abvData, borderColor: '#22c55e',
+            backgroundColor: 'rgba(34,197,94,.08)', yAxisID: 'yAbv',
+            tension: 0.35, pointRadius: ptRadius, fill: false },
           { label: 'Température (°C)', data: temps, borderColor: '#3b82f6',
             backgroundColor: 'rgba(59,130,246,.08)', yAxisID: 'yTemp',
             tension: 0.35, pointRadius: ptRadius, fill: false },
@@ -2813,40 +3429,65 @@ async function openBrewFermentationChart(brewId) {
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { labels: { color: '#ccc', font: { size: 12 } } } },
+        plugins: {
+          legend: { labels: { color: '#ccc', font: { size: 12 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.y;
+                if (ctx.dataset.label === 'ABV est. (%)')    return ` ABV est. : ${v != null ? v.toFixed(2) + ' %' : '—'}`;
+                if (ctx.dataset.label === 'Gravité')          return ` Gravité : ${v != null ? v.toFixed(3) : '—'}`;
+                if (ctx.dataset.label === 'Température (°C)') return ` Temp. : ${v != null ? v.toFixed(1) + ' °C' : '—'}`;
+                return ` ${ctx.dataset.label} : ${v}`;
+              },
+            },
+          },
+        },
         scales: {
           x: { ticks: { color: '#888', maxTicksLimit: 10, font: { size: 11 } }, grid: { color: '#2a2a2a' } },
           yGrav: { type: 'linear', position: 'left',
             ticks: { color: '#ff9500', font: { size: 11 } }, grid: { color: '#2a2a2a' },
             title: { display: true, text: 'Gravité', color: '#ff9500', font: { size: 11 } } },
-          yTemp: { type: 'linear', position: 'right',
-            ticks: { color: '#3b82f6', font: { size: 11 } }, grid: { drawOnChartArea: false },
-            title: { display: true, text: '°C', color: '#3b82f6', font: { size: 11 } } },
+          yAbv: { type: 'linear', position: 'right', min: 0,
+            ticks: { color: '#22c55e', font: { size: 11 }, callback: v => v.toFixed(1) + '%' },
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: 'ABV %', color: '#22c55e', font: { size: 11 } } },
+          yTemp: { type: 'linear', position: 'right', display: false, grid: { drawOnChartArea: false } },
         },
       },
     });
 
     const recent = readings.slice(-10).reverse();
+    const abvLabel = abvFinal != null ? `ABV final est. <strong style="color:#22c55e">${abvFinal.toFixed(2)}%</strong>` : '';
     document.getElementById('spindle-chart-table').innerHTML = `
-      <h4 style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">${readings.length} mesures archivées · 10 dernières</h4>
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+        <h4 style="margin:0;font-size:.9rem;color:var(--muted)">${readings.length} mesures archivées · 10 dernières</h4>
+        <span style="font-size:.82rem;color:var(--muted)">OG ${og.toFixed(3)}</span>
+        ${abvLabel ? `<span style="font-size:.82rem">${abvLabel}</span>` : ''}
+      </div>
       <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:.82rem">
         <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
           <th style="text-align:left;padding:5px 8px">Date / Heure</th>
           <th style="text-align:center;padding:5px 8px">Gravité</th>
+          <th style="text-align:center;padding:5px 8px">ABV est.</th>
           <th style="text-align:center;padding:5px 8px">Temp. (°C)</th>
           <th style="text-align:center;padding:5px 8px">Batterie</th>
           <th style="text-align:center;padding:5px 8px">Angle</th>
         </tr></thead>
         <tbody>
-          ${recent.map(r => `
+          ${recent.map(r => {
+            const abv = r.gravity != null ? ((og - r.gravity) * 131.25).toFixed(2) : null;
+            return `
             <tr style="border-bottom:1px solid rgba(255,255,255,.04)">
               <td style="padding:5px 8px;color:var(--muted)">${fmtReadingDate(r.recorded_at)}</td>
               <td style="text-align:center;padding:5px 8px;color:var(--amber);font-weight:600">${r.gravity != null ? r.gravity.toFixed(3) : '—'}</td>
+              <td style="text-align:center;padding:5px 8px;color:#22c55e;font-weight:600">${abv != null ? abv + '%' : '—'}</td>
               <td style="text-align:center;padding:5px 8px;color:#3b82f6">${r.temperature != null ? r.temperature.toFixed(1) + '°' : '—'}</td>
               <td style="text-align:center;padding:5px 8px;color:var(--muted)">${r.battery != null ? r.battery.toFixed(2) + 'V' : '—'}</td>
               <td style="text-align:center;padding:5px 8px;color:var(--muted)">${r.angle != null ? r.angle.toFixed(1) + '°' : '—'}</td>
-            </tr>`).join('')}
+            </tr>`;
+          }).join('')}
         </tbody>
       </table></div>`;
   } catch(e) {
@@ -2857,12 +3498,83 @@ async function openBrewFermentationChart(brewId) {
 
 let _editSpindleId = null;
 
+// ── Densimètres : types d'appareils ──────────────────────────────────────────
+const DEVICE_INFO = {
+  ispindel:   { label: 'iSpindel',   color: '#f59e0b' },
+  tilt:       { label: 'Tilt',       color: '#3b82f6' },
+  gravitymon: { label: 'GravityMon', color: '#10b981' },
+  generic:    { label: 'Générique',  color: '#6b7280' },
+};
+
+function _spindleConfigHtml(deviceType, token, host) {
+  const url = `${host}/api/spindle/data?token=${token}`;
+  const urlLine = `<div style="display:flex;gap:8px;align-items:flex-start;margin:6px 0 4px">
+    <code style="flex:1;font-size:.78rem;word-break:break-all;color:var(--info);background:var(--bg);padding:6px 8px;border-radius:6px;border:1px solid var(--border)">${url}</code>
+    <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('${url}').then(()=>toast('URL copiée !','success'))" title="Copier l'URL"><i class="fas fa-copy"></i></button>
+  </div>`;
+  switch (deviceType) {
+    case 'tilt':
+      return `<div style="font-size:.82rem;color:var(--muted)">
+        <p style="font-weight:600;margin-bottom:6px;color:var(--text)"><i class="fas fa-circle-info" style="color:#3b82f6"></i> Configuration TiltBridge</p>
+        <ul style="margin:0 0 8px 16px;line-height:1.7">
+          <li>Service : <strong>Custom HTTP</strong></li>
+          <li>Méthode : <strong>POST</strong></li>
+          <li>URL :</li>
+        </ul>
+        ${urlLine}
+        <p style="margin-top:6px"><i class="fas fa-rotate" style="color:#f59e0b"></i> La température (°F) est automatiquement convertie en °C.</p>
+        <p>Champs envoyés par TiltBridge : <code>SG</code>, <code>Temp</code> (°F), <code>Color</code></p>
+      </div>`;
+    case 'gravitymon':
+      return `<div style="font-size:.82rem;color:var(--muted)">
+        <p style="font-weight:600;margin-bottom:6px;color:var(--text)"><i class="fas fa-circle-info" style="color:#10b981"></i> Configuration GravityMon</p>
+        <ul style="margin:0 0 8px 16px;line-height:1.7">
+          <li>Service : <strong>BrewSpy</strong> ou endpoint HTTP personnalisé</li>
+          <li>Méthode : <strong>POST</strong></li>
+          <li>URL :</li>
+        </ul>
+        ${urlLine}
+        <p style="margin-top:6px">Champs compatibles : <code>gravity</code>, <code>temperature</code> (°C), <code>battery</code>, <code>angle</code>, <code>rssi</code></p>
+      </div>`;
+    case 'generic':
+      return `<div style="font-size:.82rem;color:var(--muted)">
+        <p style="font-weight:600;margin-bottom:6px;color:var(--text)"><i class="fas fa-circle-info" style="color:#6b7280"></i> Endpoint universel</p>
+        <p style="margin-bottom:6px">Envoi HTTP <strong>POST</strong> (ou GET) vers :</p>
+        ${urlLine}
+        <p style="margin-top:8px;font-weight:600;color:var(--text)">Champs acceptés :</p>
+        <table style="font-size:.78rem;border-collapse:collapse;width:100%;margin-top:4px">
+          <tr><td style="padding:2px 8px 2px 0;color:var(--text)"><code>gravity</code></td><td>ou <code>SG</code>, <code>specific_gravity</code></td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:var(--text)"><code>temperature</code></td><td>ou <code>temp</code>, <code>celsius</code> (en °C) — ou <code>temp_f</code> (en °F)</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:var(--text)"><code>battery</code></td><td>ou <code>voltage</code> (tension en V, ex: 3.85)</td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:var(--text)"><code>angle</code></td><td>ou <code>tilt</code></td></tr>
+          <tr><td style="padding:2px 8px 2px 0;color:var(--text)"><code>rssi</code></td><td>ou <code>RSSI</code>, <code>signal</code></td></tr>
+        </table>
+        <p style="margin-top:6px">Le token peut aussi être passé dans le corps JSON : <code>{"token":"…","gravity":…}</code></p>
+      </div>`;
+    default: // ispindel
+      return `<div style="font-size:.82rem;color:var(--muted)">
+        <p style="font-weight:600;margin-bottom:6px;color:var(--text)"><i class="fas fa-circle-info" style="color:#f59e0b"></i> Configuration iSpindel</p>
+        <ul style="margin:0 0 8px 16px;line-height:1.7">
+          <li>Service : <strong>HTTP</strong></li>
+          <li>Méthode : <strong>POST</strong></li>
+          <li>Port : <strong>5000</strong></li>
+          <li>Chemin : <strong>/api/spindle/data</strong></li>
+          <li>URL :</li>
+        </ul>
+        ${urlLine}
+      </div>`;
+  }
+}
+
 function openSpindleModal() {
   _editSpindleId = null;
   document.getElementById('spindle-modal-title').textContent = 'Ajouter un densimètre';
   document.getElementById('spin-f-name').value = '';
   document.getElementById('spin-f-notes').value = '';
+  document.getElementById('spin-f-type').value = 'ispindel';
+  document.getElementById('spin-type-wrap').style.display = '';
   document.getElementById('spindle-token-section').style.display = 'none';
+  document.getElementById('spindle-save-btn').style.display = '';
   document.getElementById('spindle-save-btn').innerHTML = '<i class="fas fa-plus"></i> Créer';
   openModal('spindle-modal');
 }
@@ -2874,7 +3586,10 @@ function openSpindleEditModal(id) {
   document.getElementById('spindle-modal-title').textContent = `Modifier — ${sp.name}`;
   document.getElementById('spin-f-name').value  = sp.name;
   document.getElementById('spin-f-notes').value = sp.notes || '';
+  document.getElementById('spin-f-type').value  = sp.device_type || 'ispindel';
+  document.getElementById('spin-type-wrap').style.display = '';
   document.getElementById('spindle-token-section').style.display = 'none';
+  document.getElementById('spindle-save-btn').style.display = '';
   document.getElementById('spindle-save-btn').innerHTML = '<i class="fas fa-floppy-disk"></i> Enregistrer';
   openModal('spindle-modal');
 }
@@ -2882,12 +3597,13 @@ function openSpindleEditModal(id) {
 async function saveSpindle() {
   const name = document.getElementById('spin-f-name').value.trim();
   if (!name) { toast('Nom requis', 'error'); return; }
-  const notes = document.getElementById('spin-f-notes').value.trim() || null;
+  const notes       = document.getElementById('spin-f-notes').value.trim() || null;
+  const device_type = document.getElementById('spin-f-type').value || 'ispindel';
 
   // ── Mode édition ──
   if (_editSpindleId !== null) {
     try {
-      const updated = await api('PATCH', `/api/spindles/${_editSpindleId}`, { name, notes });
+      const updated = await api('PATCH', `/api/spindles/${_editSpindleId}`, { name, notes, device_type });
       const idx = S.spindles.findIndex(s => s.id === _editSpindleId);
       if (idx !== -1) S.spindles[idx] = updated;
       renderSpindles();
@@ -2899,12 +3615,12 @@ async function saveSpindle() {
 
   // ── Mode création ──
   try {
-    const sp = await api('POST', '/api/spindles', { name, notes });
+    const sp = await api('POST', '/api/spindles', { name, notes, device_type });
     S.spindles.unshift(sp);
     renderSpindles();
     document.getElementById('spindle-token-display').textContent = sp.token;
-    const host = window.location.origin;
-    document.getElementById('spindle-token-url').textContent = `POST ${host}/api/spindle/data?token=${sp.token}`;
+    document.getElementById('spindle-token-instructions').innerHTML =
+      _spindleConfigHtml(sp.device_type || 'ispindel', sp.token, window.location.origin);
     document.getElementById('spindle-token-section').style.display = '';
     document.getElementById('spindle-save-btn').style.display = 'none';
     toast('Densimètre créé', 'success');
@@ -2919,10 +3635,14 @@ function copySpindleToken() {
 function showSpindleToken(spindleId) {
   const sp = S.spindles.find(s => s.id === spindleId);
   if (!sp) return;
-  document.getElementById('stm-spindle-name').textContent = sp.name;
+  const devInfo = DEVICE_INFO[sp.device_type] || DEVICE_INFO.generic;
+  document.getElementById('stm-spindle-name').innerHTML =
+    `${esc(sp.name)} — <span style="color:${devInfo.color};font-weight:600">${devInfo.label}</span>`;
   document.getElementById('stm-token').textContent = sp.token;
-  const url = `POST ${window.location.origin}/api/spindle/data?token=${sp.token}`;
+  const url = `${window.location.origin}/api/spindle/data?token=${sp.token}`;
   document.getElementById('stm-url').textContent = url;
+  document.getElementById('stm-instructions').innerHTML =
+    _spindleConfigHtml(sp.device_type || 'ispindel', sp.token, window.location.origin);
   openModal('spindle-token-modal');
 }
 
@@ -2932,8 +3652,7 @@ function copyStmToken() {
 }
 
 function copyStmUrl() {
-  // Copie seulement l'URL (sans le préfixe "POST ")
-  const raw = document.getElementById('stm-url').textContent.replace(/^POST\s+/, '');
+  const raw = document.getElementById('stm-url').textContent;
   navigator.clipboard.writeText(raw).then(() => toast('URL copiée !', 'success'));
 }
 
@@ -2960,36 +3679,58 @@ async function deleteSpindle(id) {
 }
 
 async function openSpindleChart(spindleId) {
+  _spindleChartId = spindleId;
   const sp = S.spindles.find(s => s.id === spindleId);
   document.getElementById('spindle-chart-title').textContent = `Suivi — ${sp ? esc(sp.name) : ''}`;
-  openModal('spindle-chart-modal');
 
-  // Détruire tout chart existant sur ce canvas (y compris les instances orphelines)
+  // Afficher la barre de plage et reset à 24h
+  const rangeBar = document.getElementById('spindle-chart-range');
+  rangeBar.style.display = 'flex';
+  rangeBar.querySelectorAll('.sc-range').forEach(b => {
+    b.classList.remove('btn-primary'); b.classList.add('btn-ghost');
+  });
+  rangeBar.querySelector('[data-range="24"]').classList.replace('btn-ghost', 'btn-primary');
+  document.getElementById('sc-custom-range').style.display = 'none';
+
+  openModal('spindle-chart-modal');
+  await _loadSpindleChart({ hours: 24 });
+}
+
+async function _loadSpindleChart({ hours, from, to } = {}) {
   if (_spindleChart) { _spindleChart.destroy(); _spindleChart = null; }
-  const _staleChart = Chart.getChart('spindle-chart-canvas');
-  if (_staleChart) _staleChart.destroy();
-  document.getElementById('spindle-chart-table').innerHTML = '';
+  const stale = Chart.getChart('spindle-chart-canvas');
+  if (stale) stale.destroy();
+  document.getElementById('spindle-chart-table').innerHTML =
+    '<p style="text-align:center;color:var(--muted);padding:20px 0"><i class="fas fa-spinner fa-spin"></i> Chargement…</p>';
 
   try {
-    const readings = await api('GET', `/api/spindles/${spindleId}/readings?limit=500`);
+    let url = `/api/spindles/${_spindleChartId}/readings?limit=2000`;
+    if (hours)  url += `&hours=${hours}`;
+    if (from)   url += `&from=${encodeURIComponent(from)}`;
+    if (to)     url += `&to=${encodeURIComponent(to)}`;
+
+    const readings = await api('GET', url);
 
     if (!readings.length) {
       document.getElementById('spindle-chart-table').innerHTML =
-        '<p style="text-align:center;color:var(--muted);padding:30px 0">Aucune mesure enregistrée pour ce densimètre.</p>';
+        '<p style="text-align:center;color:var(--muted);padding:30px 0">Aucune mesure sur cette période.</p>';
       return;
     }
 
-    const labels = readings.map(r => fmtReadingDate(r.recorded_at));
+    const labels    = readings.map(r => fmtReadingDate(r.recorded_at));
     const gravities = readings.map(r => r.gravity);
     const temps     = readings.map(r => r.temperature);
     const ptRadius  = readings.length > 60 ? 0 : 3;
 
+    // ABV estimé : OG = gravité max dans la fenêtre ; ABV = (OG - FG) × 131.25
+    const og = Math.max(...gravities.filter(g => g != null));
+    const abvData = gravities.map(g => g != null ? parseFloat(((og - g) * 131.25).toFixed(2)) : null);
+    const abvFinal = abvData[abvData.length - 1];
+
     const canvas = document.getElementById('spindle-chart-canvas');
-    // Forcer les dimensions pour éviter un canvas 0×0 si le modal est encore en transition
     canvas.style.width  = '100%';
     canvas.style.height = '100%';
-    const ctx = canvas.getContext('2d');
-    _spindleChart = new Chart(ctx, {
+    _spindleChart = new Chart(canvas.getContext('2d'), {
       type: 'line',
       data: {
         labels,
@@ -3003,6 +3744,16 @@ async function openSpindleChart(spindleId) {
             tension: 0.35,
             pointRadius: ptRadius,
             fill: true,
+          },
+          {
+            label: 'ABV est. (%)',
+            data: abvData,
+            borderColor: '#22c55e',
+            backgroundColor: 'rgba(34,197,94,.08)',
+            yAxisID: 'yAbv',
+            tension: 0.35,
+            pointRadius: ptRadius,
+            fill: false,
           },
           {
             label: 'Température (°C)',
@@ -3022,6 +3773,17 @@ async function openSpindleChart(spindleId) {
         interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: { labels: { color: '#ccc', font: { size: 12 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.y;
+                if (ctx.dataset.label === 'ABV est. (%)') return ` ABV est. : ${v != null ? v.toFixed(2) + ' %' : '—'}`;
+                if (ctx.dataset.label === 'Gravité')       return ` Gravité : ${v != null ? v.toFixed(3) : '—'}`;
+                if (ctx.dataset.label === 'Température (°C)') return ` Temp. : ${v != null ? v.toFixed(1) + ' °C' : '—'}`;
+                return ` ${ctx.dataset.label} : ${v}`;
+              },
+            },
+          },
         },
         scales: {
           x: {
@@ -3034,41 +3796,86 @@ async function openSpindleChart(spindleId) {
             grid:  { color: '#2a2a2a' },
             title: { display: true, text: 'Gravité', color: '#ff9500', font: { size: 11 } },
           },
+          yAbv: {
+            type: 'linear', position: 'right',
+            min: 0,
+            ticks: { color: '#22c55e', font: { size: 11 }, callback: v => v.toFixed(1) + '%' },
+            grid:  { drawOnChartArea: false },
+            title: { display: true, text: 'ABV %', color: '#22c55e', font: { size: 11 } },
+          },
           yTemp: {
             type: 'linear', position: 'right',
-            ticks: { color: '#3b82f6', font: { size: 11 } },
+            display: false,
             grid:  { drawOnChartArea: false },
-            title: { display: true, text: '°C', color: '#3b82f6', font: { size: 11 } },
           },
         },
       },
     });
 
-    // Tableau des 10 dernières mesures
     const recent = readings.slice(-10).reverse();
+    const ogLabel = `OG ${og.toFixed(3)}`;
+    const abvLabel = abvFinal != null ? `ABV est. <strong style="color:#22c55e">${abvFinal.toFixed(2)}%</strong>` : '';
     document.getElementById('spindle-chart-table').innerHTML = `
-      <h4 style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">10 dernières mesures</h4>
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+        <h4 style="margin:0;font-size:.9rem;color:var(--muted)">${readings.length} mesure(s) · 10 dernières</h4>
+        <span style="font-size:.82rem;color:var(--muted)">${ogLabel}</span>
+        ${abvLabel ? `<span style="font-size:.82rem">${abvLabel}</span>` : ''}
+      </div>
       <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:.82rem">
         <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
           <th style="text-align:left;padding:5px 8px">Date / Heure</th>
           <th style="text-align:center;padding:5px 8px">Gravité</th>
+          <th style="text-align:center;padding:5px 8px">ABV est.</th>
           <th style="text-align:center;padding:5px 8px">Temp. (°C)</th>
           <th style="text-align:center;padding:5px 8px">Batterie</th>
           <th style="text-align:center;padding:5px 8px">Angle</th>
         </tr></thead>
         <tbody>
-          ${recent.map(r => `
+          ${recent.map(r => {
+            const abv = r.gravity != null ? ((og - r.gravity) * 131.25).toFixed(2) : null;
+            return `
             <tr style="border-bottom:1px solid rgba(255,255,255,.04)">
               <td style="padding:5px 8px;color:var(--muted)">${fmtReadingDate(r.recorded_at)}</td>
               <td style="text-align:center;padding:5px 8px;color:var(--amber);font-weight:600">${r.gravity != null ? r.gravity.toFixed(3) : '—'}</td>
+              <td style="text-align:center;padding:5px 8px;color:#22c55e;font-weight:600">${abv != null ? abv + '%' : '—'}</td>
               <td style="text-align:center;padding:5px 8px;color:#3b82f6">${r.temperature != null ? r.temperature.toFixed(1) + '°' : '—'}</td>
               <td style="text-align:center;padding:5px 8px;color:var(--muted)">${r.battery != null ? r.battery.toFixed(2) + 'V' : '—'}</td>
               <td style="text-align:center;padding:5px 8px;color:var(--muted)">${r.angle != null ? r.angle.toFixed(1) + '°' : '—'}</td>
-            </tr>`).join('')}
+            </tr>`;
+          }).join('')}
         </tbody>
       </table></div>`;
   } catch(e) { toast('Erreur chargement données', 'error'); }
+}
+
+function setSpindleRange(btn, range) {
+  document.querySelectorAll('.sc-range').forEach(b => {
+    b.classList.remove('btn-primary'); b.classList.add('btn-ghost');
+  });
+  btn.classList.remove('btn-ghost'); btn.classList.add('btn-primary');
+  const customEl = document.getElementById('sc-custom-range');
+  if (range === 'custom') {
+    customEl.style.display = 'flex';
+    return;
+  }
+  customEl.style.display = 'none';
+  _loadSpindleChart({ hours: range > 0 ? range : null });
+}
+
+function applyCustomSpindleRange() {
+  const fromVal = document.getElementById('sc-from').value;
+  const toVal   = document.getElementById('sc-to').value;
+  if (!fromVal) { toast('Sélectionnez une date de début', 'error'); return; }
+  // Convertir heure affichée (UTC + tz_offset) → heure serveur (UTC)
+  const tz = getTzOffset();
+  const toServerTs = str => {
+    if (!str) return null;
+    const d = new Date(str + ':00Z');
+    d.setTime(d.getTime() - tz * 3600000);
+    return d.toISOString().slice(0, 19).replace('T', ' ');
+  };
+  _loadSpindleChart({ from: toServerTs(fromVal), to: toServerTs(toVal) });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3098,14 +3905,20 @@ function saveTzOffset() {
 // DONNÉES DENSIMÈTRES — STATS ET PURGE
 // ══════════════════════════════════════════════════════════════════════════════
 async function loadSpindleStats() {
-  try {
-    const stats = await api('GET', '/api/spindle/readings/stats');
-    const el = document.getElementById('spin-db-stats');
-    if (!el) return;
-    const kb = Math.round((stats.db_size || 0) / 1024);
-    const size = kb > 1024 ? (kb / 1024).toFixed(1) + ' Mo' : kb + ' Ko';
+  const _fmt = (stats, label) => {
+    const n      = (stats.total || 0).toLocaleString('fr-FR');
     const oldest = stats.oldest ? new Date(stats.oldest).toLocaleDateString('fr-FR') : '—';
-    el.textContent = `${(stats.total || 0).toLocaleString('fr-FR')} mesures · ${size} · depuis le ${oldest}`;
+    return `${n} mesure${stats.total !== 1 ? 's' : ''} ${label}· depuis le ${oldest}`;
+  };
+  try {
+    const [spinStats, tempStats] = await Promise.all([
+      api('GET', '/api/spindle/readings/stats'),
+      api('GET', '/api/temperature/readings/stats'),
+    ]);
+    const elSpin = document.getElementById('spin-db-stats');
+    const elTemp = document.getElementById('temp-db-stats');
+    if (elSpin) elSpin.textContent = _fmt(spinStats, 'densimètre ');
+    if (elTemp) elTemp.textContent = _fmt(tempStats, 'température ');
   } catch(e) {}
 }
 
@@ -3119,6 +3932,460 @@ async function purgeReadings() {
     renderSpindles();
     loadSpindleStats();
   } catch(e) { toast('Erreur lors de la purge', 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SONDES DE TEMPÉRATURE
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _editTempId   = null;
+let _tempChart    = null;
+let _tempSensorId = null;
+
+function renderTempSensors() {
+  const grid  = document.getElementById('temp-sensor-grid');
+  const empty = document.getElementById('temp-sensor-empty');
+  if (!grid) return;
+
+  if (!S.tempSensors.length) {
+    grid.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  grid.innerHTML = S.tempSensors.map(s => {
+    const lastAt      = fmtReadingDate(s.last_reading_at);
+    const age         = spindleAge(s.last_reading_at);
+    const tempVal     = s.last_temperature;
+    const humVal      = s.last_humidity;
+    const targetVal   = s.last_target_temp;
+    const hvacMode    = s.last_hvac_mode;
+    const isThermostat = s.sensor_type === 'thermostat';
+    const tempStr     = tempVal   != null ? tempVal.toFixed(1)   + ' °C' : '—';
+    const humStr      = humVal    != null ? humVal.toFixed(1)    + ' %'  : null;
+    const targetStr   = targetVal != null ? targetVal.toFixed(1) + ' °C' : null;
+
+    // Badge type d'entité
+    const typeBadge = isThermostat
+      ? `<span style="font-size:.68rem;padding:1px 7px;border-radius:8px;background:#8b5cf620;color:#8b5cf6;font-weight:700;margin-left:6px;vertical-align:middle"><i class="fas fa-sliders"></i> Thermostat</span>`
+      : '';
+
+    // Badge mode HVAC
+    const hvacInfo = (() => {
+      if (!isThermostat || !hvacMode) return '';
+      const modes = { heat: { icon: 'fa-fire', color: '#ef4444', label: 'Chauffe' }, cool: { icon: 'fa-snowflake', color: '#3b82f6', label: 'Refroid.' }, off: { icon: 'fa-power-off', color: '#6b7280', label: 'Arrêt' } };
+      const m = modes[hvacMode] || { icon: 'fa-circle', color: '#6b7280', label: hvacMode };
+      return `<span style="font-size:.72rem;padding:2px 7px;border-radius:8px;background:${m.color}20;color:${m.color};font-weight:700"><i class="fas ${m.icon}"></i> ${m.label}</span>`;
+    })();
+
+    // Alerte de seuil
+    let alertBadge = '';
+    let cardBorder = age.color;
+    if (tempVal != null) {
+      if (s.temp_min != null && tempVal < s.temp_min) {
+        alertBadge = `<span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:#3b82f620;color:#3b82f6;font-weight:700;margin-left:6px"><i class="fas fa-arrow-down"></i> Sous le seuil</span>`;
+        cardBorder = '#3b82f6';
+      } else if (s.temp_max != null && tempVal > s.temp_max) {
+        alertBadge = `<span style="font-size:.72rem;padding:2px 8px;border-radius:10px;background:#ef444420;color:#ef4444;font-weight:700;margin-left:6px"><i class="fas fa-arrow-up"></i> Hors seuil</span>`;
+        cardBorder = '#ef4444';
+      }
+    }
+
+    const thresholdInfo = (s.temp_min != null || s.temp_max != null)
+      ? `<span style="font-size:.75rem;color:var(--muted)">${s.temp_min != null ? s.temp_min + '°' : '—'} → ${s.temp_max != null ? s.temp_max + '°' : '—'}</span>`
+      : '';
+
+    return `
+      <div class="spindle-card" data-id="${s.id}" style="border-color:${cardBorder}44">
+        <div class="spindle-card-head">
+          <div style="display:flex;align-items:center;gap:4px;min-width:0">
+            <div class="spindle-name">
+              <i class="fas fa-thermometer-half" style="color:#ef4444;margin-right:7px"></i>${esc(s.name)}${typeBadge}${alertBadge}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="spindle-age-badge${age.fresh ? ' spindle-age-pulse' : ''}" style="color:${age.color};background:${age.color}1a;border-color:${age.color}55" title="Dernière réception : ${lastAt}">
+              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${age.color};flex-shrink:0"></span>
+              ${age.label}
+            </span>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="showTempSensorToken(${s.id})" title="Configuration Home Assistant"><i class="fas fa-key"></i></button>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="openTempChart(${s.id})" title="Voir le graphique"><i class="fas fa-chart-line"></i></button>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="openTempSensorEditModal(${s.id})" title="Modifier"><i class="fas fa-pen"></i></button>
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteTempSensor(${s.id})" title="Supprimer"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+        <div class="spindle-metrics">
+          <div class="spindle-metric">
+            <div class="spindle-metric-val" style="font-size:1.6rem;color:${tempVal != null && ((s.temp_min != null && tempVal < s.temp_min) || (s.temp_max != null && tempVal > s.temp_max)) ? '#ef4444' : 'inherit'}">${tempStr}</div>
+            <div class="spindle-metric-lbl">Température${thresholdInfo ? '&nbsp;' + thresholdInfo : ''}</div>
+          </div>
+          ${isThermostat && targetStr ? `<div class="spindle-metric">
+            <div class="spindle-metric-val" style="font-size:1.3rem">${targetStr}</div>
+            <div class="spindle-metric-lbl">Consigne</div>
+          </div>` : ''}
+          ${!isThermostat && humStr ? `<div class="spindle-metric">
+            <div class="spindle-metric-val">${humStr}</div>
+            <div class="spindle-metric-lbl">Humidité</div>
+          </div>` : ''}
+          ${isThermostat && hvacInfo ? `<div class="spindle-metric">
+            <div class="spindle-metric-val" style="font-size:.85rem">${hvacInfo}</div>
+            <div class="spindle-metric-lbl">Mode</div>
+          </div>` : ''}
+        </div>
+        ${s.notes ? `<div style="font-size:.78rem;color:var(--muted);margin-top:6px"><i class="fas fa-note-sticky"></i> ${esc(s.notes)}</div>` : ''}
+        <div class="spindle-brew-link">
+          <i class="fas fa-link" style="color:#ef4444;flex-shrink:0"></i>
+          <select style="flex:1;border:none;background:transparent;color:var(--text);font-family:inherit;font-size:.85rem;cursor:pointer"
+                  onchange="linkTempSensorBrew(${s.id}, this.value)">
+            <option value="">— Non lié à un brassin —</option>
+            ${(() => {
+              const otherIds = new Set(S.tempSensors.filter(ts => ts.brew_id && ts.id !== s.id).map(ts => ts.brew_id));
+              const available = S.brews.filter(b => !b.archived && !otherIds.has(b.id));
+              const active    = available.filter(b => b.status !== 'completed');
+              const done      = available.filter(b => b.status === 'completed');
+              return [
+                active.length ? `<optgroup label="En cours">` + active.map(b => `<option value="${b.id}" ${s.brew_id == b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('') + `</optgroup>` : '',
+                done.length   ? `<optgroup label="Terminés (refermentation / garde)">` + done.map(b => `<option value="${b.id}" ${s.brew_id == b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('') + `</optgroup>` : '',
+              ].join('');
+            })()}
+          </select>
+        </div>
+        <div style="font-size:.78rem;color:var(--muted);margin-top:6px">
+          <i class="fas fa-clock"></i> Dernière mesure : ${lastAt}
+          &nbsp;·&nbsp;<i class="fas fa-database"></i> ${s.reading_count || 0} mesure${s.reading_count !== 1 ? 's' : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function _tempUpdateHaFields() {
+  const type = document.getElementById('temp-f-type').value;
+  const isThermostat = type === 'thermostat';
+  document.getElementById('temp-f-entity-label').textContent =
+    isThermostat ? 'Entité thermostat HA (optionnel)' : 'Entité température HA (optionnel)';
+  document.getElementById('temp-f-entity').placeholder =
+    isThermostat ? 'Ex : climate.itc_308_wifi_thermostat' : 'Ex : sensor.inkbird_itc308_temperature_probe';
+  document.getElementById('temp-f-entity-hum-wrap').style.display = isThermostat ? 'none' : '';
+}
+
+function openTempSensorModal() {
+  _editTempId = null;
+  document.getElementById('temp-modal-title').textContent = 'Ajouter une sonde';
+  document.getElementById('temp-f-name').value       = '';
+  document.getElementById('temp-f-type').value       = 'sensor';
+  document.getElementById('temp-f-entity').value     = '';
+  document.getElementById('temp-f-entity-hum').value = '';
+  document.getElementById('temp-f-notes').value      = '';
+  document.getElementById('temp-f-min').value        = '';
+  document.getElementById('temp-f-max').value        = '';
+  document.getElementById('temp-token-section').style.display = 'none';
+  document.getElementById('temp-save-btn').style.display = '';
+  document.getElementById('temp-save-btn').innerHTML = '<i class="fas fa-plus"></i> Créer';
+  _tempUpdateHaFields();
+  openModal('temp-sensor-modal');
+}
+
+function openTempSensorEditModal(id) {
+  const s = S.tempSensors.find(x => x.id === id);
+  if (!s) return;
+  _editTempId = id;
+  document.getElementById('temp-modal-title').textContent = `Modifier — ${s.name}`;
+  document.getElementById('temp-f-name').value       = s.name;
+  document.getElementById('temp-f-type').value       = s.sensor_type || 'sensor';
+  document.getElementById('temp-f-entity').value     = s.ha_entity || '';
+  document.getElementById('temp-f-entity-hum').value = s.ha_entity_hum || '';
+  document.getElementById('temp-f-notes').value      = s.notes || '';
+  document.getElementById('temp-f-min').value        = s.temp_min ?? '';
+  document.getElementById('temp-f-max').value        = s.temp_max ?? '';
+  document.getElementById('temp-token-section').style.display = 'none';
+  document.getElementById('temp-save-btn').style.display = '';
+  document.getElementById('temp-save-btn').innerHTML = '<i class="fas fa-floppy-disk"></i> Enregistrer';
+  _tempUpdateHaFields();
+  openModal('temp-sensor-modal');
+}
+
+async function saveTempSensor() {
+  const name = document.getElementById('temp-f-name').value.trim();
+  if (!name) { toast('Nom requis', 'error'); return; }
+  const sensor_type   = document.getElementById('temp-f-type').value;
+  const ha_entity     = document.getElementById('temp-f-entity').value.trim() || null;
+  const ha_entity_hum = document.getElementById('temp-f-entity-hum').value.trim() || null;
+  const notes    = document.getElementById('temp-f-notes').value.trim() || null;
+  const temp_min = document.getElementById('temp-f-min').value !== '' ? parseFloat(document.getElementById('temp-f-min').value) : null;
+  const temp_max = document.getElementById('temp-f-max').value !== '' ? parseFloat(document.getElementById('temp-f-max').value) : null;
+  const payload  = { name, sensor_type, ha_entity, ha_entity_hum, notes, temp_min, temp_max };
+
+  if (_editTempId !== null) {
+    try {
+      const updated = await api('PATCH', `/api/temperature/${_editTempId}`, payload);
+      const idx = S.tempSensors.findIndex(x => x.id === _editTempId);
+      if (idx !== -1) S.tempSensors[idx] = updated;
+      renderTempSensors();
+      closeModal('temp-sensor-modal');
+      toast('Sonde mise à jour', 'success');
+    } catch(e) { toast('Erreur mise à jour', 'error'); }
+    return;
+  }
+
+  try {
+    const s = await api('POST', '/api/temperature', payload);
+    S.tempSensors.unshift(s);
+    renderTempSensors();
+    document.getElementById('temp-token-display').textContent = s.token;
+    document.getElementById('temp-token-section').style.display = '';
+    document.getElementById('temp-save-btn').style.display = 'none';
+    toast('Sonde créée', 'success');
+  } catch(e) { toast('Erreur création sonde', 'error'); }
+}
+
+function copyTempToken() {
+  const t = document.getElementById('temp-token-display').textContent;
+  navigator.clipboard.writeText(t).then(() => toast('Token copié !', 'success'));
+}
+
+async function deleteTempSensor(id) {
+  if (!confirm('Supprimer cette sonde et toutes ses mesures ?')) return;
+  try {
+    await api('DELETE', `/api/temperature/${id}`);
+    S.tempSensors = S.tempSensors.filter(x => x.id !== id);
+    renderTempSensors();
+    toast('Sonde supprimée', 'success');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+async function linkTempSensorBrew(sensorId, brewId) {
+  try {
+    const updated = await api('PATCH', `/api/temperature/${sensorId}`, {
+      brew_id: brewId ? parseInt(brewId) : null,
+    });
+    const idx = S.tempSensors.findIndex(s => s.id === sensorId);
+    if (idx !== -1) S.tempSensors[idx] = updated;
+    renderTempSensors();
+    renderBrassins();
+    toast(brewId ? 'Brassin lié' : 'Lien supprimé', 'success');
+  } catch(e) { toast('Erreur liaison brassin', 'error'); }
+}
+
+function showTempSensorToken(id) {
+  const s = S.tempSensors.find(x => x.id === id);
+  if (!s) return;
+  const url        = `${window.location.origin}/api/temperature/data?token=${s.token}`;
+  const sensorSlug = s.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+  document.getElementById('tha-sensor-name').textContent = s.name;
+  document.getElementById('tha-token').textContent = s.token;
+  document.getElementById('tha-url').textContent   = url;
+
+  let yamlConf, yamlAuto;
+
+  if (s.sensor_type === 'thermostat') {
+    const entity  = s.ha_entity || 'climate.ENTITE_THERMOSTAT';
+    const warning = s.ha_entity ? '' : '\n# ⚠ Remplacer climate.ENTITE_THERMOSTAT par le nom de votre entité HA';
+    yamlConf = `rest_command:
+  brewhome_temp_${sensorSlug}:
+    url: "${url}"
+    method: POST
+    content_type: "application/json"
+    payload: >-
+      {"temperature":{{ '{{' }} state_attr('${entity}','current_temperature')|float|round(1) {{ '}}' }},"target_temp":{{ '{{' }} state_attr('${entity}','temperature')|float|round(1) {{ '}}' }},"hvac_mode":"{{ '{{' }} states('${entity}') {{ '}}' }}"}${warning}`;
+  } else {
+    const entityTemp = s.ha_entity     || 'sensor.ENTITE_TEMPERATURE';
+    const entityHum  = s.ha_entity_hum || 'sensor.ENTITE_HUMIDITE';
+    const parts = [];
+    if (!s.ha_entity)     parts.push('sensor.ENTITE_TEMPERATURE');
+    if (!s.ha_entity_hum) parts.push('sensor.ENTITE_HUMIDITE');
+    const warning = parts.length ? `\n# ⚠ Remplacer ${parts.join(' et ')} par vos entités HA réelles` : '';
+    yamlConf = `rest_command:
+  brewhome_temp_${sensorSlug}:
+    url: "${url}"
+    method: POST
+    content_type: "application/json"
+    payload: >-
+      {"temperature":{{ '{{' }} states('${entityTemp}')|float|round(1) {{ '}}' }},"humidity":{{ '{{' }} states('${entityHum}')|float|round(1)|default(none) {{ '}}' }}}${warning}`;
+  }
+
+  yamlAuto = `- alias: "BrewHome — ${s.name}"
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  action:
+    - action: rest_command.brewhome_temp_${sensorSlug}`;
+
+  document.getElementById('tha-yaml-conf').textContent = yamlConf;
+  document.getElementById('tha-yaml-auto').textContent = yamlAuto;
+  openModal('temp-ha-modal');
+}
+
+function copyThaToken() {
+  navigator.clipboard.writeText(document.getElementById('tha-token').textContent)
+    .then(() => toast('Token copié !', 'success'));
+}
+
+function copyThaUrl() {
+  navigator.clipboard.writeText(document.getElementById('tha-url').textContent)
+    .then(() => toast('URL copiée !', 'success'));
+}
+
+function copyThaYamlConf() {
+  navigator.clipboard.writeText(document.getElementById('tha-yaml-conf').textContent)
+    .then(() => toast('configuration.yaml copié !', 'success'));
+}
+
+function copyThaYamlAuto() {
+  navigator.clipboard.writeText(document.getElementById('tha-yaml-auto').textContent)
+    .then(() => toast('automations.yaml copié !', 'success'));
+}
+
+async function openTempChart(sensorId) {
+  const s = S.tempSensors.find(x => x.id === sensorId);
+  _tempSensorId = sensorId;
+  document.getElementById('temp-chart-title').textContent =
+    `Température — ${s ? esc(s.name) : ''}`;
+  document.querySelectorAll('.tc-range').forEach((b, i) => {
+    b.classList.toggle('btn-primary', i === 0);
+    b.classList.toggle('btn-ghost',   i !== 0);
+  });
+  document.getElementById('tc-custom-range').style.display = 'none';
+  openModal('temp-chart-modal');
+  await _loadTempChart({ hours: 24 });
+}
+
+async function _loadTempChart({ hours, from, to } = {}) {
+  if (_tempChart) { _tempChart.destroy(); _tempChart = null; }
+  const stale = Chart.getChart('temp-chart-canvas');
+  if (stale) stale.destroy();
+  document.getElementById('temp-chart-table').innerHTML =
+    '<p style="text-align:center;color:var(--muted);padding:20px 0"><i class="fas fa-spinner fa-spin"></i> Chargement…</p>';
+
+  let url = `/api/temperature/${_tempSensorId}/readings`;
+  const params = [];
+  if (hours)  params.push(`hours=${hours}`);
+  if (from)   params.push(`from=${encodeURIComponent(from)}`);
+  if (to)     params.push(`to=${encodeURIComponent(to)}`);
+  params.push('limit=2000');
+  if (params.length) url += '?' + params.join('&');
+
+  try {
+    const readings = await api('GET', url);
+    const s = S.tempSensors.find(x => x.id === _tempSensorId);
+    const tz = getTzOffset ? getTzOffset() : 0;
+    const labels = readings.map(r => {
+      const d = new Date(r.recorded_at + 'Z');
+      d.setTime(d.getTime() + tz * 3600000);
+      return d.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    });
+    const temps = readings.map(r => r.temperature);
+    const hums  = readings.map(r => r.humidity);
+    const hasHum = hums.some(h => h != null);
+
+    const datasets = [{
+      label: 'Température (°C)',
+      data: temps,
+      borderColor: '#ef4444',
+      backgroundColor: 'rgba(239,68,68,.08)',
+      borderWidth: 2,
+      pointRadius: readings.length > 200 ? 0 : 3,
+      tension: 0.3,
+      fill: true,
+      yAxisID: 'yTemp',
+    }];
+    if (hasHum) {
+      datasets.push({
+        label: 'Humidité (%)',
+        data: hums,
+        borderColor: '#3b82f6',
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+        yAxisID: 'yHum',
+      });
+    }
+
+    // Lignes de seuil
+    const annotations = {};
+    if (s?.temp_min != null) {
+      annotations.minLine = { type:'line', yMin:s.temp_min, yMax:s.temp_min, borderColor:'#3b82f6', borderWidth:1.5, borderDash:[4,4], yScaleID:'yTemp',
+        label:{ content:`Min ${s.temp_min}°C`, enabled:true, position:'end', backgroundColor:'#3b82f6', font:{size:10} } };
+    }
+    if (s?.temp_max != null) {
+      annotations.maxLine = { type:'line', yMin:s.temp_max, yMax:s.temp_max, borderColor:'#ef4444', borderWidth:1.5, borderDash:[4,4], yScaleID:'yTemp',
+        label:{ content:`Max ${s.temp_max}°C`, enabled:true, position:'end', backgroundColor:'#ef4444', font:{size:10} } };
+    }
+
+    const scales = {
+      x:     { ticks:{ maxTicksLimit:8, font:{size:10} }, grid:{ color:'rgba(128,128,128,.1)' } },
+      yTemp: { position:'left',  ticks:{ font:{size:10}, callback:v => v+'°C' }, grid:{ color:'rgba(128,128,128,.1)' }, title:{ display:true, text:'°C', font:{size:10} } },
+    };
+    if (hasHum) {
+      scales.yHum = { position:'right', ticks:{ font:{size:10}, callback:v => v+'%' }, grid:{ drawOnChartArea:false }, title:{ display:true, text:'Humidité %', font:{size:10} } };
+    }
+
+    _tempChart = new Chart(document.getElementById('temp-chart-canvas'), {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode:'index', intersect:false },
+        plugins: { legend:{ labels:{ font:{size:11} } }, annotation:{ annotations } },
+        scales,
+      },
+    });
+
+    // Tableau des 10 dernières mesures
+    const last10 = [...readings].reverse().slice(0, 10);
+    if (!last10.length) {
+      document.getElementById('temp-chart-table').innerHTML = '<p style="text-align:center;color:var(--muted)">Aucune mesure</p>';
+    } else {
+      document.getElementById('temp-chart-table').innerHTML = `
+        <table style="width:100%;font-size:.8rem;border-collapse:collapse">
+          <thead><tr style="color:var(--muted)">
+            <th style="text-align:left;padding:4px 8px">Date / heure</th>
+            <th style="text-align:right;padding:4px 8px">Température</th>
+            ${hasHum ? '<th style="text-align:right;padding:4px 8px">Humidité</th>' : ''}
+          </tr></thead>
+          <tbody>${last10.map(r => {
+            const d = new Date(r.recorded_at + 'Z');
+            d.setTime(d.getTime() + tz * 3600000);
+            const dt = d.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+            const alert = s && r.temperature != null && ((s.temp_min != null && r.temperature < s.temp_min) || (s.temp_max != null && r.temperature > s.temp_max));
+            return `<tr style="border-top:1px solid var(--border)">
+              <td style="padding:4px 8px;color:var(--muted)">${dt}</td>
+              <td style="padding:4px 8px;text-align:right;font-weight:600;color:${alert ? '#ef4444' : 'inherit'}">${r.temperature != null ? r.temperature.toFixed(1) + ' °C' : '—'}</td>
+              ${hasHum ? `<td style="padding:4px 8px;text-align:right">${r.humidity != null ? r.humidity.toFixed(1) + ' %' : '—'}</td>` : ''}
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`;
+    }
+  } catch(e) {
+    document.getElementById('temp-chart-table').innerHTML = `<p style="color:var(--danger);text-align:center">${e.message}</p>`;
+  }
+}
+
+function setTempRange(btn, range) {
+  document.querySelectorAll('.tc-range').forEach(b => {
+    b.classList.remove('btn-primary'); b.classList.add('btn-ghost');
+  });
+  btn.classList.remove('btn-ghost'); btn.classList.add('btn-primary');
+  const customEl = document.getElementById('tc-custom-range');
+  if (range === 'custom') { customEl.style.display = 'flex'; return; }
+  customEl.style.display = 'none';
+  _loadTempChart({ hours: range > 0 ? range : null });
+}
+
+function applyCustomTempRange() {
+  const fromVal = document.getElementById('tc-from').value;
+  const toVal   = document.getElementById('tc-to').value;
+  if (!fromVal) { toast('Sélectionnez une date de début', 'error'); return; }
+  const tz = getTzOffset ? getTzOffset() : 0;
+  const toServerTs = str => {
+    if (!str) return null;
+    const d = new Date(str + ':00Z');
+    d.setTime(d.getTime() - tz * 3600000);
+    return d.toISOString().slice(0, 19).replace('T', ' ');
+  };
+  _loadTempChart({ from: toServerTs(fromVal), to: toServerTs(toVal) });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3236,6 +4503,40 @@ async function importSpindles(input) {
   input.value = '';
 }
 
+function exportSettings() {
+  const out = JSON.parse(JSON.stringify(appSettings));
+  // Exclure les tokens GitHub (données sensibles)
+  if (out.github?.vitrine) delete out.github.vitrine.pat;
+  if (out.github?.data)    delete out.github.data.pat;
+  downloadJson(out, `parametres_${new Date().toISOString().slice(0,10)}.json`);
+  toast('Paramètres exportés', 'success');
+}
+
+async function importSettings(input) {
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    // Fusionner sans écraser la config GitHub existante (tokens)
+    const githubBackup = appSettings.github;
+    Object.assign(appSettings, data);
+    if (githubBackup) appSettings.github = githubBackup;
+    saveSettings();
+    // Mettre à jour la DB pour les paramètres d'apparence
+    if (data.appName != null || data.accentColor != null || data.appIcon != null) {
+      await api('PUT', '/api/app-settings', {
+        app_name:     appSettings.appName     || null,
+        accent_color: appSettings.accentColor || null,
+        app_icon:     appSettings.appIcon     || null,
+      }).catch(() => {});
+    }
+    applyAppearance();
+    renderSettingsWater();
+    toast('Paramètres importés', 'success');
+  } catch(e) { toast('Erreur import paramètres : ' + e.message, 'error'); }
+  input.value = '';
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // WATER CORRECTION
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3248,6 +4549,15 @@ const WC_MINERAL_FX = {
   'Chlorure de sodium':    { ca: 0,     mg: 0,    na: 393.3, so4: 0,      cl: 606.5, hco3: 0      },
   'Carbonate de calcium':  { ca: 400.4, mg: 0,    na: 0,     so4: 0,      cl: 0,     hco3: 1218.0 },
   'Bicarbonate de sodium': { ca: 0,     mg: 0,    na: 273.7, so4: 0,      cl: 0,     hco3: 726.4  },
+};
+
+const WC_MINERAL_LABEL = {
+  'Sulfate de calcium':    'Sulfate de calcium (CaSO₄)',
+  'Sulfate de magnésium':  'Sulfate de magnésium (MgSO₄)',
+  'Chlorure de calcium':   'Chlorure de calcium (CaCl₂)',
+  'Chlorure de sodium':    'Chlorure de sodium (NaCl)',
+  'Carbonate de calcium':  'Carbonate de calcium (CaCO₃)',
+  'Bicarbonate de sodium': 'Bicarbonate de sodium (NaHCO₃)',
 };
 
 // mL of acid needed to neutralize 1 mEq of total alkalinity
@@ -3294,20 +4604,24 @@ function renderWaterCorrection() {
     const fmt = (v, u) => `<strong>${parseFloat(v) || 0}</strong><span style="color:var(--muted);font-size:.72rem"> ${u}</span>`;
     srcEl.innerHTML = [
       `pH ${fmt(w.ph, '')}`,
-      `Ca²⁺ ${fmt(w.ca, 'mg/L')}`,
-      `Mg²⁺ ${fmt(w.mg, 'mg/L')}`,
-      `Na⁺ ${fmt(w.na, 'mg/L')}`,
-      `SO₄²⁻ ${fmt(w.so4, 'mg/L')}`,
-      `Cl⁻ ${fmt(w.cl, 'mg/L')}`,
-      `HCO₃⁻ ${fmt(w.hco3, 'mg/L')}`,
+      `Calcium (Ca²⁺) ${fmt(w.ca, 'mg/L')}`,
+      `Magnésium (Mg²⁺) ${fmt(w.mg, 'mg/L')}`,
+      `Sodium (Na⁺) ${fmt(w.na, 'mg/L')}`,
+      `Sulfates (SO₄²⁻) ${fmt(w.so4, 'mg/L')}`,
+      `Chlorures (Cl⁻) ${fmt(w.cl, 'mg/L')}`,
+      `Bicarbonates (HCO₃⁻) ${fmt(w.hco3, 'mg/L')}`,
     ].join(' &nbsp;·&nbsp; ');
   }
-  // Auto-fill volume from recipe calculation
-  const volEl = document.getElementById('wc-volume');
-  if (!volEl.value) {
-    const totalEl = document.getElementById('rw-total');
-    const v = totalEl ? parseFloat(totalEl.textContent) : NaN;
-    volEl.value = !isNaN(v) ? v.toFixed(1) : (parseFloat(document.getElementById('rec-volume')?.value) || 20);
+  // Auto-fill volumes from recipe calculation
+  const mashEl   = document.getElementById('wc-volume-mash');
+  const spargeEl = document.getElementById('wc-volume-sparge');
+  if (mashEl && !mashEl.value) {
+    const v = parseFloat(document.getElementById('rw-mash')?.textContent);
+    if (!isNaN(v)) mashEl.value = v.toFixed(1);
+  }
+  if (spargeEl && !spargeEl.value) {
+    const v = parseFloat(document.getElementById('rw-sparge')?.textContent);
+    if (!isNaN(v)) spargeEl.value = v.toFixed(1);
   }
   calcWaterCorrection();
 }
@@ -3322,29 +4636,11 @@ function wcPreset(name) {
   calcWaterCorrection();
 }
 
-function calcWaterCorrection() {
-  const vol = parseFloat(document.getElementById('wc-volume')?.value) || 0;
-  if (vol <= 0) return;
-
-  const w = appSettings.water || {};
-  const s = { ca: parseFloat(w.ca)||0, mg: parseFloat(w.mg)||0, na: parseFloat(w.na)||0,
-               so4: parseFloat(w.so4)||0, cl: parseFloat(w.cl)||0, hco3: parseFloat(w.hco3)||0 };
-
-  const readT = id => { const v = parseFloat(document.getElementById(id)?.value); return isNaN(v) ? null : v; };
-  const t = { ca: readT('wc-t-ca'), mg: readT('wc-t-mg'), na: readT('wc-t-na'),
-              so4: readT('wc-t-so4'), cl: readT('wc-t-cl'), hco3: readT('wc-t-hco3'),
-              ph: readT('wc-t-ph') };
-
-  if (!['ca','mg','na','so4','cl','hco3'].some(k => t[k] !== null)) {
-    document.getElementById('wc-results').style.display = 'none';
-    return;
-  }
-
+function _computeWCDoses(vol, s, t) {
   const IONS = ['ca','mg','na','so4','cl','hco3'];
   const delta = {};
   IONS.forEach(k => { delta[k] = t[k] !== null ? t[k] - s[k] : 0; });
 
-  // Remaining deficits (minerals can only add ions, not remove)
   const rem = {};
   IONS.forEach(k => { rem[k] = Math.max(0, delta[k]); });
 
@@ -3354,35 +4650,30 @@ function calcWaterCorrection() {
     'Bicarbonate de sodium':0, 'Carbonate de calcium': 0,
   };
 
-  // Step 1 – Mg deficit → MgSO4 (also contributes SO4)
   if (rem.mg > 0) {
     const gPL = rem.mg / 98.6;
     doses['Sulfate de magnésium'] = gPL * vol;
     rem.so4 = Math.max(0, rem.so4 - gPL * 389.8);
     rem.mg  = 0;
   }
-  // Step 2 – SO4 deficit → CaSO4 (also contributes Ca)
   if (rem.so4 > 0) {
     const gPL = rem.so4 / 557.9;
     doses['Sulfate de calcium'] = gPL * vol;
     rem.ca  = Math.max(0, rem.ca - gPL * 232.8);
     rem.so4 = 0;
   }
-  // Step 3 – Ca deficit → CaCl2 (also contributes Cl)
   if (rem.ca > 0) {
     const gPL = rem.ca / 361.2;
     doses['Chlorure de calcium'] = gPL * vol;
     rem.cl = Math.max(0, rem.cl - gPL * 638.9);
     rem.ca = 0;
   }
-  // Step 4 – Cl deficit → NaCl (also contributes Na)
   if (rem.cl > 0) {
     const gPL = rem.cl / 606.5;
     doses['Chlorure de sodium'] = gPL * vol;
     rem.na = Math.max(0, rem.na - gPL * 393.3);
     rem.cl = 0;
   }
-  // Step 5 – HCO3 deficit: prefer NaHCO3 when Na also deficient, then CaCO3
   if (rem.hco3 > 0) {
     if (rem.na > 0) {
       const use = Math.min(rem.hco3, rem.na / 273.7 * 726.4);
@@ -3396,13 +4687,11 @@ function calcWaterCorrection() {
       rem.hco3 = 0;
     }
   }
-  // Step 6 – Na still deficient → NaHCO3 (adds bonus HCO3)
   if (rem.na > 0) {
     doses['Bicarbonate de sodium'] += (rem.na / 273.7) * vol;
     rem.na = 0;
   }
 
-  // Acid for HCO3 excess (target < source → need to acidify)
   const hco3Excess = t.hco3 !== null ? Math.max(0, s.hco3 - t.hco3) : 0;
   const acidDoses = {};
   if (hco3Excess > 0) {
@@ -3412,7 +4701,6 @@ function calcWaterCorrection() {
     });
   }
 
-  // Resulting profile
   const result = { ...s };
   Object.entries(doses).forEach(([mineral, totalG]) => {
     if (totalG <= 0) return;
@@ -3422,21 +4710,70 @@ function calcWaterCorrection() {
   });
   if (hco3Excess > 0) result.hco3 = Math.max(0, result.hco3 - hco3Excess);
 
-  _renderWCResults(s, t, delta, doses, acidDoses, result);
+  // Alternative CaCl2 : same Ca as CaSO4 provides, but adds Cl instead of SO4
+  const caFromCaSO4 = (doses['Sulfate de calcium'] / vol) * WC_MINERAL_FX['Sulfate de calcium'].ca;
+  const altCaCl2g   = caFromCaSO4 > 0.5 ? (caFromCaSO4 / WC_MINERAL_FX['Chlorure de calcium'].ca) * vol : 0;
+
+  // Alternative CaCO3 : same HCO3 as NaHCO3 provides, but adds Ca instead of Na
+  const hco3FromNaHCO3 = (doses['Bicarbonate de sodium'] / vol) * WC_MINERAL_FX['Bicarbonate de sodium'].hco3;
+  const altCaCO3g      = hco3FromNaHCO3 > 0.5 ? (hco3FromNaHCO3 / WC_MINERAL_FX['Carbonate de calcium'].hco3) * vol : 0;
+
+  // Alternative NaHCO3 : same HCO3 as CaCO3 provides, but adds Na instead of Ca
+  const hco3FromCaCO3  = (doses['Carbonate de calcium'] / vol) * WC_MINERAL_FX['Carbonate de calcium'].hco3;
+  const altNaHCO3g     = hco3FromCaCO3 > 0.5 ? (hco3FromCaCO3 / WC_MINERAL_FX['Bicarbonate de sodium'].hco3) * vol : 0;
+
+  return { delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g };
 }
 
-function _renderWCResults(s, t, delta, doses, acidDoses, result) {
+function calcWaterCorrection() {
+  const volMash   = parseFloat(document.getElementById('wc-volume-mash')?.value)   || 0;
+  const volSparge = parseFloat(document.getElementById('wc-volume-sparge')?.value) || 0;
+
+  const w = appSettings.water || {};
+  const s = { ca: parseFloat(w.ca)||0, mg: parseFloat(w.mg)||0, na: parseFloat(w.na)||0,
+               so4: parseFloat(w.so4)||0, cl: parseFloat(w.cl)||0, hco3: parseFloat(w.hco3)||0 };
+
+  const readT = id => { const v = parseFloat(document.getElementById(id)?.value); return isNaN(v) ? null : v; };
+  const t = { ca: readT('wc-t-ca'), mg: readT('wc-t-mg'), na: readT('wc-t-na'),
+              so4: readT('wc-t-so4'), cl: readT('wc-t-cl'), hco3: readT('wc-t-hco3'),
+              ph: readT('wc-t-ph') };
+
+  const hasTarget = ['ca','mg','na','so4','cl','hco3'].some(k => t[k] !== null);
+  const resMash   = document.getElementById('wc-results-mash');
+  const resSparge = document.getElementById('wc-results-sparge');
+
+  if (!hasTarget) {
+    if (resMash)   resMash.style.display   = 'none';
+    if (resSparge) resSparge.style.display = 'none';
+    return;
+  }
+
+  if (volMash > 0) {
+    const { delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g } = _computeWCDoses(volMash, s, t);
+    _renderWCResults(s, t, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, 'wc-results-mash', 'Empâtage', 'empâtage');
+  } else if (resMash) resMash.style.display = 'none';
+
+  if (volSparge > 0) {
+    const { delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g } = _computeWCDoses(volSparge, s, t);
+    _renderWCResults(s, t, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, 'wc-results-sparge', 'Rinçage', 'rinçage');
+  } else if (resSparge) resSparge.style.display = 'none';
+}
+
+function _renderWCResults(s, t, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, containerId, label, suffix) {
   const ION_META = [
-    { k: 'ca',   label: 'Ca²⁺'  },
-    { k: 'mg',   label: 'Mg²⁺'  },
-    { k: 'na',   label: 'Na⁺'   },
-    { k: 'so4',  label: 'SO₄²⁻' },
-    { k: 'cl',   label: 'Cl⁻'   },
-    { k: 'hco3', label: 'HCO₃⁻' },
+    { k: 'ca',   label: 'Calcium (Ca²⁺)'        },
+    { k: 'mg',   label: 'Magnésium (Mg²⁺)'      },
+    { k: 'na',   label: 'Sodium (Na⁺)'           },
+    { k: 'so4',  label: 'Sulfates (SO₄²⁻)'      },
+    { k: 'cl',   label: 'Chlorures (Cl⁻)'        },
+    { k: 'hco3', label: 'Bicarbonates (HCO₃⁻)'  },
   ];
 
   // ── Ion balance table ──
   let html = `
+    <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--info);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid rgba(255,255,255,.08)">
+      <i class="fas fa-droplet"></i> ${label}
+    </div>
     <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px">Bilan ionique (mg/L)</div>
     <div style="overflow-x:auto;margin-bottom:14px">
     <table style="width:100%;font-size:.8rem;border-collapse:collapse;min-width:380px">
@@ -3476,7 +4813,7 @@ function _renderWCResults(s, t, delta, doses, acidDoses, result) {
   const ratioCol  = ratioVal > 2 ? 'var(--hop)' : ratioVal < 0.5 ? 'var(--malt)' : 'var(--success)';
   html += `
     <tr style="border-top:1px solid var(--border);background:rgba(255,255,255,.03)">
-      <td colspan="4" style="padding:3px 8px;font-size:.74rem;color:var(--muted)">Ratio SO₄/Cl</td>
+      <td colspan="4" style="padding:3px 8px;font-size:.74rem;color:var(--muted)">Ratio Sulfates/Chlorures (SO₄/Cl)</td>
       <td style="text-align:right;padding:3px 8px;font-weight:700;color:${ratioCol}">${ratioVal.toFixed(2)} — ${ratioLbl}</td>
     </tr>`;
   html += `</tbody></table></div>`;
@@ -3491,15 +4828,78 @@ function _renderWCResults(s, t, delta, doses, acidDoses, result) {
     activeMinerals.forEach(([mineral, grams]) => {
       html += `
         <div style="display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:5px 10px">
-          <span style="flex:1;font-size:.83rem">${mineral}</span>
+          <span style="flex:1;font-size:.83rem">${WC_MINERAL_LABEL[mineral] || mineral}</span>
           <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${grams.toFixed(2)} g</span>
           <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
-            onclick="wcAddToRecipe('${mineral}',${grams.toFixed(2)},'g')">
+            onclick="wcAddToRecipe('${mineral} (${suffix})',${grams.toFixed(2)},'g')">
             <i class="fas fa-plus"></i> Recette
           </button>
         </div>`;
     });
     html += `</div>`;
+  }
+
+  // ── Alternative CaCl2 ──
+  if (altCaCl2g >= 0.05) {
+    html += `
+      <div style="margin-bottom:14px">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:6px">
+          <i class="fas fa-shuffle"></i> Alternative — Chlorure de calcium
+        </div>
+        <div style="color:var(--muted);font-size:.78rem;margin-bottom:6px;font-style:italic">
+          Même apport en Calcium que CaSO₄ · ajoute Chlorures au lieu de Sulfates · favorise les malts
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;background:var(--card);border:1px dashed var(--border);border-radius:6px;padding:5px 10px">
+          <span style="flex:1;font-size:.83rem">${WC_MINERAL_LABEL['Chlorure de calcium']}</span>
+          <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${altCaCl2g.toFixed(2)} g</span>
+          <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
+            onclick="wcAddToRecipe('Chlorure de calcium (${suffix})',${altCaCl2g.toFixed(2)},'g')">
+            <i class="fas fa-plus"></i> Recette
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // ── Alternative CaCO3 ──
+  if (altCaCO3g >= 0.05) {
+    html += `
+      <div style="margin-bottom:14px">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:6px">
+          <i class="fas fa-shuffle"></i> Alternative — Carbonate de calcium
+        </div>
+        <div style="color:var(--muted);font-size:.78rem;margin-bottom:6px;font-style:italic">
+          Même apport en Bicarbonates que NaHCO₃ · ajoute Calcium au lieu de Sodium · favorise l'alcalinité
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;background:var(--card);border:1px dashed var(--border);border-radius:6px;padding:5px 10px">
+          <span style="flex:1;font-size:.83rem">${WC_MINERAL_LABEL['Carbonate de calcium']}</span>
+          <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${altCaCO3g.toFixed(2)} g</span>
+          <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
+            onclick="wcAddToRecipe('Carbonate de calcium (${suffix})',${altCaCO3g.toFixed(2)},'g')">
+            <i class="fas fa-plus"></i> Recette
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // ── Alternative NaHCO3 ──
+  if (altNaHCO3g >= 0.05) {
+    html += `
+      <div style="margin-bottom:14px">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:6px">
+          <i class="fas fa-shuffle"></i> Alternative — Bicarbonate de sodium
+        </div>
+        <div style="color:var(--muted);font-size:.78rem;margin-bottom:6px;font-style:italic">
+          Même apport en Bicarbonates que CaCO₃ · ajoute Sodium au lieu de Calcium · tampon acide
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;background:var(--card);border:1px dashed var(--border);border-radius:6px;padding:5px 10px">
+          <span style="flex:1;font-size:.83rem">${WC_MINERAL_LABEL['Bicarbonate de sodium']}</span>
+          <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${altNaHCO3g.toFixed(2)} g</span>
+          <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
+            onclick="wcAddToRecipe('Bicarbonate de sodium (${suffix})',${altNaHCO3g.toFixed(2)},'g')">
+            <i class="fas fa-plus"></i> Recette
+          </button>
+        </div>
+      </div>`;
   }
 
   // ── Acid doses ──
@@ -3513,7 +4913,7 @@ function _renderWCResults(s, t, delta, doses, acidDoses, result) {
           <span style="flex:1;font-size:.83rem">${acid}</span>
           <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${mL.toFixed(1)} mL</span>
           <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
-            onclick="wcAddToRecipe('${acid}',${mL.toFixed(1)},'mL')">
+            onclick="wcAddToRecipe('${acid} (${suffix})',${mL.toFixed(1)},'mL')">
             <i class="fas fa-plus"></i> Recette
           </button>
         </div>`;
@@ -3521,7 +4921,7 @@ function _renderWCResults(s, t, delta, doses, acidDoses, result) {
     html += `</div>`;
   }
 
-  const div = document.getElementById('wc-results');
+  const div = document.getElementById(containerId);
   div.innerHTML = html;
   div.style.display = 'block';
 }
@@ -3562,7 +4962,7 @@ function renderSettingsGithub() {
   document.getElementById('gh-dat-pat').value    = d.pat    || '';
 }
 
-function saveGithubSettings() {
+function _captureGithubSettings() {
   appSettings.github = {
     vitrine: {
       repo:   document.getElementById('gh-vit-repo').value.trim(),
@@ -3576,7 +4976,207 @@ function saveGithubSettings() {
     },
   };
   saveSettings();
+}
+
+function saveGithubSettings() {
+  _captureGithubSettings();
   toast('Config GitHub enregistrée', 'success');
+}
+
+function renderSettingsLang() {
+  const panel = document.getElementById('stab-lang');
+  if (!panel) return;
+  const codes = Object.keys(LOCALES);
+  panel.innerHTML = `
+    <div style="margin-bottom:22px">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:12px">
+        <i class="fas fa-globe"></i> ${t('lang.current', 'Langue active')}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${codes.map(code => {
+          const meta = LOCALES[code]._meta || {};
+          const active = code === _lang;
+          return `<button class="btn ${active ? 'btn-primary' : 'btn-ghost'}" onclick="switchLang('${code}')">
+            ${meta.flag || ''} ${meta.name || code}${active ? ' ✓' : ''}
+          </button>`;
+        }).join('')}
+      </div>
+    </div>
+    <div style="padding-top:18px;border-top:1px solid var(--border)">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:8px">
+        <i class="fas fa-language"></i> ${t('lang.contribute', 'Contribuer une traduction')}
+      </div>
+      <p style="font-size:.83rem;color:var(--muted);margin-bottom:14px">${t('lang.import_hint', 'Importez un fichier JSON pour ajouter une langue.')}</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="exportLocaleTemplate()">
+          <i class="fas fa-file-export"></i> ${t('lang.export_template', 'Exporter le modèle (JSON)')}
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-locale-file').click()">
+          <i class="fas fa-file-import"></i> ${t('lang.import_translation', 'Importer une traduction (JSON)')}
+        </button>
+        <input type="file" id="import-locale-file" accept=".json" style="display:none" onchange="importLocaleFile(this)">
+      </div>
+    </div>`;
+}
+
+function switchLang(code) {
+  if (!LOCALES[code]) return;
+  _lang   = code;
+  _locale = LOCALES[code];
+  localStorage.setItem('brewLang', code);
+  applyI18n();
+  renderSettingsLang();
+  // Re-render current page so dynamic strings (catLabel etc.) update
+  const activePage = document.querySelector('.page.active');
+  if (activePage) _refreshPage(activePage.id.replace('page-', ''));
+}
+
+function exportLocaleTemplate() {
+  const template = JSON.parse(JSON.stringify(LOCALES.fr));
+  template._meta = { name: 'Your Language', flag: '🌐', code: 'xx' };
+  const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'brewhome-locale-template.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importLocaleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const text   = await file.text();
+    const locale = JSON.parse(text);
+    const code   = locale._meta?.code || file.name.replace(/\.json$/, '');
+    LOCALES[code] = locale;
+    toast(`Langue "${locale._meta?.name || code}" chargée`, 'success');
+    renderSettingsLang();
+  } catch(e) {
+    toast('Erreur lecture fichier de traduction', 'error');
+  }
+  input.value = '';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── APPARENCE ────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function applyAppearance() {
+  const name  = appSettings.appName    || 'BrewHome';
+  const color = appSettings.accentColor || null;
+  const icon  = appSettings.appIcon    || null;
+
+  // Titre de l'onglet
+  document.title = name + ' — Gestion Brasserie';
+
+  // Nav brand
+  const brand = document.getElementById('nav-brand');
+  if (brand) {
+    if (icon) {
+      brand.innerHTML = `<img src="${icon}" alt="${name}" style="height:34px;width:auto;object-fit:contain;border-radius:5px;vertical-align:middle;cursor:zoom-in" onclick="openAppIconLightbox()">`;
+    } else {
+      const mid = Math.ceil(name.length / 2);
+      brand.innerHTML = `${name.slice(0, mid)}<span>${name.slice(mid)}</span>`;
+    }
+  }
+
+  // Couleur d'accent
+  if (color) {
+    document.documentElement.style.setProperty('--amber', color);
+  } else {
+    document.documentElement.style.removeProperty('--amber');
+  }
+
+  // Favicon
+  const fav = document.getElementById('app-favicon');
+  if (fav) {
+    fav.href = icon || `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍺</text></svg>`;
+  }
+}
+
+function openAppIconLightbox() {
+  const icon = appSettings.appIcon;
+  if (!icon) return;
+  const name = appSettings.appName || 'BrewHome';
+  document.getElementById('beer-lightbox-img').src  = icon;
+  document.getElementById('beer-lightbox-img').alt  = name;
+  document.getElementById('beer-lightbox-name').textContent = name;
+  const lb = document.getElementById('beer-lightbox');
+  lb.style.display = 'flex';
+}
+
+function renderSettingsApparence() {
+  const name  = appSettings.appName    || '';
+  const color = appSettings.accentColor || '#ff9500';
+  const icon  = appSettings.appIcon    || null;
+
+  document.getElementById('app-name-input').value    = name;
+  document.getElementById('app-accent-color').value  = color;
+
+  const prev = document.getElementById('app-icon-preview');
+  if (prev) prev.innerHTML = icon
+    ? `<img src="${icon}" style="width:100%;height:100%;object-fit:contain">`
+    : '<i class="fas fa-image"></i>';
+
+  const removeBtn = document.getElementById('app-icon-remove-btn');
+  if (removeBtn) removeBtn.style.display = icon ? '' : 'none';
+}
+
+async function saveApparence() {
+  const name  = document.getElementById('app-name-input').value.trim();
+  const color = document.getElementById('app-accent-color').value;
+  appSettings.appName     = name  || null;
+  appSettings.accentColor = color !== '#ff9500' ? color : null;
+  saveSettings();
+  try {
+    await api('PUT', '/api/app-settings', {
+      app_name:     appSettings.appName     || null,
+      accent_color: appSettings.accentColor || null,
+      app_icon:     appSettings.appIcon     || null,
+    });
+  } catch(e) { toast('Erreur sauvegarde serveur', 'error'); return; }
+  applyAppearance();
+  toast('Apparence enregistrée', 'success');
+}
+
+function setAccentPreset(color) {
+  document.getElementById('app-accent-color').value = color;
+}
+
+function previewAppIcon(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const scale = Math.min(size / img.width, size / img.height);
+      const w = img.width * scale, h = img.height * scale;
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      const b64 = canvas.toDataURL('image/png');
+      appSettings.appIcon = b64;
+      const prev = document.getElementById('app-icon-preview');
+      if (prev) prev.innerHTML = `<img src="${b64}" style="width:100%;height:100%;object-fit:contain">`;
+      const removeBtn = document.getElementById('app-icon-remove-btn');
+      if (removeBtn) removeBtn.style.display = '';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function removeAppIcon() {
+  delete appSettings.appIcon;
+  saveSettings();
+  api('PUT', '/api/app-settings', { app_icon: null }).catch(() => {});
+  const prev = document.getElementById('app-icon-preview');
+  if (prev) prev.innerHTML = '<i class="fas fa-image"></i>';
+  const removeBtn = document.getElementById('app-icon-remove-btn');
+  if (removeBtn) removeBtn.style.display = 'none';
 }
 
 function togglePat(inputId) {
@@ -3585,6 +5185,7 @@ function togglePat(inputId) {
 }
 
 // binary=true : content est déjà du base64 pur (image), pas besoin d'encoder
+// Retourne { skipped: true } si le contenu est identique à GitHub, sinon la réponse de l'API.
 async function pushToGithub(repo, pat, branch, filePath, content, message, binary = false) {
   const base = `https://api.github.com/repos/${repo}/contents/${filePath}`;
   const headers = {
@@ -3593,14 +5194,23 @@ async function pushToGithub(repo, pat, branch, filePath, content, message, binar
     'Content-Type': 'application/json',
   };
 
-  // Récupérer le SHA si le fichier existe déjà
-  let sha;
+  // Récupérer le fichier existant : SHA (pour le PUT) + contenu base64 (pour comparer)
+  let sha, existingB64;
   try {
-    const getRes = await fetch(`${base}?ref=${encodeURIComponent(branch)}`, { headers });
-    if (getRes.ok) { sha = (await getRes.json()).sha; }
+    const getRes = await fetch(`${base}?ref=${encodeURIComponent(branch)}`, { headers, cache: 'no-store' });
+    if (getRes.ok) {
+      const data = await getRes.json();
+      sha = data.sha;
+      existingB64 = (data.content || '').replace(/\s/g, ''); // GitHub insère des \n dans le base64
+    }
   } catch(_) {}
 
+  // Encoder le nouveau contenu
   const encoded = binary ? content : btoa(unescape(encodeURIComponent(content)));
+
+  // Comparer directement le base64 — skip si identique
+  if (existingB64 && existingB64 === encoded) return { skipped: true };
+
   const body = { message, content: encoded, branch };
   if (sha) body.sha = sha;
 
@@ -3631,7 +5241,7 @@ function _vDate(iso) {
   catch(_) { return iso; }
 }
 
-function generateVitrineHtml(beers, photoMap) {
+function generateVitrineHtml(beers, photoMap, iconPath) {
   const date   = new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' });
   const total33 = beers.reduce((s, b) => s + (b.stock_33cl || 0), 0);
   const total75 = beers.reduce((s, b) => s + (b.stock_75cl || 0), 0);
@@ -3681,6 +5291,7 @@ function generateVitrineHtml(beers, photoMap) {
         ${b.origin      ? `<div class="card-origin">📍 ${_vEsc(b.origin)}</div>` : ''}
         ${b.description ? `<p class="card-desc">${_vEsc(b.description)}</p>` : ''}
         ${brewInfo.length ? `<div class="card-foot">${brewInfo.join('<span class="sep">·</span>')}</div>` : ''}
+        ${appSettings.appName ? `<div class="card-brand">${_vEsc(appSettings.appName)}</div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -3692,7 +5303,7 @@ function generateVitrineHtml(beers, photoMap) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ma cave à bières</title>
 <style>
-:root{--bg:#0f0f0f;--card:#1a1a1a;--border:#272727;--text:#e8e0d0;--muted:#888;--amber:#f5a623;--hop:#7ec845;--info:#60a5fa}
+:root{--bg:#0f0f0f;--card:#1a1a1a;--border:#272727;--text:#e8e0d0;--muted:#888;--amber:${appSettings.accentColor || '#f5a623'};--hop:#7ec845;--info:#60a5fa}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 header{text-align:center;padding:48px 16px 28px}
@@ -3734,10 +5345,14 @@ h1{font-size:2.2rem;font-weight:900;color:var(--amber);letter-spacing:-.03em;mar
 .sep{color:#333}
 .empty{text-align:center;color:var(--muted);padding:80px 20px;grid-column:1/-1}
 footer{text-align:center;padding:20px;font-size:.74rem;color:#444;border-top:1px solid var(--border)}
+.appname{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:var(--amber);opacity:.75;margin-bottom:10px}
+.card-brand{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--amber);opacity:.45;text-align:right;margin-top:4px}
 </style>
 </head>
 <body>
 <header>
+  ${iconPath ? `<img src="${iconPath}" alt="" style="width:56px;height:56px;object-fit:contain;border-radius:12px;margin-bottom:8px;display:block;margin-left:auto;margin-right:auto">` : ''}
+  ${appSettings.appName ? `<div class="appname">${_vEsc(appSettings.appName)}</div>` : ''}
   <h1>🍺 Ma cave à bières</h1>
   <div class="subtitle">Mise à jour le ${date}</div>
   <div class="stats">
@@ -3749,7 +5364,7 @@ footer{text-align:center;padding:20px;font-size:.74rem;color:#444;border-top:1px
 <div class="grid">
   ${beers.length ? cards : '<div class="empty">Aucune bière disponible pour le moment.</div>'}
 </div>
-<footer>Généré par BrewHome</footer>
+<footer>Généré par ${_vEsc(appSettings.appName || 'BrewHome')}</footer>
 
 <div id="lb" onclick="closeLb()">
   <button id="lb-close" onclick="closeLb()" title="Fermer">✕</button>
@@ -3774,9 +5389,12 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLb(); }
 }
 
 async function pushVitrine() {
-  saveGithubSettings();
+  _captureGithubSettings();
   const cfg = (appSettings.github || {}).vitrine || {};
   if (!cfg.repo || !cfg.pat) { toast('Renseignez le dépôt et le PAT vitrine', 'error'); return; }
+
+  const btn = document.getElementById('btn-push-vitrine');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi…'; }
 
   // S'assurer que les bières sont chargées
   if (!S.beers.length) {
@@ -3792,37 +5410,113 @@ async function pushVitrine() {
     if (p) photoMap[b.id] = p;
   });
 
-  const html = generateVitrineHtml(beers, photoMap);
+  // Logo de l'application
+  const appIconParsed = _parsePhotoDataUrl(appSettings.appIcon || null);
+  const iconPath = appIconParsed ? `images/app-icon.${appIconParsed.ext}` : null;
+
+  const html = generateVitrineHtml(beers, photoMap, iconPath);
   const json = JSON.stringify(beers, null, 2);
 
-  // Les fichiers sont poussés séquentiellement : chaque push crée un commit et
-  // déplace le ref de la branche ; un push parallèle recevrait un SHA périmé.
+  // Commit unique via l'API Git Data (blobs → tree → commit → ref)
+  const GH = `https://api.github.com/repos/${cfg.repo}`;
+  const headers = {
+    'Authorization': `Bearer ${cfg.pat}`,
+    'Accept': 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+  };
+
+  // Liste des fichiers : { path, b64 }
+  const files = [
+    { path: 'index.html', b64: btoa(unescape(encodeURIComponent(html))) },
+    { path: 'beers.json', b64: btoa(unescape(encodeURIComponent(json))) },
+    ...Object.entries(photoMap).map(([id, { ext, b64 }]) => ({ path: `images/beer-${id}.${ext}`, b64 })),
+    ...(appIconParsed ? [{ path: iconPath, b64: appIconParsed.b64 }] : []),
+  ];
+
   try {
-    const files = [
-      { path: 'index.html', content: html, msg: `vitrine: mise à jour ${dateStr}` },
-      { path: 'beers.json', content: json, msg: `vitrine: beers.json ${dateStr}` },
-      ...Object.entries(photoMap).map(([id, { ext, b64 }]) => ({
-        path: `images/beer-${id}.${ext}`, content: b64,
-        msg: `vitrine: photo bière #${id}`, binary: true,
-      })),
-    ];
-    for (const f of files) {
-      await pushToGithub(cfg.repo, cfg.pat, cfg.branch, f.path, f.content, f.msg, f.binary || false);
+    // 1. Récupérer le SHA du commit actuel de la branche
+    const refRes  = await fetch(`${GH}/git/ref/heads/${encodeURIComponent(cfg.branch)}`, { headers, cache: 'no-store' });
+    if (!refRes.ok) throw new Error((await refRes.json()).message || 'Branche introuvable');
+    const { object: { sha: currentCommitSha } } = await refRes.json();
+
+    // 2. Récupérer le SHA du tree de base
+    const commitRes = await fetch(`${GH}/git/commits/${currentCommitSha}`, { headers });
+    if (!commitRes.ok) throw new Error('Impossible de lire le commit courant');
+    const { tree: { sha: baseTreeSha } } = await commitRes.json();
+
+    // 3. Récupérer le tree existant (récursif) pour comparer les SHAs
+    const treeRes = await fetch(`${GH}/git/trees/${baseTreeSha}?recursive=1`, { headers });
+    const existingMap = {};
+    if (treeRes.ok) ((await treeRes.json()).tree || []).forEach(item => { existingMap[item.path] = item.sha; });
+
+    // 4. Créer les blobs en parallèle
+    const blobs = await Promise.all(files.map(async f => {
+      const res = await fetch(`${GH}/git/blobs`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ content: f.b64, encoding: 'base64' }),
+      });
+      if (!res.ok) throw new Error(`Blob ${f.path} : ${(await res.json()).message}`);
+      const { sha } = await res.json();
+      return { path: f.path, sha, changed: existingMap[f.path] !== sha };
+    }));
+
+    const changed = blobs.filter(b => b.changed);
+    if (!changed.length) {
+      toast('Vitrine déjà à jour — aucun fichier modifié', 'success');
+      return;
     }
-    const nPhotos = Object.keys(photoMap).length;
-    toast(`Vitrine poussée ✓ — ${beers.length} bière(s)${nPhotos ? `, ${nPhotos} photo(s)` : ''}`, 'success');
+
+    // 5. Créer le nouveau tree (uniquement les fichiers modifiés, base = tree actuel)
+    const newTreeRes = await fetch(`${GH}/git/trees`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        base_tree: baseTreeSha,
+        tree: changed.map(b => ({ path: b.path, mode: '100644', type: 'blob', sha: b.sha })),
+      }),
+    });
+    if (!newTreeRes.ok) throw new Error((await newTreeRes.json()).message || 'Erreur création tree');
+    const { sha: newTreeSha } = await newTreeRes.json();
+
+    // 6. Créer le commit
+    const newCommitRes = await fetch(`${GH}/git/commits`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        message: `vitrine: mise à jour ${dateStr} (${changed.length} fichier(s))`,
+        tree: newTreeSha,
+        parents: [currentCommitSha],
+      }),
+    });
+    if (!newCommitRes.ok) throw new Error((await newCommitRes.json()).message || 'Erreur création commit');
+    const { sha: newCommitSha } = await newCommitRes.json();
+
+    // 7. Avancer le pointeur de branche
+    const patchRes = await fetch(`${GH}/git/refs/heads/${encodeURIComponent(cfg.branch)}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ sha: newCommitSha }),
+    });
+    if (!patchRes.ok) throw new Error((await patchRes.json()).message || 'Erreur mise à jour branche');
+
+    const skipped = blobs.length - changed.length;
+    const skipTxt = skipped ? `, ${skipped} inchangé(s)` : '';
+    toast(`Vitrine poussée ✓ — ${beers.length} bière(s), ${changed.length} fichier(s) mis à jour${skipTxt}`, 'success');
   } catch(e) {
     toast(`Erreur vitrine : ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-brands fa-github"></i> Pousser la vitrine'; }
   }
 }
 
 async function pushGithubData() {
-  saveGithubSettings();
+  _captureGithubSettings();
   const cfg = (appSettings.github || {}).data || {};
   if (!cfg.repo || !cfg.pat) {
     toast('Renseignez le dépôt et le PAT données', 'error');
     return;
   }
+
+  const btn = document.getElementById('btn-push-data');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi…'; }
+
   const dateStr = new Date().toISOString().slice(0,10);
   try {
     // Fetch all data in parallel (pas de conflit GitHub ici)
@@ -3833,15 +5527,30 @@ async function pushGithubData() {
       api('GET', '/api/export/beers'),
       api('GET', '/api/export/spindles'),
     ]);
+    // Paramètres avancés (sans PAT)
+    const settingsOut = JSON.parse(JSON.stringify(appSettings));
+    if (settingsOut.github?.vitrine) delete settingsOut.github.vitrine.pat;
+    if (settingsOut.github?.data)    delete settingsOut.github.data.pat;
     // Push séquentiel pour éviter les conflits de SHA sur la même branche
-    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'inventaire.json',  JSON.stringify(inv,      null, 2), `backup: inventaire ${dateStr}`);
-    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'recettes.json',    JSON.stringify(rec,      null, 2), `backup: recettes ${dateStr}`);
-    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'brassins.json',    JSON.stringify(brews,    null, 2), `backup: brassins ${dateStr}`);
-    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'cave.json',        JSON.stringify(beers,    null, 2), `backup: cave ${dateStr}`);
-    await pushToGithub(cfg.repo, cfg.pat, cfg.branch, 'densimetres.json', JSON.stringify(spindles, null, 2), `backup: densimètres ${dateStr}`);
-    toast('Données poussées sur GitHub ✓ (inventaire, recettes, brassins, cave, densimètres)', 'success');
+    const dataFiles = [
+      { path: 'inventaire.json',  content: JSON.stringify(inv,         null, 2), msg: `backup: inventaire ${dateStr}` },
+      { path: 'recettes.json',    content: JSON.stringify(rec,         null, 2), msg: `backup: recettes ${dateStr}` },
+      { path: 'brassins.json',    content: JSON.stringify(brews,       null, 2), msg: `backup: brassins ${dateStr}` },
+      { path: 'cave.json',        content: JSON.stringify(beers,       null, 2), msg: `backup: cave ${dateStr}` },
+      { path: 'densimetres.json', content: JSON.stringify(spindles,    null, 2), msg: `backup: densimètres ${dateStr}` },
+      { path: 'parametres.json',  content: JSON.stringify(settingsOut, null, 2), msg: `backup: paramètres ${dateStr}` },
+    ];
+    let pushed = 0, skipped = 0;
+    for (const f of dataFiles) {
+      const res = await pushToGithub(cfg.repo, cfg.pat, cfg.branch, f.path, f.content, f.msg);
+      res?.skipped ? skipped++ : pushed++;
+    }
+    const skipTxt = skipped ? `, ${skipped} inchangé(s)` : '';
+    toast(`Données poussées ✓ — ${pushed} fichier(s) mis à jour${skipTxt}`, 'success');
   } catch(e) {
     toast(`Erreur données : ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-brands fa-github"></i> Pousser les données'; }
   }
 }
 
@@ -3884,6 +5593,8 @@ function esc(s) {
   _updateThemeBtn(savedTheme);
 
   await loadAll();
+  applyI18n();
+  applyAppearance();
   clearRecipeForm();
   // Set today's date for brew
   document.getElementById('brew-f-date').value = new Date().toISOString().split('T')[0];

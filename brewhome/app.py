@@ -26,7 +26,7 @@ def get_readings_db():
 
 
 def init_readings_db():
-    """Crée la table et les index dans la base de mesures si nécessaire."""
+    """Crée les tables et index dans la base de mesures si nécessaire."""
     with get_readings_db() as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS spindle_readings (
@@ -42,6 +42,19 @@ def init_readings_db():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_sr_spindle ON spindle_readings(spindle_id)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_sr_date    ON spindle_readings(recorded_at)')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS temperature_readings (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                sensor_id   INTEGER NOT NULL,
+                temperature REAL,
+                humidity    REAL,
+                target_temp REAL,
+                hvac_mode   TEXT,
+                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_tr_sensor ON temperature_readings(sensor_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_tr_date   ON temperature_readings(recorded_at)')
 
 
 def init_db():
@@ -172,6 +185,22 @@ def init_db():
                 angle       REAL,
                 FOREIGN KEY (brew_id) REFERENCES brews(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS temperature_sensors (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                token      TEXT UNIQUE NOT NULL,
+                notes      TEXT,
+                temp_min   REAL,
+                temp_max   REAL,
+                sort_order INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
         ''')
         # Migration: add hop_days if missing (safe to run on existing DB)
         try:
@@ -207,11 +236,31 @@ def migrate_db():
             "ALTER TABLE ingredient_catalog ADD COLUMN max_usage_pct REAL",
             "ALTER TABLE inventory_items ADD COLUMN price_per_unit REAL",
             "ALTER TABLE recipes ADD COLUMN rating INTEGER",
+            "ALTER TABLE spindles ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE recipes ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE brews ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE beers ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE inventory_items ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE spindles ADD COLUMN device_type TEXT NOT NULL DEFAULT 'ispindel'",
+            "ALTER TABLE temperature_sensors ADD COLUMN sensor_type TEXT NOT NULL DEFAULT 'sensor'",
+            "ALTER TABLE temperature_sensors ADD COLUMN ha_entity TEXT",
+            "ALTER TABLE temperature_sensors ADD COLUMN ha_entity_hum TEXT",
+            "ALTER TABLE temperature_sensors ADD COLUMN brew_id INTEGER REFERENCES brews(id) ON DELETE SET NULL",
         ]:
             try:
                 conn.execute(sql)
             except Exception:
                 pass  # colonne déjà existante
+    # Migrations base de mesures
+    with get_readings_db() as rconn:
+        for sql in [
+            "ALTER TABLE temperature_readings ADD COLUMN target_temp REAL",
+            "ALTER TABLE temperature_readings ADD COLUMN hvac_mode TEXT",
+        ]:
+            try:
+                rconn.execute(sql)
+            except Exception:
+                pass
         # Backfill initial counts for existing beers that don't have them yet
         conn.execute('UPDATE beers SET initial_33cl=stock_33cl WHERE initial_33cl=0 AND stock_33cl>0')
         conn.execute('UPDATE beers SET initial_75cl=stock_75cl WHERE initial_75cl=0 AND stock_75cl>0')
@@ -679,7 +728,7 @@ def delete_catalog_item(item_id):
 def get_inventory():
     with get_db() as conn:
         rows = conn.execute(
-            'SELECT * FROM inventory_items ORDER BY category, name'
+            'SELECT * FROM inventory_items ORDER BY COALESCE(sort_order, 9999) ASC, category, name'
         ).fetchall()
         return jsonify([dict(r) for r in rows])
 
@@ -713,6 +762,16 @@ def update_inventory_item(item_id):
         )
         row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
+
+
+@app.route('/api/inventory/reorder', methods=['PUT'])
+def reorder_inventory():
+    items = request.json or []
+    with get_db() as conn:
+        for item in items:
+            conn.execute('UPDATE inventory_items SET sort_order=? WHERE id=?',
+                         (item['sort_order'], item['id']))
+    return jsonify({'success': True})
 
 
 @app.route('/api/inventory/<int:item_id>', methods=['DELETE'])
@@ -766,11 +825,21 @@ def _recipe_with_ingredients(conn, recipe_id):
 @app.route('/api/recipes', methods=['GET'])
 def get_recipes():
     with get_db() as conn:
-        recipes = conn.execute('SELECT * FROM recipes ORDER BY created_at DESC').fetchall()
+        recipes = conn.execute('SELECT * FROM recipes ORDER BY COALESCE(sort_order, 9999) ASC, created_at DESC').fetchall()
         result = []
         for r in recipes:
             result.append(_recipe_with_ingredients(conn, r['id']))
         return jsonify(result)
+
+
+@app.route('/api/recipes/reorder', methods=['PUT'])
+def reorder_recipes():
+    items = request.json or []
+    with get_db() as conn:
+        for item in items:
+            conn.execute('UPDATE recipes SET sort_order=? WHERE id=?',
+                         (item['sort_order'], item['id']))
+    return jsonify({'success': True})
 
 
 @app.route('/api/recipes', methods=['POST'])
@@ -894,9 +963,19 @@ def get_brews():
             '''SELECT b.*, r.name as recipe_name, r.style as recipe_style,
                       (SELECT COUNT(*) FROM brew_fermentation_readings WHERE brew_id=b.id) as fermentation_count
                FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id
-               ORDER BY b.created_at DESC'''
+               ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC'''
         ).fetchall()
         return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/brews/reorder', methods=['PUT'])
+def reorder_brews():
+    items = request.json or []
+    with get_db() as conn:
+        for item in items:
+            conn.execute('UPDATE brews SET sort_order=? WHERE id=?',
+                         (item['sort_order'], item['id']))
+    return jsonify({'success': True})
 
 
 @app.route('/api/brews', methods=['POST'])
@@ -1000,6 +1079,7 @@ def update_brew(brew_id):
                 # Délier le densimètre et purger ses mesures temps-réel
                 conn.execute('UPDATE spindles SET brew_id=NULL WHERE brew_id=?', (brew_id,))
                 conn.execute('DELETE FROM rdb.spindle_readings WHERE spindle_id=?', (sp['id'],))
+            # La sonde de température reste liée après complétion (refermentation, garde…)
         row = conn.execute(
             '''SELECT b.*, r.name as recipe_name FROM brews b
                LEFT JOIN recipes r ON b.recipe_id=r.id WHERE b.id=?''',
@@ -1047,9 +1127,19 @@ def get_beers():
                FROM beers b
                LEFT JOIN brews br ON b.brew_id=br.id
                LEFT JOIN recipes r ON b.recipe_id=r.id
-               ORDER BY b.created_at DESC'''
+               ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC'''
         ).fetchall()
         return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/beers/reorder', methods=['PUT'])
+def reorder_beers():
+    items = request.json or []
+    with get_db() as conn:
+        for item in items:
+            conn.execute('UPDATE beers SET sort_order=? WHERE id=?',
+                         (item['sort_order'], item['id']))
+    return jsonify({'success': True})
 
 
 @app.route('/api/beers', methods=['POST'])
@@ -1138,7 +1228,7 @@ _SPINDLE_SELECT = '''
 @app.route('/api/spindles', methods=['GET'])
 def get_spindles():
     with get_db() as conn:
-        rows = conn.execute(_SPINDLE_SELECT + ' ORDER BY s.created_at DESC').fetchall()
+        rows = conn.execute(_SPINDLE_SELECT + ' ORDER BY COALESCE(s.sort_order, 9999) ASC, s.created_at DESC').fetchall()
         return jsonify([dict(r) for r in rows])
 
 
@@ -1146,10 +1236,11 @@ def get_spindles():
 def create_spindle():
     d = request.json
     token = secrets.token_urlsafe(16)
+    device_type = d.get('device_type', 'ispindel')
     with get_db() as conn:
         cur = conn.execute(
-            'INSERT INTO spindles (name,token,brew_id,notes) VALUES (?,?,?,?)',
-            (d['name'], token, d.get('brew_id'), d.get('notes'))
+            'INSERT INTO spindles (name,token,brew_id,notes,device_type) VALUES (?,?,?,?,?)',
+            (d['name'], token, d.get('brew_id'), d.get('notes'), device_type)
         )
         row = conn.execute(_SPINDLE_SELECT + ' WHERE s.id=?', (cur.lastrowid,)).fetchone()
         return jsonify(dict(row)), 201
@@ -1160,7 +1251,7 @@ def patch_spindle(spindle_id):
     d = request.json
     with get_db() as conn:
         sets, params = [], []
-        for field in ('name', 'brew_id', 'notes'):
+        for field in ('name', 'brew_id', 'notes', 'device_type'):
             if field in d:
                 sets.append(f'{field}=?')
                 params.append(d[field])
@@ -1182,27 +1273,103 @@ def delete_spindle(spindle_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/spindles/reorder', methods=['PUT'])
+def reorder_spindles():
+    items = request.json or []
+    with get_db() as conn:
+        for item in items:
+            conn.execute('UPDATE spindles SET sort_order=? WHERE id=?',
+                         (item['sort_order'], item['id']))
+    return jsonify({'success': True})
+
+
 @app.route('/api/spindles/<int:spindle_id>/readings', methods=['GET'])
 def get_spindle_readings(spindle_id):
-    limit = request.args.get('limit', 500, type=int)
+    limit   = request.args.get('limit', 2000, type=int)
+    hours   = request.args.get('hours',  type=int)
+    from_ts = request.args.get('from')
+    to_ts   = request.args.get('to')
     with get_readings_db() as conn:
-        rows = conn.execute(
-            'SELECT * FROM spindle_readings WHERE spindle_id=? ORDER BY recorded_at ASC LIMIT ?',
-            (spindle_id, limit)
-        ).fetchall()
+        if hours:
+            rows = conn.execute(
+                "SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= datetime('now',?) ORDER BY recorded_at ASC LIMIT ?",
+                (spindle_id, f'-{hours} hours', limit)
+            ).fetchall()
+        elif from_ts and to_ts:
+            rows = conn.execute(
+                'SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at ASC LIMIT ?',
+                (spindle_id, from_ts, to_ts, limit)
+            ).fetchall()
+        elif from_ts:
+            rows = conn.execute(
+                'SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= ? ORDER BY recorded_at ASC LIMIT ?',
+                (spindle_id, from_ts, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT * FROM spindle_readings WHERE spindle_id=? ORDER BY recorded_at ASC LIMIT ?',
+                (spindle_id, limit)
+            ).fetchall()
         return jsonify([dict(r) for r in rows])
 
 
-@app.route('/api/spindle/data', methods=['POST'])
+@app.route('/api/spindle/data', methods=['POST', 'GET'])
 def receive_spindle_data():
-    """Endpoint iSpindel : POST /api/spindle/data?token=TOKEN"""
-    token = request.args.get('token', '')
+    """Endpoint universel densimètres — POST ou GET /api/spindle/data?token=TOKEN.
+
+    Appareils supportés : iSpindel, Tilt (TiltBridge), GravityMon, générique.
+    Le token peut être passé en query param (?token=) ou dans le corps JSON.
+    """
     d = request.json or {}
+    # Token : query param > corps JSON
+    token = request.args.get('token') or d.get('token') or d.get('Token') or ''
+    if not token:
+        return jsonify({'error': 'token manquant'}), 401
+
     with get_db() as conn:
-        spindle = conn.execute('SELECT id, brew_id FROM spindles WHERE token=?', (token,)).fetchone()
+        spindle = conn.execute(
+            'SELECT id, brew_id, device_type FROM spindles WHERE token=?', (token,)
+        ).fetchone()
         if not spindle:
             return jsonify({'error': 'token invalide'}), 401
-        sid, brew_id = spindle['id'], spindle['brew_id']
+        sid        = spindle['id']
+        brew_id    = spindle['brew_id']
+        device_type = spindle['device_type'] or 'ispindel'
+
+    def _f(v):
+        try: return float(v) if v is not None else None
+        except: return None
+
+    # ── Gravité ───────────────────────────────────────────────────────────────
+    gravity = _f(d.get('gravity') or d.get('Gravity') or d.get('SG') or
+                 d.get('specific_gravity') or d.get('og'))
+
+    # ── Température ───────────────────────────────────────────────────────────
+    # Le Tilt (via TiltBridge) envoie la température en Fahrenheit dans "Temp"
+    if device_type == 'tilt':
+        temp_raw = _f(d.get('Temp') or d.get('temp'))
+        temp_c = round((temp_raw - 32) * 5 / 9, 2) if temp_raw is not None else None
+    else:
+        temp_c = _f(d.get('temperature') or d.get('Temperature') or
+                    d.get('temp') or d.get('celsius'))
+        if temp_c is None:
+            # Fahrenheit explicite (champ temp_f)
+            temp_f = _f(d.get('temp_f') or d.get('Fahrenheit') or d.get('fahrenheit'))
+            if temp_f is not None:
+                temp_c = round((temp_f - 32) * 5 / 9, 2)
+
+    # ── Batterie ──────────────────────────────────────────────────────────────
+    battery = _f(d.get('battery') or d.get('Battery') or
+                 d.get('battery_level') or d.get('voltage') or d.get('Voltage'))
+
+    # ── Angle ─────────────────────────────────────────────────────────────────
+    angle = _f(d.get('angle') or d.get('Angle') or d.get('tilt'))
+
+    # ── RSSI ──────────────────────────────────────────────────────────────────
+    rssi_raw = d.get('RSSI') or d.get('rssi') or d.get('signal') or d.get('Signal')
+    try: rssi = int(rssi_raw)
+    except: rssi = None
+
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with get_readings_db() as rconn:
         if not brew_id:
@@ -1210,8 +1377,7 @@ def receive_spindle_data():
             rconn.execute('DELETE FROM spindle_readings WHERE spindle_id=?', (sid,))
         rconn.execute(
             'INSERT INTO spindle_readings (spindle_id,gravity,temperature,battery,angle,rssi,recorded_at) VALUES (?,?,?,?,?,?,?)',
-            (sid, d.get('gravity'), d.get('temperature'),
-             d.get('battery'), d.get('angle'), d.get('RSSI'), now)
+            (sid, gravity, temp_c, battery, angle, rssi, now)
         )
     return jsonify({'ok': True}), 201
 
@@ -1237,6 +1403,175 @@ def purge_spindle_readings():
         deleted = cur.rowcount
         remaining = conn.execute('SELECT COUNT(*) FROM spindle_readings').fetchone()[0]
         conn.execute('VACUUM')
+    return jsonify({'deleted': deleted, 'remaining': remaining})
+
+
+# ── SONDES DE TEMPÉRATURE ──────────────────────────────────────
+
+_TEMP_SELECT = '''
+    SELECT ts.*,
+           b.name as brew_name,
+           (SELECT temperature FROM rdb.temperature_readings WHERE sensor_id=ts.id ORDER BY recorded_at DESC LIMIT 1) as last_temperature,
+           (SELECT humidity    FROM rdb.temperature_readings WHERE sensor_id=ts.id ORDER BY recorded_at DESC LIMIT 1) as last_humidity,
+           (SELECT target_temp FROM rdb.temperature_readings WHERE sensor_id=ts.id ORDER BY recorded_at DESC LIMIT 1) as last_target_temp,
+           (SELECT hvac_mode   FROM rdb.temperature_readings WHERE sensor_id=ts.id ORDER BY recorded_at DESC LIMIT 1) as last_hvac_mode,
+           (SELECT recorded_at FROM rdb.temperature_readings WHERE sensor_id=ts.id ORDER BY recorded_at DESC LIMIT 1) as last_reading_at,
+           (SELECT COUNT(*)    FROM rdb.temperature_readings WHERE sensor_id=ts.id) as reading_count
+    FROM temperature_sensors ts LEFT JOIN brews b ON ts.brew_id=b.id
+'''
+
+
+@app.route('/api/temperature', methods=['GET'])
+def get_temp_sensors():
+    with get_db() as conn:
+        rows = conn.execute(_TEMP_SELECT + ' ORDER BY COALESCE(ts.sort_order,9999) ASC, ts.created_at DESC').fetchall()
+        return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/temperature', methods=['POST'])
+def create_temp_sensor():
+    d = request.json
+    token = secrets.token_urlsafe(16)
+    sensor_type = d.get('sensor_type', 'sensor')
+    if sensor_type not in ('sensor', 'thermostat'):
+        sensor_type = 'sensor'
+    with get_db() as conn:
+        cur = conn.execute(
+            'INSERT INTO temperature_sensors (name,token,notes,temp_min,temp_max,sensor_type,ha_entity,ha_entity_hum) VALUES (?,?,?,?,?,?,?,?)',
+            (d['name'], token, d.get('notes'), d.get('temp_min'), d.get('temp_max'), sensor_type,
+             d.get('ha_entity') or None, d.get('ha_entity_hum') or None)
+        )
+        row = conn.execute(_TEMP_SELECT + ' WHERE ts.id=?', (cur.lastrowid,)).fetchone()
+        return jsonify(dict(row)), 201
+
+
+@app.route('/api/temperature/<int:sensor_id>', methods=['PATCH'])
+def patch_temp_sensor(sensor_id):
+    d = request.json
+    with get_db() as conn:
+        sets, params = [], []
+        for field in ('name', 'notes', 'temp_min', 'temp_max', 'sensor_type', 'ha_entity', 'ha_entity_hum', 'brew_id'):
+            if field in d:
+                sets.append(f'{field}=?')
+                params.append(d[field])
+        if sets:
+            conn.execute(f'UPDATE temperature_sensors SET {", ".join(sets)} WHERE id=?', params + [sensor_id])
+        row = conn.execute(_TEMP_SELECT + ' WHERE ts.id=?', (sensor_id,)).fetchone()
+        return jsonify(dict(row))
+
+
+@app.route('/api/temperature/<int:sensor_id>', methods=['DELETE'])
+def delete_temp_sensor(sensor_id):
+    with get_db() as conn:
+        conn.execute('DELETE FROM temperature_sensors WHERE id=?', (sensor_id,))
+    with get_readings_db() as rconn:
+        rconn.execute('DELETE FROM temperature_readings WHERE sensor_id=?', (sensor_id,))
+    return jsonify({'success': True})
+
+
+@app.route('/api/temperature/reorder', methods=['PUT'])
+def reorder_temp_sensors():
+    items = request.json or []
+    with get_db() as conn:
+        for item in items:
+            conn.execute('UPDATE temperature_sensors SET sort_order=? WHERE id=?',
+                         (item['sort_order'], item['id']))
+    return jsonify({'success': True})
+
+
+@app.route('/api/temperature/data', methods=['POST', 'GET'])
+def receive_temp_data():
+    """Endpoint Home Assistant : POST /api/temperature/data?token=TOKEN
+    Corps JSON : {"temperature": 18.5, "humidity": 65.0}
+    Le token peut aussi être passé dans le corps JSON.
+    """
+    d = request.json or {}
+    token = request.args.get('token') or d.get('token') or d.get('Token') or ''
+    if not token:
+        return jsonify({'error': 'token manquant'}), 401
+
+    with get_db() as conn:
+        sensor = conn.execute('SELECT id FROM temperature_sensors WHERE token=?', (token,)).fetchone()
+        if not sensor:
+            return jsonify({'error': 'token invalide'}), 401
+        sid = sensor['id']
+
+    def _f(v):
+        try: return float(v) if v is not None else None
+        except: return None
+
+    temperature = _f(d.get('temperature') or d.get('Temperature') or
+                     d.get('temp') or d.get('value'))
+    # Conversion Fahrenheit si nécessaire
+    if temperature is None:
+        temp_f = _f(d.get('temp_f') or d.get('fahrenheit') or d.get('Fahrenheit'))
+        if temp_f is not None:
+            temperature = round((temp_f - 32) * 5 / 9, 2)
+    humidity    = _f(d.get('humidity') or d.get('Humidity') or d.get('hum'))
+    target_temp = _f(d.get('target_temp') or d.get('target_temperature') or d.get('setpoint'))
+    hvac_mode   = d.get('hvac_mode') or d.get('mode') or None
+    if hvac_mode:
+        hvac_mode = str(hvac_mode)[:32]
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with get_readings_db() as rconn:
+        rconn.execute(
+            'INSERT INTO temperature_readings (sensor_id,temperature,humidity,target_temp,hvac_mode,recorded_at) VALUES (?,?,?,?,?,?)',
+            (sid, temperature, humidity, target_temp, hvac_mode, now)
+        )
+    return jsonify({'ok': True}), 201
+
+
+@app.route('/api/temperature/<int:sensor_id>/readings', methods=['GET'])
+def get_temp_readings(sensor_id):
+    limit   = request.args.get('limit', 2000, type=int)
+    hours   = request.args.get('hours', type=int)
+    from_ts = request.args.get('from')
+    to_ts   = request.args.get('to')
+    with get_readings_db() as conn:
+        if hours:
+            rows = conn.execute(
+                "SELECT * FROM temperature_readings WHERE sensor_id=? AND recorded_at >= datetime('now',?) ORDER BY recorded_at ASC LIMIT ?",
+                (sensor_id, f'-{hours} hours', limit)
+            ).fetchall()
+        elif from_ts and to_ts:
+            rows = conn.execute(
+                'SELECT * FROM temperature_readings WHERE sensor_id=? AND recorded_at BETWEEN ? AND ? ORDER BY recorded_at ASC LIMIT ?',
+                (sensor_id, from_ts, to_ts, limit)
+            ).fetchall()
+        elif from_ts:
+            rows = conn.execute(
+                'SELECT * FROM temperature_readings WHERE sensor_id=? AND recorded_at >= ? ORDER BY recorded_at ASC LIMIT ?',
+                (sensor_id, from_ts, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT * FROM temperature_readings WHERE sensor_id=? ORDER BY recorded_at ASC LIMIT ?',
+                (sensor_id, limit)
+            ).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/temperature/readings/stats')
+def temp_readings_stats():
+    with get_readings_db() as conn:
+        total  = conn.execute('SELECT COUNT(*) FROM temperature_readings').fetchone()[0]
+        oldest = conn.execute('SELECT MIN(recorded_at) FROM temperature_readings').fetchone()[0]
+        newest = conn.execute('SELECT MAX(recorded_at) FROM temperature_readings').fetchone()[0]
+    size = os.path.getsize(READINGS_DB_PATH) if os.path.exists(READINGS_DB_PATH) else 0
+    return jsonify({'total': total, 'oldest': oldest, 'newest': newest, 'db_size': size})
+
+
+@app.route('/api/temperature/readings/purge', methods=['DELETE'])
+def purge_temp_readings():
+    days = request.args.get('days', 30, type=int)
+    with get_readings_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM temperature_readings WHERE recorded_at < datetime('now', ?)",
+            (f'-{days} days',)
+        )
+        deleted  = cur.rowcount
+        remaining = conn.execute('SELECT COUNT(*) FROM temperature_readings').fetchone()[0]
     return jsonify({'deleted': deleted, 'remaining': remaining})
 
 
@@ -1312,7 +1647,7 @@ def export_beers():
 @app.route('/api/export/spindles')
 def export_spindles():
     with get_db() as conn:
-        spindles = conn.execute(_SPINDLE_SELECT + ' ORDER BY s.created_at DESC').fetchall()
+        spindles = conn.execute(_SPINDLE_SELECT + ' ORDER BY COALESCE(s.sort_order, 9999) ASC, s.created_at DESC').fetchall()
         result = []
         for s in spindles:
             sp = dict(s)
@@ -1690,6 +2025,30 @@ def get_stats():
                 'SELECT COALESCE(SUM(stock_33cl*0.33 + stock_75cl*0.75),0) FROM beers'
             ),
         })
+
+
+# ── APP SETTINGS (apparence) ─────────────────────────────────────────────────
+
+@app.route('/api/app-settings', methods=['GET'])
+def get_app_settings():
+    with get_db() as conn:
+        rows = conn.execute('SELECT key, value FROM app_settings').fetchall()
+    return jsonify({r['key']: r['value'] for r in rows})
+
+
+@app.route('/api/app-settings', methods=['PUT'])
+def save_app_settings():
+    data = request.json or {}
+    with get_db() as conn:
+        for key, value in data.items():
+            if value is None:
+                conn.execute('DELETE FROM app_settings WHERE key=?', (key,))
+            else:
+                conn.execute(
+                    'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
+                    (key, str(value))
+                )
+    return jsonify({'success': True})
 
 
 # ── MAIN ─────────────────────────────────────────────────────────────────────

@@ -1,22 +1,22 @@
 
 <!-- ══ NAV ══════════════════════════════════════════════════════════════════ -->
 <nav>
-  <div class="nav-brand">Brew<span>Home</span></div>
+  <div class="nav-brand" id="nav-brand">Brew<span>Home</span></div>
   <div class="nav-links">
     <button class="nav-btn active" onclick="navigate('inventaire')" id="nav-inventaire">
-      <i class="fas fa-boxes-stacked"></i> Inventaire <span class="nav-badge" id="nb-inv">0</span>
+      <i class="fas fa-boxes-stacked"></i> <span data-i18n="nav.inventaire">Inventaire</span> <span class="nav-badge" id="nb-inv">0</span>
     </button>
     <button class="nav-btn" onclick="navigate('recettes')" id="nav-recettes">
-      <i class="fas fa-scroll"></i> Recettes <span class="nav-badge" id="nb-rec">0</span>
+      <i class="fas fa-scroll"></i> <span data-i18n="nav.recettes">Recettes</span> <span class="nav-badge" id="nb-rec">0</span>
     </button>
     <button class="nav-btn" onclick="navigate('brassins')" id="nav-brassins">
-      <i class="fas fa-fire-burner"></i> Brassins <span class="nav-badge" id="nb-bra">0</span>
+      <i class="fas fa-fire-burner"></i> <span data-i18n="nav.brassins">Brassins</span> <span class="nav-badge" id="nb-bra">0</span>
     </button>
     <button class="nav-btn" onclick="navigate('cave')" id="nav-cave">
-      <i class="fas fa-beer-mug-empty"></i> Cave <span class="nav-badge" id="nb-cav">0</span>
+      <i class="fas fa-beer-mug-empty"></i> <span data-i18n="nav.cave">Cave</span> <span class="nav-badge" id="nb-cav">0</span>
     </button>
     <button class="nav-btn" onclick="navigate('spindles')" id="nav-spindles">
-      <i class="fas fa-water"></i> Densimètres <span class="nav-badge" id="nb-spin">0</span>
+      <i class="fas fa-gauge-high"></i> <span data-i18n="nav.spindles">Capteurs</span> <span class="nav-badge" id="nb-spin">0</span>
     </button>
   </div>
   <div style="display:flex;gap:2px;margin-left:auto">

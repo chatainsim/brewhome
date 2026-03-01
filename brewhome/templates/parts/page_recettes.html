@@ -105,10 +105,19 @@
         </div>
 
         <!-- Volume -->
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-          <span style="font-size:.82rem;color:var(--muted)"><i class="fas fa-droplet"></i> Volume d'eau total</span>
-          <input type="number" id="wc-volume" step="0.5" min="0.1" style="width:80px" oninput="calcWaterCorrection()">
-          <span style="font-size:.8rem;color:var(--muted)">L</span>
+        <div style="display:flex;align-items:center;gap:20px;margin-bottom:12px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px">
+            <i class="fas fa-droplet" style="color:var(--info);font-size:.8rem"></i>
+            <span style="font-size:.82rem;color:var(--muted)">Empâtage</span>
+            <input type="number" id="wc-volume-mash" step="0.5" min="0.1" style="width:72px" oninput="calcWaterCorrection()">
+            <span style="font-size:.8rem;color:var(--muted)">L</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <i class="fas fa-droplet" style="color:var(--muted);font-size:.8rem"></i>
+            <span style="font-size:.82rem;color:var(--muted)">Rinçage</span>
+            <input type="number" id="wc-volume-sparge" step="0.5" min="0.1" style="width:72px" oninput="calcWaterCorrection()">
+            <span style="font-size:.8rem;color:var(--muted)">L</span>
+          </div>
         </div>
 
         <!-- Profil cible -->
@@ -128,19 +137,20 @@
           <button class="btn btn-ghost btn-sm" onclick="wcPreset('edinburgh')">Edinburgh</button>
         </div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:6px">
-          <div class="field" style="margin:0"><label style="font-size:.72rem">Ca²⁺</label><input type="number" id="wc-t-ca"   min="0" step="1" oninput="calcWaterCorrection()"></div>
-          <div class="field" style="margin:0"><label style="font-size:.72rem">Mg²⁺</label><input type="number" id="wc-t-mg"   min="0" step="1" oninput="calcWaterCorrection()"></div>
-          <div class="field" style="margin:0"><label style="font-size:.72rem">Na⁺</label> <input type="number" id="wc-t-na"   min="0" step="1" oninput="calcWaterCorrection()"></div>
-          <div class="field" style="margin:0"><label style="font-size:.72rem">SO₄²⁻</label><input type="number" id="wc-t-so4" min="0" step="1" oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Calcium (Ca²⁺)</label><input type="number" id="wc-t-ca"   min="0" step="1" oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Magnésium (Mg²⁺)</label><input type="number" id="wc-t-mg"   min="0" step="1" oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Sodium (Na⁺)</label> <input type="number" id="wc-t-na"   min="0" step="1" oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Sulfates (SO₄²⁻)</label><input type="number" id="wc-t-so4" min="0" step="1" oninput="calcWaterCorrection()"></div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px">
-          <div class="field" style="margin:0"><label style="font-size:.72rem">Cl⁻</label>    <input type="number" id="wc-t-cl"   min="0" step="1"   oninput="calcWaterCorrection()"></div>
-          <div class="field" style="margin:0"><label style="font-size:.72rem">HCO₃⁻</label> <input type="number" id="wc-t-hco3" min="0" step="1"   oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Chlorures (Cl⁻)</label>    <input type="number" id="wc-t-cl"   min="0" step="1"   oninput="calcWaterCorrection()"></div>
+          <div class="field" style="margin:0"><label style="font-size:.72rem">Bicarbonates (HCO₃⁻)</label> <input type="number" id="wc-t-hco3" min="0" step="1"   oninput="calcWaterCorrection()"></div>
           <div class="field" style="margin:0"><label style="font-size:.72rem">pH cible (moût)</label><input type="number" id="wc-t-ph" min="4.0" max="6.5" step="0.1" placeholder="5.3" oninput="calcWaterCorrection()"></div>
         </div>
 
         <!-- Résultats -->
-        <div id="wc-results" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:14px"></div>
+        <div id="wc-results-mash" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:14px"></div>
+        <div id="wc-results-sparge" style="display:none;border-top:1px solid var(--border);padding-top:14px"></div>
       </div><!-- /rec-wc-panel -->
 
       <div class="divider"></div>

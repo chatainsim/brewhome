@@ -9,9 +9,11 @@
       <div class="stabs">
         <button class="stab active" data-tab="catalogue" onclick="settingsTab('catalogue')"><i class="fas fa-book"></i> Catalogue</button>
         <button class="stab" data-tab="thresholds" onclick="settingsTab('thresholds')"><i class="fas fa-gauge-high"></i> Seuils</button>
-        <button class="stab" data-tab="water" onclick="settingsTab('water')"><i class="fas fa-droplet"></i> Eau</button>
+        <button class="stab" data-tab="water" onclick="settingsTab('water')"><i class="fas fa-droplet"></i> Eau & Énergie</button>
         <button class="stab" data-tab="import" onclick="settingsTab('import')"><i class="fas fa-file-import"></i> Import / Export</button>
         <button class="stab" data-tab="github" onclick="settingsTab('github')"><i class="fa-brands fa-github"></i> GitHub</button>
+        <button class="stab" data-tab="lang" onclick="settingsTab('lang')"><i class="fas fa-language"></i> <span data-i18n="settings.tabs.lang">Langue</span></button>
+        <button class="stab" data-tab="apparence" onclick="settingsTab('apparence')"><i class="fas fa-palette"></i> Apparence</button>
       </div>
 
       <!-- TAB CATALOGUE -->
@@ -114,9 +116,9 @@
       <div id="stab-water" style="display:none">
         <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px">Profil de votre eau de brassage. Ces données sont utilisées à titre indicatif et pour estimer le coût de l'eau dans le calcul de recette.</p>
 
-        <!-- Prix -->
+        <!-- Prix eau -->
         <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
-          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-euro-sign"></i> Coût</div>
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-droplet"></i> Eau</div>
           <div style="display:flex;align-items:center;gap:10px">
             <label style="font-size:.88rem;color:var(--muted);white-space:nowrap">Prix au litre</label>
             <input type="number" id="water-price" min="0" step="0.0001" placeholder="Ex : 0.003" style="width:120px">
@@ -125,19 +127,104 @@
           </div>
         </div>
 
+        <!-- Énergie -->
+        <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-fire-flame-curved"></i> Énergie</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <label style="font-size:.88rem;color:var(--muted);white-space:nowrap;width:160px">Coût gaz / brassin</label>
+            <input type="number" id="energy-gas" min="0" step="0.01" placeholder="Ex : 2.50" style="width:120px">
+            <span style="font-size:.85rem;color:var(--muted)">€/brassin</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <label style="font-size:.88rem;color:var(--muted);white-space:nowrap;width:160px">Coût électricité / brassin</label>
+            <input type="number" id="energy-elec" min="0" step="0.01" placeholder="Ex : 1.20" style="width:120px">
+            <span style="font-size:.85rem;color:var(--muted)">€/brassin</span>
+          </div>
+          <p style="font-size:.78rem;color:var(--muted);margin-top:8px">(ajoutés au coût total de chaque recette)</p>
+        </div>
+
+        <!-- HubEau -->
+        <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-satellite-dish"></i> Récupération automatique (HubEau)</div>
+          <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px">Récupère les dernières valeurs connues de votre eau du robinet via l'API HubEau d'Eau France.</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+            <select id="hubeau-dept" onchange="hubEauDeptChange()" style="flex:0 0 auto;min-width:200px">
+              <option value="">— Département —</option>
+              <option value="01">01 – Ain</option><option value="02">02 – Aisne</option><option value="03">03 – Allier</option>
+              <option value="04">04 – Alpes-de-Haute-Provence</option><option value="05">05 – Hautes-Alpes</option>
+              <option value="06">06 – Alpes-Maritimes</option><option value="07">07 – Ardèche</option>
+              <option value="08">08 – Ardennes</option><option value="09">09 – Ariège</option>
+              <option value="10">10 – Aube</option><option value="11">11 – Aude</option>
+              <option value="12">12 – Aveyron</option><option value="13">13 – Bouches-du-Rhône</option>
+              <option value="14">14 – Calvados</option><option value="15">15 – Cantal</option>
+              <option value="16">16 – Charente</option><option value="17">17 – Charente-Maritime</option>
+              <option value="18">18 – Cher</option><option value="19">19 – Corrèze</option>
+              <option value="2A">2A – Corse-du-Sud</option><option value="2B">2B – Haute-Corse</option>
+              <option value="21">21 – Côte-d'Or</option><option value="22">22 – Côtes-d'Armor</option>
+              <option value="23">23 – Creuse</option><option value="24">24 – Dordogne</option>
+              <option value="25">25 – Doubs</option><option value="26">26 – Drôme</option>
+              <option value="27">27 – Eure</option><option value="28">28 – Eure-et-Loir</option>
+              <option value="29">29 – Finistère</option><option value="30">30 – Gard</option>
+              <option value="31">31 – Haute-Garonne</option><option value="32">32 – Gers</option>
+              <option value="33">33 – Gironde</option><option value="34">34 – Hérault</option>
+              <option value="35">35 – Ille-et-Vilaine</option><option value="36">36 – Indre</option>
+              <option value="37">37 – Indre-et-Loire</option><option value="38">38 – Isère</option>
+              <option value="39">39 – Jura</option><option value="40">40 – Landes</option>
+              <option value="41">41 – Loir-et-Cher</option><option value="42">42 – Loire</option>
+              <option value="43">43 – Haute-Loire</option><option value="44">44 – Loire-Atlantique</option>
+              <option value="45">45 – Loiret</option><option value="46">46 – Lot</option>
+              <option value="47">47 – Lot-et-Garonne</option><option value="48">48 – Lozère</option>
+              <option value="49">49 – Maine-et-Loire</option><option value="50">50 – Manche</option>
+              <option value="51">51 – Marne</option><option value="52">52 – Haute-Marne</option>
+              <option value="53">53 – Mayenne</option><option value="54">54 – Meurthe-et-Moselle</option>
+              <option value="55">55 – Meuse</option><option value="56">56 – Morbihan</option>
+              <option value="57">57 – Moselle</option><option value="58">58 – Nièvre</option>
+              <option value="59">59 – Nord</option><option value="60">60 – Oise</option>
+              <option value="61">61 – Orne</option><option value="62">62 – Pas-de-Calais</option>
+              <option value="63">63 – Puy-de-Dôme</option><option value="64">64 – Pyrénées-Atlantiques</option>
+              <option value="65">65 – Hautes-Pyrénées</option><option value="66">66 – Pyrénées-Orientales</option>
+              <option value="67">67 – Bas-Rhin</option><option value="68">68 – Haut-Rhin</option>
+              <option value="69">69 – Rhône</option><option value="70">70 – Haute-Saône</option>
+              <option value="71">71 – Saône-et-Loire</option><option value="72">72 – Sarthe</option>
+              <option value="73">73 – Savoie</option><option value="74">74 – Haute-Savoie</option>
+              <option value="75">75 – Paris</option><option value="76">76 – Seine-Maritime</option>
+              <option value="77">77 – Seine-et-Marne</option><option value="78">78 – Yvelines</option>
+              <option value="79">79 – Deux-Sèvres</option><option value="80">80 – Somme</option>
+              <option value="81">81 – Tarn</option><option value="82">82 – Tarn-et-Garonne</option>
+              <option value="83">83 – Var</option><option value="84">84 – Vaucluse</option>
+              <option value="85">85 – Vendée</option><option value="86">86 – Vienne</option>
+              <option value="87">87 – Haute-Vienne</option><option value="88">88 – Vosges</option>
+              <option value="89">89 – Yonne</option><option value="90">90 – Territoire de Belfort</option>
+              <option value="91">91 – Essonne</option><option value="92">92 – Hauts-de-Seine</option>
+              <option value="93">93 – Seine-Saint-Denis</option><option value="94">94 – Val-de-Marne</option>
+              <option value="95">95 – Val-d'Oise</option>
+              <option value="971">971 – Guadeloupe</option><option value="972">972 – Martinique</option>
+              <option value="973">973 – Guyane</option><option value="974">974 – La Réunion</option>
+              <option value="976">976 – Mayotte</option>
+            </select>
+            <select id="hubeau-commune" disabled style="flex:1 1 200px;min-width:200px">
+              <option value="">— Commune —</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" id="hubeau-fetch-btn" onclick="hubEauFetch()" disabled>
+              <i class="fas fa-satellite-dish"></i> Récupérer
+            </button>
+          </div>
+          <div id="hubeau-result" style="display:none"></div>
+        </div>
+
         <!-- Profil minéral -->
         <div>
           <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-flask"></i> Profil minéral (mg/L)</div>
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
             <div class="field"><label>pH</label><input type="number" id="water-ph" min="0" max="14" step="0.1" placeholder="Ex : 7.2"></div>
-            <div class="field"><label>Ca²⁺ (mg/L)</label><input type="number" id="water-ca" min="0" step="1" placeholder="Ex : 80"></div>
-            <div class="field"><label>Mg²⁺ (mg/L)</label><input type="number" id="water-mg" min="0" step="1" placeholder="Ex : 10"></div>
-            <div class="field"><label>Na⁺ (mg/L)</label><input type="number" id="water-na" min="0" step="1" placeholder="Ex : 20"></div>
+            <div class="field"><label>Calcium (Ca²⁺) mg/L</label><input type="number" id="water-ca" min="0" step="1" placeholder="Ex : 80"></div>
+            <div class="field"><label>Magnésium (Mg²⁺) mg/L</label><input type="number" id="water-mg" min="0" step="1" placeholder="Ex : 10"></div>
+            <div class="field"><label>Sodium (Na⁺) mg/L</label><input type="number" id="water-na" min="0" step="1" placeholder="Ex : 20"></div>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
-            <div class="field"><label>SO₄²⁻ (mg/L)</label><input type="number" id="water-so4" min="0" step="1" placeholder="Ex : 60"></div>
-            <div class="field"><label>Cl⁻ (mg/L)</label><input type="number" id="water-cl" min="0" step="1" placeholder="Ex : 50"></div>
-            <div class="field"><label>HCO₃⁻ (mg/L)</label><input type="number" id="water-hco3" min="0" step="1" placeholder="Ex : 120"></div>
+            <div class="field"><label>Sulfates (SO₄²⁻) mg/L</label><input type="number" id="water-so4" min="0" step="1" placeholder="Ex : 60"></div>
+            <div class="field"><label>Chlorures (Cl⁻) mg/L</label><input type="number" id="water-cl" min="0" step="1" placeholder="Ex : 50"></div>
+            <div class="field"><label>Bicarbonates (HCO₃⁻) mg/L</label><input type="number" id="water-hco3" min="0" step="1" placeholder="Ex : 120"></div>
           </div>
         </div>
 
@@ -205,6 +292,17 @@
             </div>
           </div>
 
+          <!-- Paramètres avancés -->
+          <div style="background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.2);border-radius:10px;padding:14px">
+            <h4 style="font-size:.82rem;font-weight:700;margin-bottom:12px;color:#a78bfa;text-transform:uppercase;letter-spacing:.05em"><i class="fas fa-sliders"></i> Paramètres avancés</h4>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="exportSettings()"><i class="fas fa-file-export"></i> Exporter (JSON)</button>
+              <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-settings-file')"><i class="fas fa-file-import"></i> Importer (JSON)</button>
+              <input type="file" id="import-settings-file" accept=".json" style="display:none" onchange="importSettings(this)">
+              <p style="font-size:.72rem;color:var(--muted);margin:0">Eau, énergie, seuils, apparence. Les tokens GitHub sont exclus.</p>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -233,7 +331,7 @@
                   <button class="btn btn-ghost btn-sm btn-icon" onclick="togglePat('gh-vit-pat')" title="Afficher/masquer"><i class="fas fa-eye"></i></button>
                 </div>
               </div>
-              <button class="btn btn-primary btn-sm" onclick="pushVitrine()">
+              <button id="btn-push-vitrine" class="btn btn-primary btn-sm" onclick="pushVitrine()">
                 <i class="fa-brands fa-github"></i> Pousser la vitrine
               </button>
               <p style="font-size:.73rem;color:var(--muted);margin:0">Pousse <code>index.html</code> + <code>beers.json</code> vers ce dépôt.</p>
@@ -261,7 +359,7 @@
                   <button class="btn btn-ghost btn-sm btn-icon" onclick="togglePat('gh-dat-pat')" title="Afficher/masquer"><i class="fas fa-eye"></i></button>
                 </div>
               </div>
-              <button class="btn btn-primary btn-sm" onclick="pushGithubData()">
+              <button id="btn-push-data" class="btn btn-primary btn-sm" onclick="pushGithubData()">
                 <i class="fa-brands fa-github"></i> Pousser les données
               </button>
               <div style="font-size:.73rem;color:var(--muted);line-height:1.6">
@@ -272,6 +370,7 @@
                   <li><code>brassins.json</code> — brassins &amp; fermentation</li>
                   <li><code>cave.json</code> — bières en cave</li>
                   <li><code>densimetres.json</code> — densimètres &amp; lectures</li>
+                  <li><code>parametres.json</code> — eau, énergie, seuils, apparence</li>
                 </ul>
               </div>
             </div>
@@ -280,11 +379,63 @@
         </div>
       </div><!-- /stab-github -->
 
+      <!-- TAB LANGUE -->
+      <div id="stab-lang" style="display:none">
+        <!-- contenu injecté par renderSettingsLang() -->
+      </div>
+
+      <!-- TAB APPARENCE -->
+      <div id="stab-apparence" style="display:none">
+
+        <!-- Nom de l'application -->
+        <div style="margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--border)">
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-signature"></i> Nom de l'application</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="app-name-input" placeholder="BrewHome" style="width:220px">
+            <span style="font-size:.8rem;color:var(--muted)">Affiché dans la nav et l'onglet du navigateur</span>
+          </div>
+        </div>
+
+        <!-- Couleur d'accent -->
+        <div style="margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--border)">
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-droplet"></i> Couleur principale</div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <input type="color" id="app-accent-color" value="#ff9500" style="width:48px;height:38px;border:none;background:none;cursor:pointer;border-radius:8px;padding:2px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn btn-sm" onclick="setAccentPreset('#ff9500')" style="background:#ff9500;color:#000;border-color:#ff9500;font-weight:700">Ambre</button>
+              <button class="btn btn-sm" onclick="setAccentPreset('#3b82f6')" style="background:#3b82f6;color:#fff;border-color:#3b82f6;font-weight:700">Bleu</button>
+              <button class="btn btn-sm" onclick="setAccentPreset('#10b981')" style="background:#10b981;color:#fff;border-color:#10b981;font-weight:700">Vert</button>
+              <button class="btn btn-sm" onclick="setAccentPreset('#ec4899')" style="background:#ec4899;color:#fff;border-color:#ec4899;font-weight:700">Rose</button>
+              <button class="btn btn-sm" onclick="setAccentPreset('#8b5cf6')" style="background:#8b5cf6;color:#fff;border-color:#8b5cf6;font-weight:700">Violet</button>
+              <button class="btn btn-sm" onclick="setAccentPreset('#ef4444')" style="background:#ef4444;color:#fff;border-color:#ef4444;font-weight:700">Rouge</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Icône / Favicon -->
+        <div>
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:8px"><i class="fas fa-image"></i> Icône &amp; Favicon</div>
+          <p style="font-size:.83rem;color:var(--muted);margin-bottom:12px">Remplace le texte de marque dans la navigation et sert de favicon dans l'onglet du navigateur.</p>
+          <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+            <div id="app-icon-preview" style="width:64px;height:64px;border:2px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.6rem;overflow:hidden;flex-shrink:0;background:var(--card2)">
+              <i class="fas fa-image"></i>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="document.getElementById('app-icon-file').click()"><i class="fas fa-upload"></i> Choisir une image</button>
+              <button class="btn btn-ghost btn-sm" id="app-icon-remove-btn" style="display:none" onclick="removeAppIcon()"><i class="fas fa-trash"></i> Supprimer l'icône</button>
+              <input type="file" id="app-icon-file" accept="image/*" style="display:none" onchange="previewAppIcon(event)">
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /stab-apparence -->
+
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeSettings()">Fermer</button>
       <button class="btn btn-primary" id="settings-save-btn" onclick="saveThresholds()" style="display:none"><i class="fas fa-floppy-disk"></i> Enregistrer les seuils</button>
       <button class="btn btn-success" id="github-save-btn" onclick="saveGithubSettings()" style="display:none"><i class="fas fa-floppy-disk"></i> Enregistrer la config GitHub</button>
+      <button class="btn btn-primary" id="apparence-save-btn" onclick="saveApparence()" style="display:none"><i class="fas fa-floppy-disk"></i> Appliquer</button>
     </div>
   </div>
 </div>
