@@ -1,0 +1,210 @@
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PAGE : CAHIER DE BROUILLONS
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-brouillons">
+  <div class="section-head">
+    <h2><i class="fas fa-book-open" style="color:var(--amber)"></i> <span data-i18n="draft.title">Cahier de brouillons</span></h2>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="newDraft()">
+        <i class="fas fa-plus"></i> <span data-i18n="draft.new">Nouveau brouillon</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="brouillons-layout" style="display:flex;gap:16px;align-items:flex-start">
+
+    <!-- LISTE -->
+    <div id="draft-list-panel" style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
+      <div id="draft-list-empty" style="display:none;color:var(--muted);font-size:.875rem;padding:24px 0;text-align:center">
+        <i class="fas fa-book-open" style="font-size:2rem;display:block;margin-bottom:8px;opacity:.4"></i>
+        <p data-i18n="draft.empty" style="margin:0">Aucun brouillon. Cliquez sur + Nouveau brouillon.</p>
+      </div>
+      <div id="draft-list" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+
+    <!-- ÉDITEUR -->
+    <div id="draft-editor" style="flex:1;min-width:0;display:none">
+      <div class="card" style="padding:20px 24px">
+
+        <!-- Barre d'actions (contenu injecté par setDraftMode) -->
+        <div id="draft-actions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border)"></div>
+
+        <!-- ══ VUE LECTURE ══ -->
+        <div id="draft-view-panel" style="display:none"></div>
+
+        <!-- ══ FORMULAIRE ÉDITION ══ -->
+        <div id="draft-form-panel">
+
+          <!-- Titre + couleur -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+            <input id="draft-title" type="text" class="form-control"
+              placeholder="Titre du brouillon"
+              style="font-size:1.1rem;font-weight:600;flex:1"
+              oninput="scheduleDraftSave()">
+            <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+              <label style="font-size:.75rem;color:var(--muted)" data-i18n="draft.field_color">Couleur</label>
+              <input id="draft-color" type="color" value="#ff9500"
+                style="width:32px;height:32px;border:none;border-radius:6px;cursor:pointer;background:none;padding:0"
+                oninput="scheduleDraftSave()">
+            </div>
+          </div>
+
+          <!-- Bannière dates -->
+          <div id="draft-date-banner" style="display:none;flex-direction:column;gap:5px;margin-bottom:14px;
+            padding:10px 14px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.22);
+            border-radius:10px;font-size:.82rem">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="fas fa-fire-burner" style="color:var(--amber);flex-shrink:0;width:14px;text-align:center"></i>
+              <span style="color:var(--muted)" data-i18n="draft.brew_on">Brasser le</span>
+              <span id="draft-banner-brew" style="font-weight:700;color:var(--amber)"></span>
+              <span id="draft-banner-brew-cd" style="font-size:.75rem;font-weight:700;margin-left:auto"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="fas fa-calendar-star" style="color:#8b5cf6;flex-shrink:0;width:14px;text-align:center"></i>
+              <span id="draft-banner-label" style="font-weight:600;color:#8b5cf6;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+              <span id="draft-banner-date" style="color:var(--muted);flex-shrink:0"></span>
+              <span id="draft-banner-countdown" style="font-size:.75rem;font-weight:700;flex-shrink:0"></span>
+            </div>
+          </div>
+
+          <!-- Style + Volume -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div style="position:relative">
+              <label class="form-label" data-i18n="draft.field_style">Style BJCP</label>
+              <input id="draft-style" type="text" class="form-control" placeholder="Rechercher un style…"
+                autocomplete="off"
+                oninput="draftStyleSearch(this)" onfocus="draftStyleSearch(this)"
+                onblur="setTimeout(closeDraftStyleSuggest,200)"
+                onchange="scheduleDraftSave()">
+              <div id="draft-style-sug" class="ing-suggest" style="max-height:320px"></div>
+            </div>
+            <div>
+              <label class="form-label" data-i18n="draft.field_volume">Volume cible (L)</label>
+              <input id="draft-volume" type="number" class="form-control" placeholder="ex: 20"
+                min="1" step="0.5" oninput="scheduleDraftSave()">
+            </div>
+          </div>
+
+          <!-- Ingrédients -->
+          <div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <label class="form-label" style="margin:0" data-i18n="draft.ingredients">Ingrédients</label>
+              <div id="draft-ing-btns" style="display:flex;gap:6px">
+                <button class="btn btn-sm btn-ghost" style="color:var(--malt);border-color:var(--malt)"
+                  onclick="addDraftIngRow('malt')">
+                  <i class="fas fa-wheat-awn"></i> <span data-i18n="draft.ing_add_malt">Malt</span>
+                </button>
+                <button class="btn btn-sm btn-ghost" style="color:var(--hop);border-color:var(--hop)"
+                  onclick="addDraftIngRow('houblon')">
+                  <i class="fas fa-seedling"></i> <span data-i18n="draft.ing_add_hop">Houblon</span>
+                </button>
+                <button class="btn btn-sm btn-ghost" style="color:var(--yeast);border-color:var(--yeast)"
+                  onclick="addDraftIngRow('levure')">
+                  <i class="fas fa-circle-nodes"></i> <span data-i18n="draft.ing_add_yeast">Levure</span>
+                </button>
+                <button class="btn btn-sm btn-ghost" style="color:var(--other);border-color:var(--other)"
+                  onclick="addDraftIngRow('autre')">
+                  <i class="fas fa-plus"></i> <span data-i18n="draft.ing_add_other">Autre</span>
+                </button>
+              </div>
+            </div>
+            <div id="draft-ing-empty" style="color:var(--muted);font-size:.8rem;padding:10px 0;display:none" data-i18n="draft.no_ing">
+              Ajoutez des ingrédients avec les boutons ci-dessus.
+            </div>
+            <div id="draft-ing-rows"></div>
+          </div>
+
+          <!-- Objectif de brassage -->
+          <div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <label class="form-label" style="margin:0" data-i18n="draft.brew_target">Objectif de brassage</label>
+              <span style="font-size:.72rem;color:var(--muted)" data-i18n="draft.event_target">(événement cible)</span>
+            </div>
+            <div id="draft-event-linked" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.3);border-radius:9px;margin-bottom:6px">
+              <i class="fas fa-calendar-star" style="color:#8b5cf6;flex-shrink:0"></i>
+              <div style="flex:1;min-width:0">
+                <div id="draft-event-label" style="font-weight:600;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+                <div id="draft-event-date" style="font-size:.72rem;color:var(--muted)"></div>
+              </div>
+              <button class="btn btn-ghost btn-sm" style="padding:2px 7px;flex-shrink:0"
+                onclick="unlinkDraftEvent()" title="Dissocier">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <button id="draft-event-pick-btn" class="btn btn-ghost btn-sm" onclick="toggleDraftEventPicker()">
+              <i class="fas fa-calendar-plus"></i> <span data-i18n="draft.link_event">Associer à un événement</span>
+            </button>
+            <!-- Picker d'événements -->
+            <div id="draft-event-picker" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden;max-height:260px;overflow-y:auto">
+              <div id="draft-event-picker-list"></div>
+            </div>
+          </div>
+
+          <!-- Notes -->
+          <div style="margin-bottom:20px">
+            <label class="form-label" data-i18n="draft.field_notes">Notes & idées</label>
+            <textarea id="draft-notes" class="form-control" rows="4"
+              placeholder="Inspirations, références, ajustements prévus…"
+              style="resize:vertical;font-family:inherit"
+              oninput="scheduleDraftSave()"></textarea>
+          </div>
+
+          <!-- Image -->
+          <div style="margin-bottom:8px">
+            <label class="form-label" data-i18n="draft.image">Image</label>
+            <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+              <!-- Aperçu -->
+              <div style="flex-shrink:0">
+                <div id="draft-img-empty" onclick="document.getElementById('draft-img-input').click()"
+                  style="width:160px;height:160px;border:2px dashed var(--border);border-radius:12px;
+                    display:flex;flex-direction:column;align-items:center;justify-content:center;
+                    gap:8px;color:var(--muted);font-size:.8rem;cursor:pointer;transition:border-color .2s"
+                  onmouseenter="this.style.borderColor='var(--accent)'"
+                  onmouseleave="this.style.borderColor='var(--border)'">
+                  <i class="fas fa-image" style="font-size:1.8rem;opacity:.35"></i>
+                  <span data-i18n="draft.img_click_add" style="text-align:center;line-height:1.3;white-space:pre-line">Cliquer pour&#10;ajouter</span>
+                </div>
+                <img id="draft-img-preview" src="" alt="aperçu"
+                  style="display:none;width:160px;height:160px;object-fit:cover;border-radius:12px;cursor:pointer"
+                  onclick="document.getElementById('draft-img-input').click()"
+                  title="Cliquer pour changer l'image">
+                <input type="file" id="draft-img-input" accept="image/*" style="display:none"
+                  onchange="loadDraftImageFile(this)">
+              </div>
+              <!-- Boutons + prompt -->
+              <div style="display:flex;flex-direction:column;gap:8px;padding-top:4px;flex:1;min-width:160px">
+                <textarea id="draft-img-extra" class="form-control" rows="3"
+                  placeholder="Instructions supplémentaires pour l'IA (style artistique, couleurs, ambiance…)"
+                  style="resize:vertical;font-size:.82rem;font-family:inherit"></textarea>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-ghost btn-sm" id="draft-img-ai-btn" onclick="generateDraftImage()"
+                    style="color:#8b5cf6;border-color:rgba(139,92,246,.4)">
+                    <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="draft.img_generate">Générer avec IA</span>
+                  </button>
+                  <button class="btn btn-ghost btn-sm" onclick="document.getElementById('draft-img-input').click()">
+                    <i class="fas fa-upload"></i> <span data-i18n="draft.img_import">Importer</span>
+                  </button>
+                  <button id="draft-img-remove-btn" class="btn btn-ghost btn-sm"
+                    style="display:none;color:var(--danger)" onclick="removeDraftImage()">
+                    <i class="fas fa-trash"></i> <span data-i18n="draft.img_remove">Supprimer</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <span id="draft-save-status" style="font-size:.78rem;color:var(--muted);display:block;margin-top:10px"></span>
+
+        </div><!-- /draft-form-panel -->
+
+      </div>
+    </div>
+
+    <!-- Placeholder quand rien n'est sélectionné -->
+    <div id="draft-editor-placeholder" style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;padding:60px 0;color:var(--muted);font-size:.9rem;flex-direction:column;gap:10px">
+      <i class="fas fa-book-open" style="font-size:2.5rem;opacity:.3"></i>
+      <span data-i18n="draft.select_hint">Sélectionnez ou créez un brouillon</span>
+    </div>
+
+  </div>
+</div>

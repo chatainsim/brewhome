@@ -316,7 +316,9 @@ td{padding:10px 12px;vertical-align:middle}
 
 /* ── TOAST ── */
 #toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px}
-.toast-item{padding:12px 18px;border-radius:10px;font-size:.875rem;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,.4);animation:toastIn .3s ease;display:flex;align-items:center;gap:10px;max-width:340px}
+.toast-item{padding:10px 14px;border-radius:10px;font-size:.875rem;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,.4);animation:toastIn .3s ease;display:flex;align-items:center;gap:10px;max-width:360px}
+.toast-close{margin-left:auto;padding:0 0 0 8px;cursor:pointer;opacity:.6;font-size:.8rem;line-height:1;flex-shrink:0;background:none;border:none;color:inherit}
+.toast-close:hover{opacity:1}
 @keyframes toastIn{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}
 .toast-success{background:#166534;color:#bbf7d0;border:1px solid #16a34a}
 .toast-error{background:#7f1d1d;color:#fecaca;border:1px solid #dc2626}
@@ -393,6 +395,21 @@ td{padding:10px 12px;vertical-align:middle}
   /* Modales */
   .modal{margin:8px;max-height:calc(100dvh - 16px)}
   .modal-body{padding:14px}
+
+  /* Section head */
+  .section-head h2{font-size:1.15rem}
+
+  /* Brouillons — empilement vertical */
+  #brouillons-layout{flex-direction:column}
+  #draft-list-panel{width:100%!important}
+  #draft-editor,#draft-editor-placeholder{width:100%}
+  #draft-ing-btns{flex-wrap:wrap}
+  #draft-editor .card{padding:14px 16px}
+
+  /* Calendrier — cellules compactes */
+  .cal-dh{font-size:.62rem;padding:5px 2px}
+  .cal-cell{min-height:58px!important;padding:4px 3px}
+  .cal-event{font-size:.62rem;padding:1px 3px;gap:2px}
 }
 
 /* ══ THÈME CLAIR ══════════════════════════════════════════════════════════════ */

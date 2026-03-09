@@ -1,9 +1,9 @@
 <div class="page" id="page-brassins">
   <div class="section-head">
-    <h2>Sessions de brassage</h2>
+    <h2 data-i18n="brew.page_title">Sessions de brassage</h2>
     <div class="actions">
       <button class="btn btn-ghost btn-sm" id="brew-arch-btn" onclick="toggleShowArchived('brew')"></button>
-      <button class="btn btn-primary" onclick="openModal('brew-modal')"><i class="fas fa-fire-burner"></i> Lancer un brassin</button>
+      <button class="btn btn-primary" onclick="openModal('brew-modal')"><i class="fas fa-fire-burner"></i> <span data-i18n="brew.launch">Lancer un brassin</span></button>
     </div>
   </div>
 
@@ -11,7 +11,7 @@
 
   <div class="card">
     <div id="brew-list"></div>
-    <div class="empty" id="brew-empty"><i class="fas fa-fire-burner"></i><p>Aucun brassin enregistré</p></div>
+    <div class="empty" id="brew-empty"><i class="fas fa-fire-burner"></i><p data-i18n="brew.empty_none">Aucun brassin enregistré</p></div>
   </div>
 </div>
 

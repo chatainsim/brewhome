@@ -8,32 +8,32 @@
     <div class="modal-body">
       <div class="form-row cols-2">
         <div class="field">
-          <label>Nom du densimètre <span class="req">*</span></label>
+          <label><span data-i18n="spin.field_name_dev">Nom du densimètre</span> <span class="req">*</span></label>
           <input type="text" id="spin-f-name" placeholder="Ex : iSpindel-01">
         </div>
         <div class="field" id="spin-type-wrap">
-          <label>Type d'appareil</label>
+          <label data-i18n="spin.field_type">Type d'appareil</label>
           <select id="spin-f-type">
             <option value="ispindel">iSpindel</option>
             <option value="tilt">Tilt (via TiltBridge)</option>
             <option value="gravitymon">GravityMon</option>
-            <option value="generic">Générique / Autre</option>
+            <option value="generic" data-i18n="spin.type_generic">Générique / Autre</option>
           </select>
         </div>
       </div>
       <div class="field">
-        <label>Notes <span style="color:var(--muted)">(optionnel)</span></label>
+        <label><span data-i18n="common.notes">Notes</span> <span style="color:var(--muted)" data-i18n="common.optional">(optionnel)</span></label>
         <textarea id="spin-f-notes" rows="2" placeholder="Ex : Cuve principale"></textarea>
       </div>
       <div id="spindle-token-section" style="display:none">
-        <p style="font-weight:600;margin-bottom:6px"><i class="fas fa-key" style="color:var(--amber)"></i> Token d'authentification</p>
+        <p style="font-weight:600;margin-bottom:6px"><i class="fas fa-key" style="color:var(--amber)"></i> <span data-i18n="spin.token_title">Token d'authentification</span></p>
         <div class="token-box" id="spindle-token-display" onclick="copySpindleToken()" title="Cliquer pour copier"></div>
         <div id="spindle-token-instructions" style="margin-top:10px"></div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('spindle-modal')">Fermer</button>
-      <button class="btn btn-primary" id="spindle-save-btn" onclick="saveSpindle()"><i class="fas fa-plus"></i> Créer</button>
+      <button class="btn btn-ghost" onclick="closeModal('spindle-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-primary" id="spindle-save-btn" onclick="saveSpindle()"><i class="fas fa-plus"></i> <span data-i18n="spin.create">Créer</span></button>
     </div>
   </div>
 </div>
@@ -42,17 +42,17 @@
 <div class="modal-overlay" id="spindle-token-modal" onclick="if(event.target===this)closeModal('spindle-token-modal')">
   <div class="modal" style="max-width:500px">
     <div class="modal-head">
-      <h3><i class="fas fa-key" style="color:var(--amber);margin-right:8px"></i>Configuration densimètre</h3>
+      <h3><i class="fas fa-key" style="color:var(--amber);margin-right:8px"></i><span data-i18n="spin.config_title">Configuration densimètre</span></h3>
       <button class="modal-close" onclick="closeModal('spindle-token-modal')">✕</button>
     </div>
     <div class="modal-body">
       <p style="color:var(--muted);font-size:.85rem;margin-bottom:14px" id="stm-spindle-name"></p>
-      <label style="font-weight:600;display:block;margin-bottom:4px">Token</label>
+      <label style="font-weight:600;display:block;margin-bottom:4px" data-i18n="spin.token">Token</label>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
         <div class="token-box" id="stm-token" style="flex:1;margin:0" onclick="copyStmToken()" title="Cliquer pour copier"></div>
         <button class="btn btn-ghost btn-sm" onclick="copyStmToken()" title="Copier le token"><i class="fas fa-copy"></i></button>
       </div>
-      <label style="font-weight:600;display:block;margin-bottom:4px">URL de l'endpoint</label>
+      <label style="font-weight:600;display:block;margin-bottom:4px" data-i18n="spin.endpoint_url">URL de l'endpoint</label>
       <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px">
         <div class="token-box" id="stm-url" style="flex:1;margin:0;color:var(--info)" onclick="copyStmUrl()" title="Cliquer pour copier"></div>
         <button class="btn btn-ghost btn-sm" onclick="copyStmUrl()" title="Copier l'URL"><i class="fas fa-copy"></i></button>
@@ -60,7 +60,7 @@
       <div id="stm-instructions"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-primary" onclick="closeModal('spindle-token-modal')">Fermer</button>
+      <button class="btn btn-primary" onclick="closeModal('spindle-token-modal')" data-i18n="common.close">Fermer</button>
     </div>
   </div>
 </div>
@@ -75,13 +75,13 @@
     <div class="modal-body">
       <!-- Sélecteur de plage temporelle (masqué pour les graphiques de fermentation) -->
       <div id="spindle-chart-range" style="display:none;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-        <span style="font-size:.78rem;color:var(--muted);white-space:nowrap">Plage :</span>
+        <span style="font-size:.78rem;color:var(--muted);white-space:nowrap" data-i18n="spin.range">Plage :</span>
         <button class="btn btn-sm btn-primary sc-range" data-range="24"     onclick="setSpindleRange(this,24)">24h</button>
         <button class="btn btn-sm btn-ghost  sc-range" data-range="48"     onclick="setSpindleRange(this,48)">48h</button>
         <button class="btn btn-sm btn-ghost  sc-range" data-range="72"     onclick="setSpindleRange(this,72)">72h</button>
-        <button class="btn btn-sm btn-ghost  sc-range" data-range="168"    onclick="setSpindleRange(this,168)">7 jours</button>
-        <button class="btn btn-sm btn-ghost  sc-range" data-range="0"      onclick="setSpindleRange(this,0)">Tout</button>
-        <button class="btn btn-sm btn-ghost  sc-range" data-range="custom" onclick="setSpindleRange(this,'custom')">Personnalisé</button>
+        <button class="btn btn-sm btn-ghost  sc-range" data-range="168"    onclick="setSpindleRange(this,168)" data-i18n="spin.purge_7d">7 jours</button>
+        <button class="btn btn-sm btn-ghost  sc-range" data-range="0"      onclick="setSpindleRange(this,0)" data-i18n="spin.range_all">Tout</button>
+        <button class="btn btn-sm btn-ghost  sc-range" data-range="custom" onclick="setSpindleRange(this,'custom')" data-i18n="spin.range_custom">Personnalisé</button>
         <div id="sc-custom-range" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
           <input type="datetime-local" id="sc-from" style="font-size:.78rem;padding:3px 8px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text)">
           <span style="color:var(--muted)">→</span>
@@ -107,14 +107,14 @@
     <div class="modal-body">
       <div class="form-row cols-2">
         <div class="field">
-          <label>Nom de la sonde <span class="req">*</span></label>
+          <label><span data-i18n="spin.temp_name">Nom de la sonde</span> <span class="req">*</span></label>
           <input type="text" id="temp-f-name" placeholder="Ex : Frigo Cave">
         </div>
         <div class="field">
-          <label>Type d'entité HA</label>
+          <label data-i18n="spin.temp_ha_type">Type d'entité HA</label>
           <select id="temp-f-type" onchange="_tempUpdateHaFields()">
-            <option value="sensor">Sonde (sensor.xxx)</option>
-            <option value="thermostat">Thermostat (climate.xxx)</option>
+            <option value="sensor" data-i18n="spin.temp_type_sensor">Sonde (sensor.xxx)</option>
+            <option value="thermostat" data-i18n="spin.temp_type_therm">Thermostat (climate.xxx)</option>
           </select>
         </div>
       </div>
@@ -123,33 +123,33 @@
         <input type="text" id="temp-f-entity" placeholder="Ex : sensor.inkbird_itc308_temperature_probe" autocomplete="off" spellcheck="false">
       </div>
       <div class="field" id="temp-f-entity-hum-wrap">
-        <label>Entité humidité HA <span style="color:var(--muted)">(optionnel)</span></label>
+        <label><span data-i18n="spin.temp_hum">Entité humidité HA</span> <span style="color:var(--muted)" data-i18n="common.optional">(optionnel)</span></label>
         <input type="text" id="temp-f-entity-hum" placeholder="Ex : sensor.inkbird_itc308_humidity" autocomplete="off" spellcheck="false">
       </div>
       <div class="field">
-        <label>Notes <span style="color:var(--muted)">(optionnel)</span></label>
+        <label><span data-i18n="common.notes">Notes</span> <span style="color:var(--muted)" data-i18n="common.optional">(optionnel)</span></label>
         <input type="text" id="temp-f-notes" placeholder="Ex : ITC-308 frigo brassage">
       </div>
       <div class="form-row cols-2">
         <div class="field">
-          <label>Seuil min (°C)</label>
+          <label data-i18n="spin.temp_min">Seuil min (°C)</label>
           <input type="number" id="temp-f-min" step="0.5" placeholder="Ex : 2">
         </div>
         <div class="field">
-          <label>Seuil max (°C)</label>
+          <label data-i18n="spin.temp_max">Seuil max (°C)</label>
           <input type="number" id="temp-f-max" step="0.5" placeholder="Ex : 20">
         </div>
       </div>
-      <p style="font-size:.78rem;color:var(--muted);margin-top:-4px">Les seuils déclenchent une alerte visuelle sur la carte si la température sort de la plage.</p>
+      <p style="font-size:.78rem;color:var(--muted);margin-top:-4px" data-i18n="spin.temp_threshold_hint">Les seuils déclenchent une alerte visuelle sur la carte si la température sort de la plage.</p>
       <div id="temp-token-section" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
-        <p style="font-weight:600;margin-bottom:6px"><i class="fas fa-key" style="color:var(--amber)"></i> Token d'authentification</p>
+        <p style="font-weight:600;margin-bottom:6px"><i class="fas fa-key" style="color:var(--amber)"></i> <span data-i18n="spin.token_title">Token d'authentification</span></p>
         <div class="token-box" id="temp-token-display" onclick="copyTempToken()" title="Cliquer pour copier"></div>
-        <p style="font-size:.78rem;color:var(--muted);margin-top:6px"><i class="fas fa-circle-info"></i> Cliquez sur le token pour le copier · Consultez la config HA via le bouton <i class="fas fa-key"></i> sur la carte.</p>
+        <p style="font-size:.78rem;color:var(--muted);margin-top:6px" data-i18n="spin.temp_token_hint"><i class="fas fa-circle-info"></i> Cliquez sur le token pour le copier · Consultez la config HA via le bouton <i class="fas fa-key"></i> sur la carte.</p>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('temp-sensor-modal')">Fermer</button>
-      <button class="btn btn-primary" id="temp-save-btn" onclick="saveTempSensor()"><i class="fas fa-plus"></i> Créer</button>
+      <button class="btn btn-ghost" onclick="closeModal('temp-sensor-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-primary" id="temp-save-btn" onclick="saveTempSensor()"><i class="fas fa-plus"></i> <span data-i18n="spin.create">Créer</span></button>
     </div>
   </div>
 </div>
@@ -158,19 +158,19 @@
 <div class="modal-overlay" id="temp-ha-modal" onclick="if(event.target===this)closeModal('temp-ha-modal')">
   <div class="modal" style="max-width:600px">
     <div class="modal-head">
-      <h3><i class="fas fa-key" style="color:var(--amber);margin-right:8px"></i>Configuration Home Assistant</h3>
+      <h3><i class="fas fa-key" style="color:var(--amber);margin-right:8px"></i><span data-i18n="spin.ha_config">Configuration Home Assistant</span></h3>
       <button class="modal-close" onclick="closeModal('temp-ha-modal')">✕</button>
     </div>
     <div class="modal-body">
       <p style="color:var(--muted);font-size:.85rem;margin-bottom:14px" id="tha-sensor-name"></p>
 
-      <label style="font-weight:600;display:block;margin-bottom:4px">Token</label>
+      <label style="font-weight:600;display:block;margin-bottom:4px" data-i18n="spin.token">Token</label>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
         <div class="token-box" id="tha-token" style="flex:1;margin:0" onclick="copyThaToken()" title="Cliquer pour copier"></div>
         <button class="btn btn-ghost btn-sm" onclick="copyThaToken()"><i class="fas fa-copy"></i></button>
       </div>
 
-      <label style="font-weight:600;display:block;margin-bottom:4px">URL de l'endpoint</label>
+      <label style="font-weight:600;display:block;margin-bottom:4px" data-i18n="spin.endpoint_url">URL de l'endpoint</label>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px">
         <div class="token-box" id="tha-url" style="flex:1;margin:0;color:var(--info)" onclick="copyThaUrl()" title="Cliquer pour copier"></div>
         <button class="btn btn-ghost btn-sm" onclick="copyThaUrl()"><i class="fas fa-copy"></i></button>
@@ -198,7 +198,7 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-primary" onclick="closeModal('temp-ha-modal')">Fermer</button>
+      <button class="btn btn-primary" onclick="closeModal('temp-ha-modal')" data-i18n="common.close">Fermer</button>
     </div>
   </div>
 </div>
@@ -212,14 +212,14 @@
     </div>
     <div class="modal-body">
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-        <span style="font-size:.78rem;color:var(--muted);white-space:nowrap">Plage :</span>
+        <span style="font-size:.78rem;color:var(--muted);white-space:nowrap" data-i18n="spin.range">Plage :</span>
         <button class="btn btn-sm btn-primary tc-range" onclick="setTempRange(this,24)">24h</button>
         <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,48)">48h</button>
         <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,72)">72h</button>
-        <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,168)">7 jours</button>
-        <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,720)">30 jours</button>
-        <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,0)">Tout</button>
-        <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,'custom')">Personnalisé</button>
+        <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,168)" data-i18n="spin.purge_7d">7 jours</button>
+        <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,720)" data-i18n="spin.purge_30d">30 jours</button>
+        <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,0)" data-i18n="spin.range_all">Tout</button>
+        <button class="btn btn-sm btn-ghost  tc-range" onclick="setTempRange(this,'custom')" data-i18n="spin.range_custom">Personnalisé</button>
         <div id="tc-custom-range" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
           <input type="datetime-local" id="tc-from" style="font-size:.78rem;padding:3px 8px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text)">
           <span style="color:var(--muted)">→</span>

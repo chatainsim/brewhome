@@ -56,7 +56,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo  [OK] Dependances installees (Flask)
+echo  [OK] Dependances installees (Flask, APScheduler)
 
 :: ── Raccourci Bureau ──────────────────────────────────────────────────────────
 echo.

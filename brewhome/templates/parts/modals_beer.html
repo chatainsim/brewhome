@@ -11,41 +11,59 @@
     <div class="modal-head"><h3 id="beer-modal-title">Ajouter une bière</h3><button class="modal-close" onclick="closeModal('beer-modal')">✕</button></div>
     <div class="modal-body">
       <div class="form-row cols-2">
-        <div class="field"><label>Nom <span class="req">*</span></label><input type="text" id="beer-f-name" placeholder="Ex : IPA Tropicale"></div>
-        <div class="field" style="position:relative"><label>Type</label>
+        <div class="field"><label><span data-i18n="common.name">Nom</span> <span class="req">*</span></label><input type="text" id="beer-f-name" placeholder="Ex : IPA Tropicale"></div>
+        <div class="field" style="position:relative"><label data-i18n="cave.field_type">Type</label>
           <input type="text" id="beer-f-type" placeholder="Rechercher un type de bière…" autocomplete="off"
             oninput="beerTypeSearch(this)" onfocus="beerTypeSearch(this)" onblur="setTimeout(closeBeerTypeSuggest,200)">
           <div id="beer-type-sug" class="ing-suggest" style="max-height:280px"></div>
         </div>
       </div>
       <div class="form-row cols-3">
-        <div class="field"><label>ABV (%)</label><input type="number" id="beer-f-abv" step="0.1" placeholder="Ex : 6.5"></div>
-        <div class="field"><label>Stock actuel 33cl</label><input type="number" id="beer-f-33" value="0" min="0"></div>
-        <div class="field"><label>Stock actuel 75cl</label><input type="number" id="beer-f-75" value="0" min="0"></div>
+        <div class="field"><label data-i18n="brew.abv_label">ABV (%)</label><input type="number" id="beer-f-abv" step="0.1" placeholder="Ex : 6.5"></div>
+        <div class="field"><label data-i18n="cave.stock_33">Stock actuel 33cl</label><input type="number" id="beer-f-33" value="0" min="0"></div>
+        <div class="field"><label data-i18n="cave.stock_75">Stock actuel 75cl</label><input type="number" id="beer-f-75" value="0" min="0"></div>
       </div>
       <div class="form-row cols-2" id="beer-f-init-wrap" style="display:none">
-        <div class="field"><label>Remplissage initial 33cl <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none">(historique)</span></label><input type="number" id="beer-f-33-init" value="0" min="0"></div>
-        <div class="field"><label>Remplissage initial 75cl <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none">(historique)</span></label><input type="number" id="beer-f-75-init" value="0" min="0"></div>
+        <div class="field"><label><span data-i18n="cave.init_33">Remplissage initial 33cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-33-init" value="0" min="0"></div>
+        <div class="field"><label><span data-i18n="cave.init_75">Remplissage initial 75cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-75-init" value="0" min="0"></div>
       </div>
-      <div class="field" style="margin-bottom:14px"><label>Origine / Brasserie</label><input type="text" id="beer-f-origin" placeholder="Ex : Maison, Belgique..."></div>
-      <div class="field" style="margin-bottom:14px"><label>Description</label><textarea id="beer-f-desc" placeholder="Notes de dégustation, arômes..."></textarea></div>
+      <div class="field" style="margin-bottom:14px"><label data-i18n="cave.field_origin">Origine / Brasserie</label><input type="text" id="beer-f-origin" placeholder="Ex : Maison, Belgique..."></div>
+      <div class="field" style="margin-bottom:14px"><label data-i18n="common.description">Description</label><textarea id="beer-f-desc" placeholder="Notes de dégustation, arômes..."></textarea></div>
       <div class="form-row cols-2" style="margin-bottom:14px" id="beer-f-dates-wrap">
-        <div class="field"><label>Date du brassin</label><input type="date" id="beer-f-brew-date"></div>
-        <div class="field"><label>Date d'embouteillage</label><input type="date" id="beer-f-bottling-date"></div>
+        <div class="field"><label data-i18n="brew.field_date">Date du brassin</label><input type="date" id="beer-f-brew-date"></div>
+        <div class="field"><label data-i18n="brew.field_bottling">Date d'embouteillage</label><input type="date" id="beer-f-bottling-date"></div>
       </div>
-      <div class="field"><label>Photo</label>
+      <div class="field" style="margin-bottom:14px">
+        <label><i class="fas fa-wine-barrel" style="color:var(--amber)"></i> <span data-i18n="cave.field_keg">Volume en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.keg_hint">— laisser vide si uniquement en bouteilles</span></label>
+        <input type="number" id="beer-f-keg" step="0.1" min="0" placeholder="Ex : 19" oninput="updateKegInitWrap()">
+      </div>
+      <div class="form-row cols-2" id="beer-f-keg-init-wrap" style="display:none;margin-bottom:14px">
+        <div class="field"><label><span data-i18n="cave.keg_init">Volume initial en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-keg-init" step="0.1" min="0" value="0"></div>
+      </div>
+      <div class="field"><label data-i18n="cave.field_photo">Photo</label>
         <input type="file" id="beer-f-photo" accept="image/*" onchange="previewBeerPhoto(event)" style="display:none">
-        <label for="beer-f-photo" style="display:block;padding:10px;border:2px dashed var(--border);border-radius:9px;cursor:pointer;text-align:center;color:var(--muted)">
-          <i class="fas fa-camera" style="font-size:1.5rem;display:block;margin-bottom:4px"></i> Cliquer pour ajouter une photo
-        </label>
-        <img id="beer-f-photo-preview" style="display:none;width:100%;max-height:180px;object-fit:contain;margin-top:8px;border-radius:9px">
+        <div style="display:flex;gap:8px;align-items:stretch">
+          <label for="beer-f-photo" style="flex:1;display:block;padding:10px;border:2px dashed var(--border);border-radius:9px;cursor:pointer;text-align:center;color:var(--muted)">
+            <i class="fas fa-camera" style="font-size:1.5rem;display:block;margin-bottom:4px"></i> <span data-i18n="cave.photo_click">Cliquer pour ajouter une photo</span>
+          </label>
+          <button type="button" id="beer-gen-ai-btn" class="btn btn-ghost btn-sm" onclick="generateBeerImage()" style="display:none;white-space:nowrap;align-self:center" title="Générer une image avec l'IA configurée">
+            <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="draft.img_generate">Générer avec IA</span>
+          </button>
+        </div>
+        <div id="beer-ai-extra-wrap" style="display:none;margin-top:8px">
+          <textarea id="beer-ai-extra" placeholder="Instructions supplémentaires pour l'IA : couleurs, style graphique, ambiance, ingrédients à illustrer…" style="width:100%;height:60px;font-size:.82rem;resize:vertical"></textarea>
+        </div>
+        <div style="position:relative;display:inline-block;width:100%">
+          <img id="beer-f-photo-preview" style="display:none;width:100%;max-height:180px;object-fit:contain;margin-top:8px;border-radius:9px">
+          <button type="button" id="beer-f-photo-remove" onclick="removeBeerPhoto()" style="display:none;position:absolute;top:12px;right:4px;background:rgba(0,0,0,.55);border:none;color:#fff;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:.85rem;line-height:1" title="Supprimer la photo"><i class="fas fa-times"></i></button>
+        </div>
       </div>
       <input type="hidden" id="beer-f-id">
       <input type="hidden" id="beer-f-photo-b64">
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('beer-modal')">Annuler</button>
-      <button class="btn btn-primary" onclick="saveBeer()"><i class="fas fa-floppy-disk"></i> Enregistrer</button>
+      <button class="btn btn-ghost" onclick="closeModal('beer-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="saveBeer()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>
@@ -69,9 +87,9 @@
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('beer-detail-modal')">Fermer</button>
-      <button class="btn btn-ghost" id="bd-print-btn"><i class="fas fa-tag"></i> Étiquette</button>
-      <button class="btn btn-ghost" id="bd-edit-btn" onclick=""><i class="fas fa-pen"></i> Modifier</button>
+      <button class="btn btn-ghost" onclick="closeModal('beer-detail-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-ghost" id="bd-print-btn"><i class="fas fa-tag"></i> <span data-i18n="cave.label">Étiquette</span></button>
+      <button class="btn btn-ghost" id="bd-edit-btn" onclick=""><i class="fas fa-pen"></i> <span data-i18n="common.edit">Modifier</span></button>
     </div>
   </div>
 </div>
@@ -80,24 +98,82 @@
 <div class="modal-overlay" id="label-modal" onclick="if(event.target===this)closeModal('label-modal')">
   <div class="modal" style="max-width:540px">
     <div class="modal-head">
-      <h3><i class="fas fa-tag" style="color:var(--amber)"></i> Imprimer une étiquette</h3>
+      <h3><i class="fas fa-tag" style="color:var(--amber)"></i> <span data-i18n="cave.print_label">Imprimer une étiquette</span></h3>
       <button class="modal-close" onclick="closeModal('label-modal')">✕</button>
     </div>
     <div class="modal-body">
       <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
-        <label style="font-size:.88rem;color:var(--muted);white-space:nowrap">Exemplaires :</label>
+        <label style="font-size:.88rem;color:var(--muted);white-space:nowrap" data-i18n="cave.label_copies">Exemplaires :</label>
         <input type="number" id="label-copies" value="1" min="1" max="30" style="width:68px" oninput="renderLabelPreview()">
       </div>
       <div class="label-preview-wrap" id="label-preview-wrap"></div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('label-modal')">Fermer</button>
-      <button class="btn btn-primary" onclick="doPrintLabel()"><i class="fas fa-print"></i> Imprimer</button>
+      <button class="btn btn-ghost" onclick="closeModal('label-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-primary" onclick="doPrintLabel()"><i class="fas fa-print"></i> <span data-i18n="cave.print">Imprimer</span></button>
     </div>
   </div>
 </div>
 
 <!-- Zone d'impression (injectée au moment de window.print()) -->
 <div id="label-print-area" style="display:none"></div>
+
+<!-- Modal Association Bière cave ↔ Keg -->
+<div class="modal-overlay" id="cave-keg-modal" onclick="if(event.target===this)closeModal('cave-keg-modal')">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <h3><i class="fas fa-jar" style="color:var(--amber)"></i> <span data-i18n="cave.keg_assign">Associer à un keg</span></h3>
+      <button class="modal-close" onclick="closeModal('cave-keg-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field" style="margin-bottom:14px">
+        <label data-i18n="cave.keg_assign">Keg</label>
+        <select id="ck-keg-id">
+          <option value="" data-i18n="cave.keg_select">Choisir un keg…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label data-i18n="cave.keg_volume">Volume mis en keg (L)</label>
+        <input type="number" id="ck-volume" step="0.1" min="0" placeholder="Ex : 19">
+      </div>
+      <input type="hidden" id="ck-beer-id">
+      <input type="hidden" id="ck-prev-keg-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="ck-unlink-btn" onclick="unlinkCaveKeg()" style="margin-right:auto;display:none"><i class="fas fa-link-slash"></i> <span data-i18n="cave.keg_unlink">Dissocier</span></button>
+      <button class="btn btn-ghost" onclick="closeModal('cave-keg-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="saveCaveKegAssoc()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Transfert fût → bouteilles -->
+<div class="modal-overlay" id="keg-transfer-modal" onclick="if(event.target===this)closeModal('keg-transfer-modal')">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">
+      <h3><i class="fas fa-wine-barrel" style="color:var(--amber)"></i> <span data-i18n="cave.keg_transfer">Transvaser du fût</span></h3>
+      <button class="modal-close" onclick="closeModal('keg-transfer-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:16px;padding:12px;background:var(--card2);border-radius:9px">
+        <div id="keg-tr-name" style="font-weight:700;margin-bottom:4px"></div>
+        <div id="keg-tr-current" style="font-size:.85rem;color:var(--muted)"></div>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label data-i18n="cave.keg_consumed">Bière consommée directement du fût (L)</label>
+        <input type="number" id="keg-tr-consumed" step="0.1" min="0" value="0" placeholder="0" oninput="updateKegCalc()">
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:14px">
+        <div class="field" style="flex:1"><label data-i18n="cave.bottles_33">Bouteilles 33cl</label><input type="number" id="keg-tr-33" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
+        <div class="field" style="flex:1"><label data-i18n="cave.bottles_75">Bouteilles 75cl</label><input type="number" id="keg-tr-75" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
+      </div>
+      <div id="keg-tr-calc" style="padding:12px;border-radius:9px;background:var(--card2);font-size:.88rem;line-height:2"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('keg-transfer-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" id="keg-tr-save-btn" onclick="saveKegTransfer()"><i class="fas fa-check"></i> <span data-i18n="cave.validate">Valider</span></button>
+    </div>
+  </div>
+</div>
 
 <!-- ══ MODAL PARAMÈTRES AVANCÉS ══════════════════════════════════════════ -->

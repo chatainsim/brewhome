@@ -1,0 +1,100 @@
+<!-- Modal Ajouter/Modifier Keg -->
+<div class="modal-overlay" id="keg-modal" onclick="if(event.target===this)closeModal('keg-modal')">
+  <div class="modal">
+    <div class="modal-head"><h3 id="keg-modal-title" data-i18n="keg.add">Ajouter un keg</h3><button class="modal-close" onclick="closeModal('keg-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row cols-2">
+        <div class="field"><label><span data-i18n="keg.field_name">Nom / étiquette</span> <span class="req">*</span></label><input type="text" id="keg-f-name" placeholder="Ex : Corny #1"></div>
+        <div class="field"><label data-i18n="keg.field_type">Type</label>
+          <select id="keg-f-type" onchange="toggleKegTypeOther();_kegTypePreset()">
+            <option value="corny19" data-i18n="keg.type_corny19">Corny Keg / Soda Keg 19 L</option>
+            <option value="corny6" data-i18n="keg.type_corny6">Corny Keg 6 L</option>
+            <option value="other" data-i18n="keg.type_other">Autre</option>
+          </select>
+          <input type="text" id="keg-f-type-other" placeholder="Ex : Mini keg 5 L" style="display:none;margin-top:6px">
+        </div>
+      </div>
+      <div class="form-row cols-3">
+        <div class="field"><label data-i18n="keg.field_volume">Volume total (L)</label><input type="number" id="keg-f-volume" step="0.1" min="0" placeholder="Ex : 19" onblur="suggestFermentVolume()"></div>
+        <div class="field"><label><span data-i18n="keg.field_ferment">Volume fermentation (L)</span> <span id="keg-f-ferment-hint" style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="keg.suggest_ferment">(80% suggéré)</span></label><input type="number" id="keg-f-ferment" step="0.1" min="0" placeholder="Ex : 15.2"></div>
+        <div class="field"><label data-i18n="keg.field_weight">Poids à vide (kg)</label><input type="number" id="keg-f-weight" step="0.1" min="0" placeholder="Ex : 4.5"></div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="field"><label data-i18n="keg.field_color">Couleur</label><input type="color" id="keg-f-color" value="#f59e0b" style="height:42px;padding:4px 6px"></div>
+        <div class="field"><label data-i18n="common.notes">Notes</label><input type="text" id="keg-f-notes" placeholder=""></div>
+      </div>
+      <div class="field">
+        <label data-i18n="keg.field_photo">Photo</label>
+        <input type="file" id="keg-f-photo" accept="image/*" onchange="previewKegPhoto(event)" style="display:none">
+        <div style="display:flex;gap:8px;align-items:stretch">
+          <label for="keg-f-photo" style="flex:1;display:block;padding:10px;border:2px dashed var(--border);border-radius:9px;cursor:pointer;text-align:center;color:var(--muted)">
+            <i class="fas fa-camera" style="font-size:1.5rem;display:block;margin-bottom:4px"></i> <span data-i18n="cave.photo_click">Cliquer pour ajouter une photo</span>
+          </label>
+        </div>
+        <div style="position:relative;display:inline-block;width:100%">
+          <img id="keg-f-photo-preview" style="display:none;width:100%;max-height:180px;object-fit:contain;margin-top:8px;border-radius:9px">
+          <button type="button" id="keg-f-photo-remove" onclick="removeKegPhoto()" style="display:none;position:absolute;top:12px;right:4px;background:rgba(0,0,0,.55);border:none;color:#fff;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:.85rem;line-height:1" title="Supprimer la photo"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+      <input type="hidden" id="keg-f-id">
+      <input type="hidden" id="keg-f-photo-b64">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('keg-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="saveKeg()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Changer le statut du Keg -->
+<div class="modal-overlay" id="keg-status-modal" onclick="if(event.target===this)closeModal('keg-status-modal')">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head"><h3 id="keg-status-modal-title" data-i18n="keg.change_status">Changer le statut</h3><button class="modal-close" onclick="closeModal('keg-status-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="field" style="margin-bottom:16px">
+        <label data-i18n="keg.status_label">Statut</label>
+        <select id="keg-s-status" onchange="updateKegStatusFields()">
+          <option value="empty" data-i18n="keg.status_empty">Vide</option>
+          <option value="fermenting" data-i18n="keg.status_fermenting">En fermentation</option>
+          <option value="serving" data-i18n="keg.status_serving">En service</option>
+          <option value="cleaning" data-i18n="keg.status_cleaning">Nettoyage</option>
+        </select>
+      </div>
+      <div id="keg-s-brew-wrap" style="display:none;margin-bottom:16px">
+        <div class="field" style="margin-bottom:10px">
+          <label data-i18n="keg.field_brew">Brassin associé</label>
+          <select id="keg-s-brew-id">
+            <option value="" data-i18n="keg.none">Aucun</option>
+          </select>
+        </div>
+        <div class="field">
+          <label data-i18n="keg.field_current">Volume actuel (L)</label>
+          <input type="number" id="keg-s-current-brew" step="0.1" min="0" placeholder="Ex : 15">
+        </div>
+      </div>
+      <div id="keg-s-beer-wrap" style="display:none;margin-bottom:16px">
+        <div class="field" style="margin-bottom:10px">
+          <label data-i18n="keg.field_beer">Bière associée</label>
+          <select id="keg-s-beer-id">
+            <option value="" data-i18n="keg.none">Aucun</option>
+          </select>
+        </div>
+        <div class="field">
+          <label data-i18n="keg.field_current">Volume actuel (L)</label>
+          <input type="number" id="keg-s-current-beer" step="0.1" min="0" placeholder="Ex : 19">
+        </div>
+      </div>
+      <div id="keg-s-current-wrap" style="display:none;margin-bottom:16px">
+        <div class="field">
+          <label data-i18n="keg.field_current">Volume actuel (L)</label>
+          <input type="number" id="keg-s-current-other" step="0.1" min="0" placeholder="0">
+        </div>
+      </div>
+      <input type="hidden" id="keg-s-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('keg-status-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="saveKegStatus()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>

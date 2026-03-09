@@ -1,45 +1,45 @@
 <!-- Modal Lancer un Brassin -->
 <div class="modal-overlay" id="brew-modal" onclick="if(event.target===this)closeModal('brew-modal')">
   <div class="modal modal-lg">
-    <div class="modal-head"><h3>Lancer un brassin</h3><button class="modal-close" onclick="closeModal('brew-modal')">✕</button></div>
+    <div class="modal-head"><h3><span data-i18n="brew.launch">Lancer un brassin</span></h3><button class="modal-close" onclick="closeModal('brew-modal')">✕</button></div>
     <div class="modal-body">
       <div id="brew-alert" class="alert"></div>
 
       <div class="form-row cols-2">
-        <div class="field"><label>Recette <span class="req">*</span></label>
+        <div class="field"><label><span data-i18n="brew.field_recipe">Recette</span> <span class="req">*</span></label>
           <select id="brew-f-recipe" onchange="onBrewRecipeChange()">
-            <option value="">— Choisir une recette —</option>
+            <option value="" data-i18n="brew.pick_recipe">— Choisir une recette —</option>
           </select></div>
-        <div class="field"><label>Nom du brassin</label><input type="text" id="brew-f-name" placeholder="Ex : Brassin #5 – IPA Été"></div>
+        <div class="field"><label data-i18n="brew.field_name">Nom du brassin</label><input type="text" id="brew-f-name" placeholder="Ex : Brassin #5 – IPA Été"></div>
       </div>
       <div class="form-row cols-3">
-        <div class="field"><label>Date</label><input type="date" id="brew-f-date"></div>
-        <div class="field"><label>Volume brassé (L)</label><input type="number" id="brew-f-vol" step="0.5"></div>
-        <div class="field"><label>Densité initiale (OG)</label><input type="number" id="brew-f-og" step="0.001" placeholder="Ex : 1.058"></div>
+        <div class="field"><label data-i18n="common.date">Date</label><input type="date" id="brew-f-date"></div>
+        <div class="field"><label data-i18n="brew.field_volume">Volume brassé (L)</label><input type="number" id="brew-f-vol" step="0.5"></div>
+        <div class="field"><label data-i18n="brew.field_og">Densité initiale (OG)</label><input type="number" id="brew-f-og" step="0.001" placeholder="Ex : 1.058"></div>
       </div>
       <div class="form-row cols-2">
-        <div class="field"><label>Densité finale (FG)</label><input type="number" id="brew-f-fg" step="0.001" placeholder="Ex : 1.010"></div>
-        <div class="field"><label>ABV calculé (%)</label><input type="number" id="brew-f-abv" step="0.1" placeholder="Auto si OG/FG renseignés" readonly style="opacity:.6"></div>
+        <div class="field"><label data-i18n="brew.field_fg">Densité finale (FG)</label><input type="number" id="brew-f-fg" step="0.001" placeholder="Ex : 1.010"></div>
+        <div class="field"><label data-i18n="brew.field_abv_calc">ABV calculé (%)</label><input type="number" id="brew-f-abv" step="0.1" placeholder="Auto si OG/FG renseignés" readonly style="opacity:.6"></div>
       </div>
 
       <!-- Ingrédients recette + disponibilité stock -->
       <div id="brew-ingredients-section" style="display:none">
         <div class="divider"></div>
-        <div class="section-label">Ingrédients de la recette — disponibilité stock</div>
+        <div class="section-label" data-i18n="brew.ing_avail">Ingrédients de la recette — disponibilité stock</div>
         <div id="brew-ing-list"></div>
       </div>
 
       <div class="divider"></div>
-      <div class="field"><label>Notes de brassage</label><textarea id="brew-f-notes" placeholder="Observations, ajustements, incidents..."></textarea></div>
+      <div class="field"><label data-i18n="brew.field_notes">Notes de brassage</label><textarea id="brew-f-notes" placeholder="Observations, ajustements, incidents..."></textarea></div>
 
       <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
         <input type="checkbox" id="brew-deduct" checked style="width:auto">
-        <label for="brew-deduct" style="text-transform:none;font-size:.9rem;font-weight:500;color:var(--text)">Déduire automatiquement les ingrédients du stock</label>
+        <label for="brew-deduct" style="text-transform:none;font-size:.9rem;font-weight:500;color:var(--text)" data-i18n="brew.deduct_stock">Déduire automatiquement les ingrédients du stock</label>
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('brew-modal')">Annuler</button>
-      <button class="btn btn-primary" onclick="confirmBrew(false)"><i class="fas fa-fire-burner"></i> Lancer le brassin</button>
+      <button class="btn btn-ghost" onclick="closeModal('brew-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="confirmBrew(false)"><i class="fas fa-fire-burner"></i> <span data-i18n="brew.launch">Lancer le brassin</span></button>
     </div>
   </div>
 </div>
@@ -47,15 +47,15 @@
 <!-- Modal Stock insuffisant -->
 <div class="modal-overlay" id="stock-warn-modal" onclick="if(event.target===this)closeModal('stock-warn-modal')">
   <div class="modal">
-    <div class="modal-head"><h3><i class="fas fa-triangle-exclamation" style="color:#f59e0b"></i> Stock insuffisant</h3><button class="modal-close" onclick="closeModal('stock-warn-modal')">✕</button></div>
+    <div class="modal-head"><h3><i class="fas fa-triangle-exclamation" style="color:#f59e0b"></i> <span data-i18n="brew.stock_warn">Stock insuffisant</span></h3><button class="modal-close" onclick="closeModal('stock-warn-modal')">✕</button></div>
     <div class="modal-body">
-      <p style="margin-bottom:14px;color:var(--muted)">Les ingrédients suivants ne sont pas en quantité suffisante :</p>
+      <p style="margin-bottom:14px;color:var(--muted)" data-i18n="brew.stock_warn_msg">Les ingrédients suivants ne sont pas en quantité suffisante :</p>
       <div id="stock-warn-list"></div>
-      <p style="margin-top:14px;font-size:.875rem">Voulez-vous quand même lancer le brassin et déduire ce qui est disponible ?</p>
+      <p style="margin-top:14px;font-size:.875rem" data-i18n="brew.stock_warn_confirm">Voulez-vous quand même lancer le brassin et déduire ce qui est disponible ?</p>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('stock-warn-modal')">Annuler</button>
-      <button class="btn btn-danger" onclick="confirmBrew(true)"><i class="fas fa-fire-burner"></i> Lancer quand même</button>
+      <button class="btn btn-ghost" onclick="closeModal('stock-warn-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-danger" onclick="confirmBrew(true)"><i class="fas fa-fire-burner"></i> <span data-i18n="brew.launch_anyway">Lancer quand même</span></button>
     </div>
   </div>
 </div>
@@ -63,18 +63,33 @@
 <!-- Modal Ajouter bière à la cave (après brassin) -->
 <div class="modal-overlay" id="after-brew-modal" onclick="if(event.target===this)closeModal('after-brew-modal')">
   <div class="modal">
-    <div class="modal-head"><h3><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> Ajouter à la cave</h3><button class="modal-close" onclick="closeModal('after-brew-modal')">✕</button></div>
+    <div class="modal-head"><h3><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> <span data-i18n="brew.to_cave">Ajouter à la cave</span></h3><button class="modal-close" onclick="closeModal('after-brew-modal')">✕</button></div>
     <div class="modal-body">
-      <p style="margin-bottom:16px;color:var(--muted)">Le brassin est enregistré. Voulez-vous créer une entrée dans votre cave ?</p>
+      <p style="margin-bottom:16px;color:var(--muted)" data-i18n="brew.after_brew_msg">Le brassin est enregistré. Voulez-vous créer une entrée dans votre cave ?</p>
       <div class="form-row cols-2">
-        <div class="field"><label>Stock 33cl</label><input type="number" id="ab-33" value="0" min="0"></div>
-        <div class="field"><label>Stock 75cl</label><input type="number" id="ab-75" value="0" min="0"></div>
+        <div class="field"><label data-i18n="brew.stock_33">Stock 33cl</label><input type="number" id="ab-33" value="0" min="0"></div>
+        <div class="field"><label data-i18n="brew.stock_75">Stock 75cl</label><input type="number" id="ab-75" value="0" min="0"></div>
+      </div>
+      <div class="field" style="margin-top:4px">
+        <label><i class="fas fa-wine-barrel" style="color:var(--amber)"></i> <span data-i18n="brew.keg_vol">Volume en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="brew.keg_opt">— optionnel, si la bière reste en fût</span></label>
+        <input type="number" id="ab-keg" step="0.1" min="0" value="" placeholder="Ex : 19">
       </div>
       <div class="form-row cols-2" style="margin-top:4px">
-        <div class="field"><label>Date du brassin</label><input type="date" id="ab-brew-date"></div>
-        <div class="field"><label>Date d'embouteillage</label><input type="date" id="ab-bottling-date"></div>
+        <div class="field"><label data-i18n="brew.field_date">Date du brassin</label><input type="date" id="ab-brew-date"></div>
+        <div class="field"><label data-i18n="brew.field_bottling">Date d'embouteillage</label><input type="date" id="ab-bottling-date"></div>
       </div>
-      <div class="field"><label>Description / Notes dégustation</label><textarea id="ab-desc" placeholder="Arômes, notes de dégustation..."></textarea></div>
+      <div class="field"><label data-i18n="brew.field_desc_tasting">Description / Notes dégustation</label><textarea id="ab-desc" placeholder="Arômes, notes de dégustation..."></textarea></div>
+      <!-- Aperçu image du brouillon -->
+      <div id="ab-img-preview-wrap" style="display:none;margin-top:10px;padding:10px 12px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.22);border-radius:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <img id="ab-img-preview" src="" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0">
+          <div style="font-size:.8rem;color:var(--muted)">
+            <i class="fas fa-image" style="color:#8b5cf6"></i>
+            <span data-i18n="draft.img_follow_cave">L'image du brouillon sera ajoutée à la cave.</span>
+          </div>
+        </div>
+      </div>
+      <input type="hidden" id="ab-draft-image">
       <input type="hidden" id="ab-brew-id">
       <input type="hidden" id="ab-recipe-id">
       <input type="hidden" id="ab-name">
@@ -82,8 +97,8 @@
       <input type="hidden" id="ab-abv">
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('after-brew-modal')">Plus tard</button>
-      <button class="btn btn-primary" onclick="createBeerFromBrew()"><i class="fas fa-plus"></i> Ajouter à la cave</button>
+      <button class="btn btn-ghost" onclick="closeModal('after-brew-modal')" data-i18n="brew.later">Plus tard</button>
+      <button class="btn btn-primary" onclick="createBeerFromBrew()"><i class="fas fa-plus"></i> <span data-i18n="brew.to_cave">Ajouter à la cave</span></button>
     </div>
   </div>
 </div>
@@ -91,35 +106,64 @@
 <!-- Modal Édition Brassin -->
 <div class="modal-overlay" id="brew-edit-modal" onclick="if(event.target===this)closeModal('brew-edit-modal')">
   <div class="modal">
-    <div class="modal-head"><h3><i class="fas fa-pen" style="color:var(--amber)"></i> Modifier le brassin</h3><button class="modal-close" onclick="closeModal('brew-edit-modal')">✕</button></div>
+    <div class="modal-head"><h3><i class="fas fa-pen" style="color:var(--amber)"></i> <span data-i18n="brew.modal_edit">Modifier le brassin</span></h3><button class="modal-close" onclick="closeModal('brew-edit-modal')">✕</button></div>
     <div class="modal-body">
       <div id="brew-edit-alert" class="alert"></div>
       <input type="hidden" id="bew-id">
       <div class="form-row cols-2">
-        <div class="field"><label>Nom du brassin</label><input type="text" id="bew-name"></div>
-        <div class="field"><label>Statut</label>
+        <div class="field"><label data-i18n="brew.field_name">Nom du brassin</label><input type="text" id="bew-name"></div>
+        <div class="field"><label data-i18n="common.status">Statut</label>
           <select id="bew-status">
-            <option value="planned">Planifié</option>
-            <option value="in_progress">En cours</option>
-            <option value="fermenting">En fermentation</option>
-            <option value="completed">Terminé</option>
+            <option value="planned" data-i18n="brew.status_planned">Planifié</option>
+            <option value="in_progress" data-i18n="brew.status_fermenting">En cours</option>
+            <option value="fermenting" data-i18n="brew.status_fermenting">En fermentation</option>
+            <option value="completed" data-i18n="brew.status_completed">Terminé</option>
           </select>
         </div>
       </div>
       <div class="form-row cols-2">
-        <div class="field"><label>Date de brassage</label><input type="date" id="bew-date"></div>
-        <div class="field"><label>Volume brassé (L)</label><input type="number" id="bew-vol" step="0.5" min="0"></div>
+        <div class="field"><label data-i18n="brew.field_date">Date de brassage</label><input type="date" id="bew-date"></div>
+        <div class="field"><label data-i18n="brew.field_volume">Volume brassé (L)</label><input type="number" id="bew-vol" step="0.5" min="0"></div>
       </div>
       <div class="form-row cols-3">
-        <div class="field"><label>Densité initiale (OG)</label><input type="number" id="bew-og" step="0.001" placeholder="1.058"></div>
-        <div class="field"><label>Densité finale (FG)</label><input type="number" id="bew-fg" step="0.001" placeholder="1.010"></div>
-        <div class="field"><label>ABV (%)</label><input type="number" id="bew-abv" step="0.1" placeholder="Auto" readonly style="opacity:.6"></div>
+        <div class="field"><label data-i18n="brew.field_og">Densité initiale (OG)</label><input type="number" id="bew-og" step="0.001" placeholder="1.058"></div>
+        <div class="field"><label data-i18n="brew.field_fg">Densité finale (FG)</label><input type="number" id="bew-fg" step="0.001" placeholder="1.010"></div>
+        <div class="field"><label data-i18n="brew.abv_label">ABV (%)</label><input type="number" id="bew-abv" step="0.1" placeholder="Auto" readonly style="opacity:.6"></div>
       </div>
-      <div class="field"><label>Notes de brassage</label><textarea id="bew-notes" placeholder="Observations, ajustements, incidents..."></textarea></div>
+      <div class="field"><label data-i18n="brew.field_notes">Notes de brassage</label><textarea id="bew-notes" placeholder="Observations, ajustements, incidents..."></textarea></div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('brew-edit-modal')">Annuler</button>
-      <button class="btn btn-primary" onclick="saveBrewEdit()"><i class="fas fa-save"></i> Enregistrer</button>
+      <button class="btn btn-ghost" onclick="closeModal('brew-edit-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="saveBrewEdit()"><i class="fas fa-save"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Association Brassin ↔ Keg -->
+<div class="modal-overlay" id="brew-keg-modal" onclick="if(event.target===this)closeModal('brew-keg-modal')">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <h3><i class="fas fa-jar" style="color:var(--amber)"></i> <span data-i18n="brew.keg_assign">Associer à un keg</span></h3>
+      <button class="modal-close" onclick="closeModal('brew-keg-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field" style="margin-bottom:14px">
+        <label data-i18n="brew.keg_assign">Keg</label>
+        <select id="bk-keg-id">
+          <option value="" data-i18n="brew.keg_select">Choisir un keg…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label data-i18n="brew.keg_volume">Volume mis en keg (L)</label>
+        <input type="number" id="bk-volume" step="0.1" min="0" placeholder="Ex : 15">
+      </div>
+      <input type="hidden" id="bk-brew-id">
+      <input type="hidden" id="bk-prev-keg-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="bk-unlink-btn" onclick="unlinkBrewKeg()" style="margin-right:auto;display:none"><i class="fas fa-link-slash"></i> <span data-i18n="brew.keg_unlink">Dissocier</span></button>
+      <button class="btn btn-ghost" onclick="closeModal('brew-keg-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="saveBrewKegAssoc()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>

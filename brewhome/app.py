@@ -1,10 +1,18 @@
 import sqlite3
 import os
 import secrets
-from datetime import datetime
-from flask import Flask, jsonify, request, render_template
+import json
+import base64
+import urllib.request
+import urllib.parse
+import urllib.error
+from datetime import datetime, date, timedelta
+from flask import Flask, jsonify, request, render_template, make_response
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 app = Flask(__name__)
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 DB_PATH       = os.path.join(os.path.dirname(__file__), 'brewhome.db')
 READINGS_DB_PATH = os.path.join(os.path.dirname(__file__), 'brewhome_readings.db')
 
@@ -234,10 +242,12 @@ def migrate_db():
             "ALTER TABLE ingredient_catalog ADD COLUMN attenuation_max REAL",
             "ALTER TABLE ingredient_catalog ADD COLUMN alcohol_tolerance REAL",
             "ALTER TABLE ingredient_catalog ADD COLUMN max_usage_pct REAL",
+            "ALTER TABLE ingredient_catalog ADD COLUMN aroma_spec TEXT",
             "ALTER TABLE inventory_items ADD COLUMN price_per_unit REAL",
             "ALTER TABLE recipes ADD COLUMN rating INTEGER",
             "ALTER TABLE spindles ADD COLUMN sort_order INTEGER DEFAULT 0",
             "ALTER TABLE recipes ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE recipes ADD COLUMN draft_id INTEGER REFERENCES draft_recipes(id) ON DELETE SET NULL",
             "ALTER TABLE brews ADD COLUMN sort_order INTEGER DEFAULT 0",
             "ALTER TABLE beers ADD COLUMN sort_order INTEGER DEFAULT 0",
             "ALTER TABLE inventory_items ADD COLUMN sort_order INTEGER DEFAULT 0",
@@ -246,6 +256,60 @@ def migrate_db():
             "ALTER TABLE temperature_sensors ADD COLUMN ha_entity TEXT",
             "ALTER TABLE temperature_sensors ADD COLUMN ha_entity_hum TEXT",
             "ALTER TABLE temperature_sensors ADD COLUMN brew_id INTEGER REFERENCES brews(id) ON DELETE SET NULL",
+            "ALTER TABLE beers ADD COLUMN keg_liters REAL",
+            "ALTER TABLE beers ADD COLUMN keg_initial_liters REAL",
+            """CREATE TABLE IF NOT EXISTS draft_recipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL DEFAULT 'Nouveau brouillon',
+                style TEXT,
+                volume REAL,
+                ingredients TEXT,
+                notes TEXT,
+                color TEXT,
+                target_date TEXT,
+                event_label TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            "ALTER TABLE draft_recipes ADD COLUMN target_date TEXT",
+            "ALTER TABLE draft_recipes ADD COLUMN event_label TEXT",
+            "ALTER TABLE draft_recipes ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE draft_recipes ADD COLUMN image TEXT",
+            """CREATE TABLE IF NOT EXISTS custom_calendar_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                emoji TEXT DEFAULT '📅',
+                event_date TEXT NOT NULL,
+                color TEXT DEFAULT '#f59e0b',
+                notes TEXT,
+                brew_reminder INTEGER NOT NULL DEFAULT 0,
+                telegram_notify INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            "ALTER TABLE custom_calendar_events ADD COLUMN style TEXT",
+            "ALTER TABLE custom_calendar_events ADD COLUMN recipe_id INTEGER",
+            "ALTER TABLE custom_calendar_events ADD COLUMN draft_id INTEGER",
+            """CREATE TABLE IF NOT EXISTS soda_kegs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                keg_type TEXT,
+                volume_total REAL,
+                volume_ferment REAL,
+                weight_empty REAL,
+                status TEXT DEFAULT 'empty',
+                current_liters REAL,
+                beer_id INTEGER,
+                brew_id INTEGER,
+                notes TEXT,
+                color TEXT DEFAULT '#f59e0b',
+                photo TEXT,
+                archived INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (beer_id) REFERENCES beers(id) ON DELETE SET NULL,
+                FOREIGN KEY (brew_id) REFERENCES brews(id) ON DELETE SET NULL
+            )""",
         ]:
             try:
                 conn.execute(sql)
@@ -654,7 +718,10 @@ def _seed_catalog_extras(conn):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    resp = make_response(render_template('index.html'))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 # ── CATALOG ──────────────────────────────────────────────────────────────────
@@ -682,13 +749,13 @@ def create_catalog_item():
         cur = conn.execute(
             '''INSERT INTO ingredient_catalog
                (name,category,subcategory,ebc,gu,alpha,yeast_type,default_unit,
-                temp_min,temp_max,dosage_per_liter,attenuation_min,attenuation_max,alcohol_tolerance,max_usage_pct)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                temp_min,temp_max,dosage_per_liter,attenuation_min,attenuation_max,alcohol_tolerance,max_usage_pct,aroma_spec)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (d['name'], d['category'], d.get('subcategory'), d.get('ebc'), d.get('gu'),
              d.get('alpha'), d.get('yeast_type'), d.get('default_unit', 'g'),
              d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
              d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
-             d.get('max_usage_pct'))
+             d.get('max_usage_pct'), d.get('aroma_spec'))
         )
         row = conn.execute('SELECT * FROM ingredient_catalog WHERE id=?', (cur.lastrowid,)).fetchone()
         return jsonify(dict(row)), 201
@@ -703,13 +770,13 @@ def update_catalog_item(item_id):
                SET name=?, subcategory=?, ebc=?, alpha=?, yeast_type=?, default_unit=?,
                    temp_min=?, temp_max=?, dosage_per_liter=?,
                    attenuation_min=?, attenuation_max=?, alcohol_tolerance=?,
-                   max_usage_pct=?
+                   max_usage_pct=?, aroma_spec=?
                WHERE id=?''',
             (d['name'], d.get('subcategory'), d.get('ebc'), d.get('alpha'),
              d.get('yeast_type'), d.get('default_unit', 'g'),
              d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
              d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
-             d.get('max_usage_pct'), item_id)
+             d.get('max_usage_pct'), d.get('aroma_spec'), item_id)
         )
         row = conn.execute('SELECT * FROM ingredient_catalog WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
@@ -850,15 +917,15 @@ def create_recipe():
             '''INSERT INTO recipes
                (batch_no,name,style,volume,brew_date,bottling_date,mash_temp,mash_time,
                 boil_time,mash_ratio,evap_rate,grain_absorption,brewhouse_efficiency,
-                ferm_temp,ferm_time,notes,rating)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                ferm_temp,ferm_time,notes,rating,draft_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (d.get('batch_no'), d['name'], d.get('style'), d.get('volume', 20),
              d.get('brew_date'), d.get('bottling_date'), d.get('mash_temp', 66),
              d.get('mash_time', 60), d.get('boil_time', 60), d.get('mash_ratio', 3.0),
              d.get('evap_rate', 3.0), d.get('grain_absorption', 0.8),
              d.get('brewhouse_efficiency', 72),
              d.get('ferm_temp', 20), d.get('ferm_time', 14), d.get('notes'),
-             d.get('rating'))
+             d.get('rating'), d.get('draft_id'))
         )
         recipe_id = cur.lastrowid
         for ing in d.get('ingredients', []):
@@ -892,14 +959,15 @@ def update_recipe(recipe_id):
         conn.execute(
             '''UPDATE recipes SET batch_no=?,name=?,style=?,volume=?,brew_date=?,bottling_date=?,
                mash_temp=?,mash_time=?,boil_time=?,mash_ratio=?,evap_rate=?,grain_absorption=?,
-               brewhouse_efficiency=?,ferm_temp=?,ferm_time=?,notes=?,rating=? WHERE id=?''',
+               brewhouse_efficiency=?,ferm_temp=?,ferm_time=?,notes=?,rating=?,draft_id=?
+               WHERE id=?''',
             (d.get('batch_no'), d['name'], d.get('style'), d.get('volume', 20),
              d.get('brew_date'), d.get('bottling_date'), d.get('mash_temp', 66),
              d.get('mash_time', 60), d.get('boil_time', 60), d.get('mash_ratio', 3.0),
              d.get('evap_rate', 3.0), d.get('grain_absorption', 0.8),
              d.get('brewhouse_efficiency', 72),
              d.get('ferm_temp', 20), d.get('ferm_time', 14), d.get('notes'),
-             d.get('rating'), recipe_id)
+             d.get('rating'), d.get('draft_id'), recipe_id)
         )
         conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id=?', (recipe_id,))
         for ing in d.get('ingredients', []):
@@ -961,7 +1029,9 @@ def get_brews():
     with get_db() as conn:
         rows = conn.execute(
             '''SELECT b.*, r.name as recipe_name, r.style as recipe_style,
-                      (SELECT COUNT(*) FROM brew_fermentation_readings WHERE brew_id=b.id) as fermentation_count
+                      r.ferm_time,
+                      (SELECT COUNT(*) FROM brew_fermentation_readings WHERE brew_id=b.id) as fermentation_count,
+                      (SELECT MIN(bottling_date) FROM beers WHERE brew_id=b.id AND bottling_date IS NOT NULL) as bottling_date
                FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id
                ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC'''
         ).fetchall()
@@ -1148,11 +1218,13 @@ def create_beer():
     with get_db() as conn:
         s33 = d.get('stock_33cl', 0)
         s75 = d.get('stock_75cl', 0)
+        keg = d.get('keg_liters')
         cur = conn.execute(
-            '''INSERT INTO beers (name,type,abv,stock_33cl,stock_75cl,initial_33cl,initial_75cl,origin,description,photo,brew_id,recipe_id,brew_date,bottling_date)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            '''INSERT INTO beers (name,type,abv,stock_33cl,stock_75cl,initial_33cl,initial_75cl,keg_liters,keg_initial_liters,origin,description,photo,brew_id,recipe_id,brew_date,bottling_date)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (d['name'], d.get('type'), d.get('abv'), s33, s75,
              d.get('initial_33cl', s33), d.get('initial_75cl', s75),
+             keg, d.get('keg_initial_liters', keg),
              d.get('origin'), d.get('description'),
              d.get('photo'), d.get('brew_id'), d.get('recipe_id'),
              d.get('brew_date'), d.get('bottling_date'))
@@ -1166,15 +1238,17 @@ def update_beer(beer_id):
     d = request.json
     with get_db() as conn:
         # Preserve existing initial values if not provided by client
-        existing = conn.execute('SELECT initial_33cl, initial_75cl FROM beers WHERE id=?', (beer_id,)).fetchone()
+        existing = conn.execute('SELECT initial_33cl, initial_75cl, keg_initial_liters FROM beers WHERE id=?', (beer_id,)).fetchone()
         init33 = d['initial_33cl'] if 'initial_33cl' in d else (existing['initial_33cl'] if existing else 0)
         init75 = d['initial_75cl'] if 'initial_75cl' in d else (existing['initial_75cl'] if existing else 0)
+        keg_init = d['keg_initial_liters'] if 'keg_initial_liters' in d else (existing['keg_initial_liters'] if existing else None)
         conn.execute(
             '''UPDATE beers SET name=?,type=?,abv=?,stock_33cl=?,stock_75cl=?,
-               initial_33cl=?,initial_75cl=?,origin=?,description=?,photo=?,
+               initial_33cl=?,initial_75cl=?,keg_liters=?,keg_initial_liters=?,origin=?,description=?,photo=?,
                brew_date=?,bottling_date=? WHERE id=?''',
             (d['name'], d.get('type'), d.get('abv'), d.get('stock_33cl', 0),
              d.get('stock_75cl', 0), init33, init75,
+             d.get('keg_liters'), keg_init,
              d.get('origin'), d.get('description'),
              d.get('photo'), d.get('brew_date'), d.get('bottling_date'), beer_id)
         )
@@ -1197,6 +1271,8 @@ def patch_beer_stock(beer_id):
             conn.execute('UPDATE beers SET stock_33cl=? WHERE id=?', (d['stock_33cl'], beer_id))
         if 'stock_75cl' in d:
             conn.execute('UPDATE beers SET stock_75cl=? WHERE id=?', (d['stock_75cl'], beer_id))
+        if 'keg_liters' in d:
+            conn.execute('UPDATE beers SET keg_liters=? WHERE id=?', (d['keg_liters'], beer_id))
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
         return jsonify(dict(row))
 
@@ -1209,6 +1285,89 @@ def patch_beer(beer_id):
                      (1 if d.get('archived') else 0, beer_id))
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
         return jsonify(dict(row))
+
+
+# ── SODA KEGS ─────────────────────────────────────────────────────────────────
+
+_SODA_KEGS_SELECT = '''
+    SELECT k.*,
+           b.name AS beer_name,
+           br.name AS brew_name
+    FROM soda_kegs k
+    LEFT JOIN beers b ON k.beer_id = b.id
+    LEFT JOIN brews br ON k.brew_id = br.id
+'''
+
+@app.route('/api/soda-kegs', methods=['GET'])
+def get_soda_kegs():
+    with get_db() as conn:
+        rows = conn.execute(
+            _SODA_KEGS_SELECT +
+            ' ORDER BY COALESCE(k.sort_order, 9999) ASC, k.created_at DESC'
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/soda-kegs/reorder', methods=['PUT'])
+def reorder_soda_kegs():
+    items = request.json or []
+    with get_db() as conn:
+        for item in items:
+            conn.execute('UPDATE soda_kegs SET sort_order=? WHERE id=?',
+                         (item['sort_order'], item['id']))
+    return jsonify({'success': True})
+
+
+@app.route('/api/soda-kegs', methods=['POST'])
+def create_soda_keg():
+    d = request.json
+    with get_db() as conn:
+        cur = conn.execute(
+            '''INSERT INTO soda_kegs
+               (name, keg_type, volume_total, volume_ferment, weight_empty,
+                status, current_liters, beer_id, brew_id, notes, color, photo)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (d['name'], d.get('keg_type'), d.get('volume_total'),
+             d.get('volume_ferment'), d.get('weight_empty'),
+             d.get('status', 'empty'), d.get('current_liters'),
+             d.get('beer_id'), d.get('brew_id'),
+             d.get('notes'), d.get('color', '#f59e0b'), d.get('photo'))
+        )
+        row = conn.execute(
+            _SODA_KEGS_SELECT + ' WHERE k.id=?', (cur.lastrowid,)
+        ).fetchone()
+        return jsonify(dict(row)), 201
+
+
+@app.route('/api/soda-kegs/<int:keg_id>', methods=['PUT'])
+def update_soda_keg(keg_id):
+    d = request.json
+    with get_db() as conn:
+        conn.execute(
+            '''UPDATE soda_kegs SET
+               name=?, keg_type=?, volume_total=?, volume_ferment=?,
+               weight_empty=?, status=?, current_liters=?, beer_id=?,
+               brew_id=?, notes=?, color=?, photo=?,
+               updated_at=CURRENT_TIMESTAMP
+               WHERE id=?''',
+            (d['name'], d.get('keg_type'), d.get('volume_total'),
+             d.get('volume_ferment'), d.get('weight_empty'),
+             d.get('status', 'empty'), d.get('current_liters'),
+             d.get('beer_id'), d.get('brew_id'),
+             d.get('notes'), d.get('color', '#f59e0b'), d.get('photo'),
+             keg_id)
+        )
+        row = conn.execute(
+            _SODA_KEGS_SELECT + ' WHERE k.id=?', (keg_id,)
+        ).fetchone()
+        return jsonify(dict(row))
+
+
+@app.route('/api/soda-kegs/<int:keg_id>', methods=['DELETE'])
+def delete_soda_keg(keg_id):
+    with get_db() as conn:
+        conn.execute('DELETE FROM soda_kegs WHERE id=?', (keg_id,))
+        return jsonify({'success': True})
 
 
 # ── SPINDLES ─────────────────────────────────────────────────────────────────
@@ -1292,22 +1451,22 @@ def get_spindle_readings(spindle_id):
     with get_readings_db() as conn:
         if hours:
             rows = conn.execute(
-                "SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= datetime('now',?) ORDER BY recorded_at ASC LIMIT ?",
+                "SELECT * FROM (SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= datetime('now',?) ORDER BY recorded_at DESC LIMIT ?) ORDER BY recorded_at ASC",
                 (spindle_id, f'-{hours} hours', limit)
             ).fetchall()
         elif from_ts and to_ts:
             rows = conn.execute(
-                'SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at ASC LIMIT ?',
+                'SELECT * FROM (SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at DESC LIMIT ?) ORDER BY recorded_at ASC',
                 (spindle_id, from_ts, to_ts, limit)
             ).fetchall()
         elif from_ts:
             rows = conn.execute(
-                'SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= ? ORDER BY recorded_at ASC LIMIT ?',
+                'SELECT * FROM (SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= ? ORDER BY recorded_at DESC LIMIT ?) ORDER BY recorded_at ASC',
                 (spindle_id, from_ts, limit)
             ).fetchall()
         else:
             rows = conn.execute(
-                'SELECT * FROM spindle_readings WHERE spindle_id=? ORDER BY recorded_at ASC LIMIT ?',
+                'SELECT * FROM (SELECT * FROM spindle_readings WHERE spindle_id=? ORDER BY recorded_at DESC LIMIT ?) ORDER BY recorded_at ASC',
                 (spindle_id, limit)
             ).fetchall()
         return jsonify([dict(r) for r in rows])
@@ -1576,6 +1735,104 @@ def purge_temp_readings():
 
 
 # ── IMPORT / EXPORT ────────────────────────────────────────────
+
+@app.route('/api/catalog/import-hopsteiner', methods=['POST'])
+def import_hopsteiner():
+    """Importe les houblons depuis la base Hopsteiner (GitHub kasperg3/HopDatabase)."""
+    url = 'https://raw.githubusercontent.com/kasperg3/HopDatabase/refs/heads/main/hop_database/data/hopsteiner_raw_data.json'
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
+
+    # Le JSON est { "hops": [...] }
+    hops = data.get('hops', data) if isinstance(data, dict) else data
+
+    def _avg_alpha(low, high):
+        try:
+            vals = [float(v) for v in [low, high] if v is not None]
+            return round(sum(vals) / len(vals), 1) if vals else None
+        except (ValueError, TypeError):
+            return None
+
+    imported = updated = 0
+    with get_db() as conn:
+        for h in hops:
+            if not isinstance(h, dict):
+                continue
+            name = (h.get('name') or '').strip()
+            if not name:
+                continue
+            alpha     = _avg_alpha(h.get('acid_alpha_low'), h.get('acid_alpha_high'))
+            aroma     = (h.get('aroma_spec') or '').strip() or None
+            existing  = conn.execute(
+                'SELECT id, alpha FROM ingredient_catalog WHERE name=? AND category=?',
+                (name, 'houblon')
+            ).fetchone()
+            if existing:
+                # Toujours mettre à jour aroma_spec ; alpha seulement si absent
+                conn.execute(
+                    'UPDATE ingredient_catalog SET aroma_spec=?, alpha=COALESCE(alpha,?) WHERE id=?',
+                    (aroma, alpha, existing['id'])
+                )
+                updated += 1
+            else:
+                conn.execute(
+                    "INSERT INTO ingredient_catalog (name,category,alpha,aroma_spec,default_unit) VALUES (?,?,?,?,'g')",
+                    (name, 'houblon', alpha, aroma)
+                )
+                imported += 1
+    return jsonify({'imported': imported, 'updated': updated})
+
+
+@app.route('/api/export/catalog')
+def export_catalog():
+    with get_db() as conn:
+        rows = conn.execute('SELECT * FROM ingredient_catalog ORDER BY category, subcategory, name').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/import/catalog', methods=['POST'])
+def import_catalog():
+    items = request.json or []
+    imported = 0
+    with get_db() as conn:
+        for d in items:
+            if not d.get('name') or not d.get('category'):
+                continue
+            existing = conn.execute(
+                'SELECT id FROM ingredient_catalog WHERE name=? AND category=?',
+                (d['name'], d['category'])
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    '''UPDATE ingredient_catalog
+                       SET subcategory=?, ebc=?, gu=?, alpha=?, yeast_type=?, default_unit=?,
+                           temp_min=?, temp_max=?, dosage_per_liter=?,
+                           attenuation_min=?, attenuation_max=?, alcohol_tolerance=?, max_usage_pct=?
+                       WHERE id=?''',
+                    (d.get('subcategory'), d.get('ebc'), d.get('gu'), d.get('alpha'),
+                     d.get('yeast_type'), d.get('default_unit', 'g'),
+                     d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
+                     d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
+                     d.get('max_usage_pct'), existing['id'])
+                )
+            else:
+                conn.execute(
+                    '''INSERT INTO ingredient_catalog
+                       (name,category,subcategory,ebc,gu,alpha,yeast_type,default_unit,
+                        temp_min,temp_max,dosage_per_liter,attenuation_min,attenuation_max,alcohol_tolerance,max_usage_pct)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (d['name'], d['category'], d.get('subcategory'), d.get('ebc'), d.get('gu'),
+                     d.get('alpha'), d.get('yeast_type'), d.get('default_unit', 'g'),
+                     d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
+                     d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
+                     d.get('max_usage_pct'))
+                )
+            imported += 1
+    return jsonify({'imported': imported})
+
 
 @app.route('/api/export/inventory')
 def export_inventory():
@@ -2019,12 +2276,703 @@ def get_stats():
             'recipes_count':   scalar('SELECT COUNT(*) FROM recipes'),
             'brews_count':     scalar('SELECT COUNT(*) FROM brews'),
             'beers_count':     scalar('SELECT COUNT(*) FROM beers'),
+            'kegs_count':      scalar('SELECT COUNT(*) FROM soda_kegs'),
             'total_33cl':      scalar('SELECT COALESCE(SUM(stock_33cl),0) FROM beers'),
             'total_75cl':      scalar('SELECT COALESCE(SUM(stock_75cl),0) FROM beers'),
             'total_liters':    scalar(
                 'SELECT COALESCE(SUM(stock_33cl*0.33 + stock_75cl*0.75),0) FROM beers'
             ),
         })
+
+
+# ── TELEGRAM NOTIFICATIONS ───────────────────────────────────────────────────
+
+def _tg_get_settings():
+    """Récupère la config Telegram depuis la base de données."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT key, value FROM app_settings "
+                "WHERE key IN ('telegram_token','telegram_chat_id','telegram_notifs','telegram_tz')"
+            ).fetchall()
+    except Exception:
+        return None, None, {}, 'UTC'
+    s = {r['key']: r['value'] for r in rows}
+    notifs = {}
+    try:
+        notifs = json.loads(s.get('telegram_notifs') or '{}')
+    except Exception:
+        pass
+    return s.get('telegram_token'), s.get('telegram_chat_id'), notifs, s.get('telegram_tz', 'UTC')
+
+
+def _tg_send(token, chat_id, text):
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = urllib.parse.urlencode({
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'HTML',
+    }).encode()
+    req = urllib.request.Request(url, data=data, method='POST')
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
+def _tg_build_brews():
+    with get_db() as conn:
+        brews = conn.execute(
+            "SELECT id, name, status, og, fg, abv, brew_date FROM brews "
+            "WHERE archived=0 AND status NOT IN ('completed') ORDER BY brew_date DESC"
+        ).fetchall()
+        # Dernière mesure densimètre par brassin (via spindle lié)
+        spindle_data = {}
+        for b in brews:
+            row = conn.execute(
+                "SELECT r.gravity, r.temperature, r.recorded_at "
+                "FROM spindles s "
+                "JOIN rdb.spindle_readings r ON r.spindle_id = s.id "
+                "WHERE s.brew_id = ? "
+                "ORDER BY r.recorded_at DESC LIMIT 1",
+                (b['id'],)
+            ).fetchone()
+            if row:
+                spindle_data[b['id']] = row
+    if not brews:
+        return "🍺 <b>Brassins en cours</b>\n\nAucun brassin actif en ce moment."
+    st_map = {
+        'planned':    '📋 Planifié',
+        'in_progress': '🔥 En cours',
+        'fermenting': '🧪 En fermentation',
+    }
+    lines = ["🍺 <b>Brassins en cours</b>"]
+    for b in brews:
+        st = st_map.get(b['status'], b['status'])
+        line = f"\n• <b>{b['name']}</b> — {st}"
+        if b['og']:
+            line += f"\n  OG : {float(b['og']):.3f}"
+            if b['fg']:
+                line += f"  →  FG : {float(b['fg']):.3f}"
+        if b['abv']:
+            line += f"  |  ABV : {float(b['abv']):.1f} %"
+        if b['brew_date']:
+            line += f"\n  Brassé le {b['brew_date']}"
+        sr = spindle_data.get(b['id'])
+        if sr:
+            grav_str = f"{float(sr['gravity']):.3f}" if sr['gravity'] is not None else "—"
+            temp_str = f"{float(sr['temperature']):.1f} °C" if sr['temperature'] is not None else "—"
+            # Ancienneté de la mesure
+            age = ""
+            try:
+                ts = datetime.fromisoformat(sr['recorded_at'].replace('Z', ''))
+                diff = datetime.now() - ts
+                mins = int(diff.total_seconds() // 60)
+                if mins < 60:
+                    age = f"{mins} min"
+                elif mins < 1440:
+                    age = f"{mins // 60} h"
+                else:
+                    age = f"{mins // 1440} j"
+                age = f" <i>({age})</i>"
+            except Exception:
+                pass
+            line += f"\n  📡 Densité : <b>{grav_str}</b>  |  🌡 Temp : <b>{temp_str}</b>{age}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _tg_build_cave():
+    with get_db() as conn:
+        beers = conn.execute(
+            "SELECT name, stock_33cl, stock_75cl, keg_liters "
+            "FROM beers WHERE archived=0 ORDER BY name"
+        ).fetchall()
+
+    def _has_stock(b):
+        return (b['stock_33cl'] or 0) + (b['stock_75cl'] or 0) > 0 or (b['keg_liters'] or 0) > 0
+
+    in_stock  = [b for b in beers if     _has_stock(b)]
+    out_stock = [b for b in beers if not _has_stock(b)]
+
+    t33  = sum(b['stock_33cl'] or 0 for b in in_stock)
+    t75  = sum(b['stock_75cl'] or 0 for b in in_stock)
+    tkeg = sum(b['keg_liters'] or 0 for b in in_stock)
+
+    lines = ["🍾 <b>État de la cave</b>",
+             f"\n{len(beers)} bière(s)  —  {t33}×33cl  {t75}×75cl"]
+    if tkeg:
+        lines.append(f"  {tkeg:.1f} L en fût")
+
+    if in_stock:
+        lines.append("\n<b>En stock :</b>")
+        for b in in_stock:
+            parts = []
+            if b['stock_33cl']:  parts.append(f"{b['stock_33cl']}×33cl")
+            if b['stock_75cl']:  parts.append(f"{b['stock_75cl']}×75cl")
+            if b['keg_liters']:  parts.append(f"{float(b['keg_liters']):.1f} L fût")
+            lines.append(f"• {b['name']} : {', '.join(parts)}")
+
+    if out_stock:
+        lines.append("\n<b>Épuisées :</b>")
+        for b in out_stock:
+            lines.append(f"• {b['name']}")
+
+    return "\n".join(lines)
+
+
+def _tg_build_inventory():
+    """Retourne une liste de messages, un par catégorie présente."""
+    with get_db() as conn:
+        items = conn.execute(
+            "SELECT name, category, quantity, unit "
+            "FROM inventory_items WHERE archived=0 ORDER BY category, name"
+        ).fetchall()
+    if not items:
+        return ["📦 <b>Inventaire</b>\n\nAucun article en stock."]
+    labels = {
+        'malt':    ('🌾', 'Malts'),
+        'houblon': ('🌿', 'Houblons'),
+        'levure':  ('🧫', 'Levures'),
+        'autre':   ('🔮', 'Autres'),
+    }
+    # Ordre d'affichage fixe
+    order = ['malt', 'houblon', 'levure', 'autre']
+    by_cat = {}
+    for i in items:
+        by_cat.setdefault(i['category'], []).append(i)
+    messages = []
+    for cat in order:
+        cat_items = by_cat.get(cat)
+        if not cat_items:
+            continue
+        icon, label = labels.get(cat, ('📦', cat.capitalize()))
+        lines = [f"{icon} <b>Inventaire — {label}</b>", ""]
+        for it in cat_items:
+            lines.append(f"• {it['name']} : {it['quantity']} {it['unit']}")
+        # Catégories inconnues éventuelles
+        messages.append("\n".join(lines))
+    # Catégories hors liste fixe
+    for cat, cat_items in by_cat.items():
+        if cat not in order:
+            icon, label = labels.get(cat, ('📦', cat.capitalize()))
+            lines = [f"{icon} <b>Inventaire — {label}</b>", ""]
+            for it in cat_items:
+                lines.append(f"• {it['name']} : {it['quantity']} {it['unit']}")
+            messages.append("\n".join(lines))
+    return messages
+
+
+_TG_BUILDERS = {
+    'brews':     _tg_build_brews,
+    'cave':      _tg_build_cave,
+    'inventory': _tg_build_inventory,
+}
+
+
+def _tg_fire(notif_type):
+    token, chat_id, _, _ = _tg_get_settings()
+    if not token or not chat_id:
+        return
+    fn = _TG_BUILDERS.get(notif_type)
+    if not fn:
+        return
+    try:
+        result = fn()
+        messages = result if isinstance(result, list) else [result]
+        for msg in messages:
+            _tg_send(token, chat_id, msg)
+    except Exception as e:
+        app.logger.error(f"Telegram send error ({notif_type}): {e}")
+
+
+_scheduler = BackgroundScheduler()
+
+
+_BREW_EVENTS_FIXED = [
+    (1,  1, "National Hangover Day",                "🤕"),
+    (1, 17, "Baltic Porter Day",                    "🍺"),
+    (1, 17, "National Bootlegger's Day",            "🥃"),
+    (1, 24, "National Beer Can Day",                "🥫"),
+    (2, 24, "World Bartender Day",                  "🍸"),
+    (2, 28, "Open That Bottle Night",               "🍾"),
+    (3,  8, "Pink Boots Collaboration Brew Day",    "👢"),
+    (3, 16, "Orval International Day",              "🍺"),
+    (3, 17, "St. Patrick's Day",                    "🍀"),
+    (3, 20, "National Bock Day",                    "🐐"),
+    (4,  6, "New Beer's Eve",                       "🍺"),
+    (4,  7, "National Beer Day",                    "🍺"),
+    (4, 11, "King Gambrinus Day",                   "👑"),
+    (4, 23, "German Beer Day / Reinheitsgebot",     "🇩🇪"),
+    (4, 25, "Beer-Clean Glass Day",                 "🥃"),
+    (4, 26, "Saison Day",                           "🌾"),
+    (5,  1, "National Rotate Your Beer Day",        "🔄"),
+    (5,  2, "Beer Pong Day",                        "🏓"),
+    (5,  5, "Cinco de Mayo",                        "🌮"),
+    (5,  7, "National Homebrew Day",                "🍻"),
+    (5, 11, "American Craft Beer Week (debut)",     "🇺🇸"),
+    (6,  8, "Name Your Poison Day",                 "☠"),
+    (6, 15, "Beer Day Britain",                     "🏴"),
+    (7,  7, "National Dive Bar Day",                "🍺"),
+    (7, 12, "National Michelada Day",               "🌶"),
+    (7, 23, "National Refreshment Day",             "🥤"),
+    (9,  7, "National Beer Lover's Day",            "🍺"),
+    (9, 20, "Sour Beer Day",                        "🍋"),
+    (9, 24, "Arthur Guinness Day",                  "🖤"),
+    (9, 27, "National Crush-A-Can Day",             "🥫"),
+    (9, 28, "National Drink A Beer Day",            "🍺"),
+    (10,  2, "Barrel-Aged Beer Day",                "🛢"),
+    (10,  4, "Buy A Stranger A Drink Day",          "🍺"),
+    (10,  9, "Beer & Pizza Day",                    "🍕"),
+    (10, 10, "National Black Brewers Day",          "✊"),
+    (10, 14, "Homebrewing Legalization Day",        "⚖"),
+    (10, 27, "National American Beer Day",          "🇺🇸"),
+    (11,  5, "International Stout Day",             "🖤"),
+    (11,  7, "Learn to Homebrew Day",               "🏠"),
+    (11, 12, "National Happy Hour Day",             "🍺"),
+    (11, 17, "International Happy Gose Day",        "🧂"),
+    (11, 29, "Small Brewery Sunday",                "🏠"),
+    (12,  4, "National Bartender Day",              "🍸"),
+    (12,  5, "National Repeal Day",                 "🗽"),
+    (12, 10, "National Lager Day",                  "🍺"),
+    (12, 25, "Noel - Biere de Noel",                "🎄"),
+]
+
+def _calc_brewing_events(year):
+    """Retourne [(date, label, emoji)] pour une année donnée."""
+    def _nth_dow(y, m, dow, nth):
+        d = date(y, m, 1)
+        while d.weekday() != dow:
+            d += timedelta(days=1)
+        return d + timedelta(weeks=nth - 1)
+    def _last_dow(y, m, dow):
+        d = date(y, m + 1, 1) - timedelta(days=1)
+        while d.weekday() != dow:
+            d -= timedelta(days=1)
+        return d
+
+    evs = []
+    for mo, da, label, emoji in _BREW_EVENTS_FIXED:
+        try:
+            evs.append((date(year, mo, da), label, emoji))
+        except ValueError:
+            pass
+    evs.append((_nth_dow(year, 8, 3, 1),  "IPA Day",               "🌿"))  # 1er jeudi août
+    evs.append((_nth_dow(year, 8, 4, 1),  "International Beer Day","🍺"))  # 1er vendredi août
+    evs.append((_nth_dow(year, 7, 5, 1),  "Sour Beer Day",         "🍋"))  # 1er samedi juillet
+    evs.append((_nth_dow(year, 11, 3, 3), "Beaujolais Nouveau",    "🍷"))  # 3e jeudi novembre
+    # Oktoberfest : dernier samedi avant le 22 sept
+    okt = date(year, 9, 22)
+    while okt.weekday() != 5:
+        okt -= timedelta(days=1)
+    evs.append((okt, "Début Oktoberfest", "🥨"))
+    return sorted(evs, key=lambda x: x[0])
+
+
+def _tg_brewing_events_fire():
+    """Job quotidien : vérifie si aujourd'hui est un event ou un rappel J-45."""
+    token, chat_id, _, _ = _tg_get_settings()
+    if not token or not chat_id:
+        return
+    with get_db() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key='tg_brewing_events'").fetchone()
+    if not row:
+        return
+    try:
+        cfg = json.loads(row['value'])
+    except Exception:
+        return
+    if not cfg.get('enabled'):
+        return
+
+    today = date.today()
+    remind_days = 45
+
+    for year in (today.year, today.year + 1):
+        for ev_date, label, emoji in _calc_brewing_events(year):
+            if cfg.get('event_day') and ev_date == today:
+                _tg_send(token, chat_id,
+                    f'{emoji} <b>{label}</b>\n\n'
+                    f'C\'est aujourd\'hui ! 🎉\nSanté et bonne dégustation ! 🍺')
+            if cfg.get('remind'):
+                remind_date = ev_date - timedelta(days=remind_days)
+                if remind_date == today:
+                    _tg_send(token, chat_id,
+                        f'⏰ <b>Rappel brassage — {label}</b>\n\n'
+                        f'{emoji} <b>{label}</b> est dans <b>{remind_days} jours</b> '
+                        f'({ev_date.strftime("%d/%m/%Y")}).\n\n'
+                        f'C\'est le moment idéal pour brasser une bière spéciale ! 🍺')
+
+    # Événements personnalisés
+    with get_db() as conn:
+        custom_evs = conn.execute(
+            'SELECT * FROM custom_calendar_events WHERE telegram_notify=1'
+        ).fetchall()
+        # Pré-charger recettes et brouillons pour les associations
+        all_recipes = {r['id']: r for r in conn.execute('SELECT id, name, style FROM recipes').fetchall()}
+        all_drafts  = {d['id']: d for d in conn.execute('SELECT id, title, style FROM draft_recipes').fetchall()}
+
+    for ev in custom_evs:
+        try:
+            ev_date = date.fromisoformat(ev['event_date'])
+        except Exception:
+            continue
+        emoji = ev['emoji'] or '📅'
+        label = ev['title']
+
+        # Construire le bloc d'association (style / recette / brouillon)
+        assoc_lines = []
+        if ev['style']:
+            assoc_lines.append(f'🍺 Style : <b>{ev["style"]}</b>')
+        if ev['recipe_id'] and ev['recipe_id'] in all_recipes:
+            r = all_recipes[ev['recipe_id']]
+            line = f'📜 Recette : <b>{r["name"]}</b>'
+            if r['style']:
+                line += f' ({r["style"]})'
+            assoc_lines.append(line)
+        if ev['draft_id'] and ev['draft_id'] in all_drafts:
+            d = all_drafts[ev['draft_id']]
+            line = f'📓 Brouillon : <b>{d["title"] or "Sans titre"}</b>'
+            if d['style']:
+                line += f' ({d["style"]})'
+            assoc_lines.append(line)
+        assoc_block = ('\n' + '\n'.join(assoc_lines)) if assoc_lines else ''
+
+        if ev_date == today:
+            notes_line = f'\n\n{ev["notes"]}' if ev['notes'] else ''
+            _tg_send(token, chat_id,
+                f'{emoji} <b>{label}</b>\n\n'
+                f'C\'est aujourd\'hui ! 🎉'
+                f'{assoc_block}'
+                f'{notes_line}')
+        if ev['brew_reminder']:
+            remind_date = ev_date - timedelta(days=remind_days)
+            if remind_date == today:
+                _tg_send(token, chat_id,
+                    f'⏰ <b>Rappel brassage — {label}</b>\n\n'
+                    f'{emoji} <b>{label}</b> est dans <b>{remind_days} jours</b> '
+                    f'({ev_date.strftime("%d/%m/%Y")}).'
+                    f'{assoc_block}\n\n'
+                    f'C\'est le moment idéal pour brasser une bière spéciale ! 🍺')
+
+
+def reschedule_telegram():
+    """Recharge la config depuis la DB et re-planifie les jobs Telegram."""
+    token, chat_id, notifs, tz_str = _tg_get_settings()
+    for jid in ('tg_brews', 'tg_cave', 'tg_inventory', 'tg_brew_events'):
+        try:
+            _scheduler.remove_job(jid)
+        except Exception:
+            pass
+    if not token or not chat_id:
+        return
+    try:
+        from zoneinfo import ZoneInfo   # Python 3.9+
+        tz = ZoneInfo(tz_str or 'UTC')
+    except Exception:
+        import datetime as _dt
+        tz = _dt.timezone.utc
+
+    def _add(jid, ntype, cfg, monthly):
+        if not cfg.get('enabled'):
+            return
+        h = int(cfg.get('hour', 8))
+        m = int(cfg.get('minute', 0))
+        if monthly:
+            d = max(1, min(28, int(cfg.get('day', 1))))
+            trigger = CronTrigger(day=d, hour=h, minute=m, timezone=tz)
+        else:
+            trigger = CronTrigger(hour=h, minute=m, timezone=tz)
+        _scheduler.add_job(_tg_fire, trigger, args=[ntype], id=jid, replace_existing=True)
+
+    _add('tg_brews',     'brews',     notifs.get('brews', {}),     monthly=False)
+    _add('tg_cave',      'cave',      notifs.get('cave', {}),      monthly=True)
+    _add('tg_inventory', 'inventory', notifs.get('inventory', {}), monthly=True)
+
+    # Événements brassicoles
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key='tg_brewing_events'").fetchone()
+        ev_cfg = json.loads(row['value']) if row else {}
+    except Exception:
+        ev_cfg = {}
+    if ev_cfg.get('enabled') and (ev_cfg.get('remind') or ev_cfg.get('event_day')):
+        h = int(ev_cfg.get('hour', 8))
+        m = int(ev_cfg.get('minute', 0))
+        _scheduler.add_job(_tg_brewing_events_fire, CronTrigger(hour=h, minute=m, timezone=tz),
+                           id='tg_brew_events', replace_existing=True)
+
+
+@app.route('/api/telegram/test', methods=['POST'])
+def telegram_test():
+    d = request.json or {}
+    token   = (d.get('token')   or '').strip()
+    chat_id = (d.get('chat_id') or '').strip()
+    if not token or not chat_id:
+        return jsonify({'error': 'Token et Chat ID requis'}), 400
+    try:
+        _tg_send(token, chat_id, '🍺 <b>BrewHome</b>\n\nConnexion Telegram configurée avec succès !')
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/telegram/trigger/<notif_type>', methods=['POST'])
+def telegram_trigger(notif_type):
+    if notif_type not in _TG_BUILDERS:
+        return jsonify({'error': 'Type inconnu'}), 400
+    token, chat_id, _, _ = _tg_get_settings()
+    if not token or not chat_id:
+        return jsonify({'error': 'Telegram non configuré (token ou chat_id manquant)'}), 400
+    try:
+        result = _TG_BUILDERS[notif_type]()
+        messages = result if isinstance(result, list) else [result]
+        for msg in messages:
+            _tg_send(token, chat_id, msg)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── MISES À JOUR DES LIBRAIRIES STATIQUES ────────────────────────────────────
+
+STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
+
+def _read_version_from_file(path):
+    """Lit la version dans le commentaire d'entête d'un fichier JS/CSS."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            head = f.read(512)
+        import re
+        m = re.search(r'v?(\d+\.\d+\.\d+)', head)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+def _npm_latest(package):
+    """Récupère la dernière version d'un package npm."""
+    url = f'https://registry.npmjs.org/{urllib.parse.quote(package, safe="@/")}/latest'
+    req = urllib.request.Request(url, headers={'Accept': 'application/json', 'User-Agent': 'BrewHome'})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        return json.loads(resp.read().decode())['version']
+
+def _download(url, dest_path):
+    req = urllib.request.Request(url, headers={'User-Agent': 'BrewHome'})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = resp.read()
+    with open(dest_path, 'wb') as f:
+        f.write(data)
+    return len(data)
+
+@app.route('/api/static/check-updates')
+def static_check_updates():
+    result = {}
+    # Chart.js
+    cjs_path = os.path.join(STATIC_DIR, 'js', 'chart.umd.min.js')
+    result['chartjs'] = {'current': _read_version_from_file(cjs_path), 'latest': None, 'error': None}
+    try:
+        result['chartjs']['latest'] = _npm_latest('chart.js')
+    except Exception as e:
+        result['chartjs']['error'] = str(e)
+    # Font Awesome
+    fa_path = os.path.join(STATIC_DIR, 'fonts', 'fa', 'all.min.css')
+    result['fontawesome'] = {'current': _read_version_from_file(fa_path), 'latest': None, 'error': None}
+    try:
+        result['fontawesome']['latest'] = _npm_latest('@fortawesome/fontawesome-free')
+    except Exception as e:
+        result['fontawesome']['error'] = str(e)
+    # Google Fonts (pas de version npm — on retourne juste la taille/date du fichier)
+    gf_path = os.path.join(STATIC_DIR, 'fonts', 'google', 'fonts.css')
+    try:
+        st = os.stat(gf_path)
+        result['googlefonts'] = {
+            'current': datetime.fromtimestamp(st.st_mtime).strftime('%Y-%m-%d'),
+            'size': st.st_size,
+        }
+    except Exception:
+        result['googlefonts'] = {'current': None, 'size': 0}
+    return jsonify(result)
+
+
+@app.route('/api/static/update/chartjs', methods=['POST'])
+def update_chartjs():
+    try:
+        version = _npm_latest('chart.js')
+        url = f'https://cdn.jsdelivr.net/npm/chart.js@{version}/dist/chart.umd.min.js'
+        dest = os.path.join(STATIC_DIR, 'js', 'chart.umd.min.js')
+        size = _download(url, dest)
+        return jsonify({'version': version, 'size': size})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/static/update/fontawesome', methods=['POST'])
+def update_fontawesome():
+    try:
+        version = _npm_latest('@fortawesome/fontawesome-free')
+        base = f'https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@{version}'
+        fa_dir = os.path.join(STATIC_DIR, 'fonts', 'fa')
+        wf_dir = os.path.join(fa_dir, 'webfonts')
+        os.makedirs(wf_dir, exist_ok=True)
+        # CSS
+        _download(f'{base}/css/all.min.css', os.path.join(fa_dir, 'all.min.css'))
+        # Webfonts
+        for wf in ('fa-brands-400.woff2', 'fa-regular-400.woff2',
+                   'fa-solid-900.woff2', 'fa-v4compatibility.woff2'):
+            try:
+                _download(f'{base}/webfonts/{wf}', os.path.join(wf_dir, wf))
+            except Exception:
+                pass  # certains fichiers optionnels peuvent manquer selon la version
+        return jsonify({'version': version})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── GITHUB BACKUP AUTOMATIQUE ────────────────────────────────────────────────
+
+def _gh_push_file(repo, pat, branch, file_path, content_str, message):
+    """Pousse un fichier texte vers GitHub via l'API. Retourne True si modifié, False si inchangé."""
+    encoded = base64.b64encode(content_str.encode('utf-8')).decode('ascii')
+    base_url = f'https://api.github.com/repos/{repo}/contents/{file_path}'
+    headers = {
+        'Authorization': f'Bearer {pat}',
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'BrewHome',
+    }
+    # Récupérer le SHA existant
+    sha = None
+    try:
+        req = urllib.request.Request(f'{base_url}?ref={urllib.parse.quote(branch)}', headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            existing = json.loads(resp.read().decode())
+            sha = existing.get('sha')
+            existing_b64 = (existing.get('content') or '').replace('\n', '')
+            if existing_b64 == encoded:
+                return False  # inchangé
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+    body = {'message': message, 'content': encoded, 'branch': branch}
+    if sha:
+        body['sha'] = sha
+    req = urllib.request.Request(
+        base_url, data=json.dumps(body).encode('utf-8'),
+        headers=headers, method='PUT'
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        resp.read()
+    return True
+
+
+def _github_data_backup():
+    """Sauvegarde complète des données vers GitHub (appellée par le scheduler)."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT key, value FROM app_settings WHERE key IN "
+                            "('gh_data_repo','gh_data_branch','gh_data_pat')").fetchall()
+    cfg = {r['key']: r['value'] for r in rows}
+    repo = cfg.get('gh_data_repo', '').strip()
+    pat  = cfg.get('gh_data_pat',  '').strip()
+    branch = cfg.get('gh_data_branch', 'main').strip() or 'main'
+    if not repo or not pat:
+        app.logger.warning('GitHub backup: dépôt ou PAT manquant, sauvegarde ignorée')
+        return
+
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    try:
+        # Collecte des données
+        with get_db() as conn:
+            inventory = [dict(r) for r in conn.execute(
+                'SELECT * FROM inventory_items ORDER BY category, name').fetchall()]
+            recipes_raw = conn.execute('SELECT * FROM recipes ORDER BY name').fetchall()
+            recipes = []
+            for r in recipes_raw:
+                rec = dict(r)
+                rec['ingredients'] = [dict(i) for i in conn.execute(
+                    'SELECT * FROM recipe_ingredients WHERE recipe_id=?', (r['id'],)).fetchall()]
+                recipes.append(rec)
+            brews_raw = conn.execute('SELECT * FROM brews ORDER BY created_at DESC').fetchall()
+            brews = []
+            for b in brews_raw:
+                brew = dict(b)
+                brew['fermentation'] = [dict(f) for f in conn.execute(
+                    'SELECT * FROM brew_fermentation_readings WHERE brew_id=? ORDER BY recorded_at', (b['id'],)).fetchall()]
+                brews.append(brew)
+            beers = [dict(r) for r in conn.execute(
+                'SELECT * FROM beers ORDER BY name').fetchall()]
+            spindles = [dict(r) for r in conn.execute(
+                'SELECT * FROM spindles ORDER BY name').fetchall()]
+            catalog = [dict(r) for r in conn.execute(
+                'SELECT * FROM ingredient_catalog ORDER BY category, name').fetchall()]
+            settings_rows = conn.execute('SELECT key, value FROM app_settings').fetchall()
+        settings_out = {r['key']: r['value'] for r in settings_rows}
+        # Retirer les secrets
+        for k in ('gh_data_pat', 'gh_vitrine_pat', 'ai_api_key', 'telegram_token'):
+            settings_out.pop(k, None)
+
+        files = [
+            ('inventaire.json',  inventory),
+            ('recettes.json',    recipes),
+            ('brassins.json',    brews),
+            ('cave.json',        beers),
+            ('densimetres.json', spindles),
+            ('catalogue.json',   catalog),
+            ('parametres.json',  settings_out),
+        ]
+        pushed = skipped = 0
+        for name, data in files:
+            changed = _gh_push_file(repo, pat, branch, f'backup_auto/{name}',
+                                    json.dumps(data, ensure_ascii=False, indent=2),
+                                    f'backup auto: {name.replace(".json","")} {date_str}')
+            if changed:
+                pushed += 1
+            else:
+                skipped += 1
+
+        # Enregistrer la date de dernière sauvegarde
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M')
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES ('gh_data_last_backup',?)", (ts,))
+            notify = conn.execute("SELECT value FROM app_settings WHERE key='gh_data_backup_notify'").fetchone()
+        app.logger.info(f'GitHub backup: {pushed} fichier(s) mis à jour, {skipped} inchangé(s)')
+        # Notification Telegram si activée
+        if notify and notify['value'] == 'true':
+            try:
+                tg_token, tg_chat, _, _ = _tg_get_settings()
+                if tg_token and tg_chat:
+                    skip_txt = f', {skipped} inchangé(s)' if skipped else ''
+                    _tg_send(tg_token, tg_chat,
+                             f'☁️ <b>Backup GitHub automatique</b>\n\n'
+                             f'✅ {pushed} fichier(s) mis à jour{skip_txt}\n'
+                             f'🕐 {ts}\n'
+                             f'📁 Dépôt : <code>{repo}</code>')
+            except Exception as te:
+                app.logger.warning(f'GitHub backup Telegram notify error: {te}')
+    except Exception as e:
+        app.logger.error(f'GitHub backup error: {e}')
+
+
+def reschedule_github_backup():
+    """Recharge la config depuis la DB et re-planifie le job de backup GitHub."""
+    try:
+        _scheduler.remove_job('gh_backup')
+    except Exception:
+        pass
+    with get_db() as conn:
+        rows = conn.execute("SELECT key, value FROM app_settings WHERE key LIKE 'gh_data_backup_%'").fetchall()
+    cfg = {r['key']: r['value'] for r in rows}
+    if cfg.get('gh_data_backup_enabled') != 'true':
+        return
+    freq   = cfg.get('gh_data_backup_freq', 'daily')
+    hour   = int(cfg.get('gh_data_backup_hour',   '2'))
+    minute = int(cfg.get('gh_data_backup_minute', '0'))
+    if freq == 'daily':
+        trigger = CronTrigger(hour=hour, minute=minute)
+    elif freq == 'weekly':
+        dow = int(cfg.get('gh_data_backup_weekday', '0'))
+        trigger = CronTrigger(day_of_week=dow, hour=hour, minute=minute)
+    else:  # monthly
+        day = max(1, min(28, int(cfg.get('gh_data_backup_day', '1'))))
+        trigger = CronTrigger(day=day, hour=hour, minute=minute)
+    _scheduler.add_job(_github_data_backup, trigger, id='gh_backup', replace_existing=True)
 
 
 # ── APP SETTINGS (apparence) ─────────────────────────────────────────────────
@@ -2048,7 +2996,321 @@ def save_app_settings():
                     'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
                     (key, str(value))
                 )
+    if any(k in data for k in ('telegram_token', 'telegram_chat_id', 'telegram_notifs', 'telegram_tz',
+                               'tg_brewing_events')):
+        try:
+            reschedule_telegram()
+        except Exception as e:
+            app.logger.warning(f"Telegram reschedule error: {e}")
+    if any(k.startswith('gh_data_backup_') for k in data):
+        try:
+            reschedule_github_backup()
+        except Exception as e:
+            app.logger.warning(f"GitHub backup reschedule error: {e}")
     return jsonify({'success': True})
+
+
+# ── CUSTOM CALENDAR EVENTS ───────────────────────────────────────────────────
+
+@app.route('/api/custom_events', methods=['GET'])
+def get_custom_events():
+    with get_db() as conn:
+        rows = conn.execute('SELECT * FROM custom_calendar_events ORDER BY event_date').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/custom_events', methods=['POST'])
+def create_custom_event():
+    data = request.json or {}
+    with get_db() as conn:
+        cur = conn.execute(
+            '''INSERT INTO custom_calendar_events
+               (title, emoji, event_date, color, notes, brew_reminder, telegram_notify,
+                style, recipe_id, draft_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (
+                data.get('title', 'Événement'),
+                data.get('emoji', '📅'),
+                data.get('event_date'),
+                data.get('color', '#f59e0b'),
+                data.get('notes'),
+                1 if data.get('brew_reminder') else 0,
+                1 if data.get('telegram_notify') else 0,
+                data.get('style') or None,
+                data.get('recipe_id') or None,
+                data.get('draft_id') or None,
+            )
+        )
+        row = conn.execute('SELECT * FROM custom_calendar_events WHERE id=?', (cur.lastrowid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@app.route('/api/custom_events/<int:event_id>', methods=['PUT'])
+def update_custom_event(event_id):
+    data = request.json or {}
+    with get_db() as conn:
+        conn.execute(
+            '''UPDATE custom_calendar_events
+               SET title=?, emoji=?, event_date=?, color=?, notes=?, brew_reminder=?, telegram_notify=?,
+                   style=?, recipe_id=?, draft_id=?
+               WHERE id=?''',
+            (
+                data.get('title', 'Événement'),
+                data.get('emoji', '📅'),
+                data.get('event_date'),
+                data.get('color', '#f59e0b'),
+                data.get('notes'),
+                1 if data.get('brew_reminder') else 0,
+                1 if data.get('telegram_notify') else 0,
+                data.get('style') or None,
+                data.get('recipe_id') or None,
+                data.get('draft_id') or None,
+                event_id,
+            )
+        )
+        row = conn.execute('SELECT * FROM custom_calendar_events WHERE id=?', (event_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify(dict(row))
+
+
+@app.route('/api/custom_events/<int:event_id>', methods=['DELETE'])
+def delete_custom_event(event_id):
+    with get_db() as conn:
+        conn.execute('DELETE FROM custom_calendar_events WHERE id=?', (event_id,))
+    return jsonify({'success': True})
+
+
+# ── BROUILLONS ───────────────────────────────────────────────────────────────
+
+@app.route('/api/drafts', methods=['GET'])
+def get_drafts():
+    with get_db() as conn:
+        rows = conn.execute(
+            'SELECT * FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC'
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/drafts/reorder', methods=['PUT'])
+def reorder_drafts():
+    items = request.json or []
+    with get_db() as conn:
+        for item in items:
+            conn.execute('UPDATE draft_recipes SET sort_order=? WHERE id=?',
+                         (item['sort_order'], item['id']))
+    return jsonify({'success': True})
+
+
+@app.route('/api/drafts', methods=['POST'])
+def create_draft():
+    data = request.json or {}
+    with get_db() as conn:
+        cur = conn.execute(
+            '''INSERT INTO draft_recipes (title, style, volume, ingredients, notes, color, target_date, event_label, image)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (
+                data.get('title', 'Nouveau brouillon'),
+                data.get('style'),
+                data.get('volume'),
+                data.get('ingredients'),
+                data.get('notes'),
+                data.get('color'),
+                data.get('target_date'),
+                data.get('event_label'),
+                data.get('image'),
+            )
+        )
+        row = conn.execute('SELECT * FROM draft_recipes WHERE id=?', (cur.lastrowid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@app.route('/api/drafts/<int:draft_id>', methods=['PUT'])
+def update_draft(draft_id):
+    data = request.json or {}
+    with get_db() as conn:
+        conn.execute(
+            '''UPDATE draft_recipes
+               SET title=?, style=?, volume=?, ingredients=?, notes=?, color=?,
+                   target_date=?, event_label=?, image=?, updated_at=CURRENT_TIMESTAMP
+               WHERE id=?''',
+            (
+                data.get('title', 'Nouveau brouillon'),
+                data.get('style'),
+                data.get('volume'),
+                data.get('ingredients'),
+                data.get('notes'),
+                data.get('color'),
+                data.get('target_date'),
+                data.get('event_label'),
+                data.get('image'),
+                draft_id,
+            )
+        )
+        row = conn.execute('SELECT * FROM draft_recipes WHERE id=?', (draft_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify(dict(row))
+
+
+@app.route('/api/drafts/<int:draft_id>', methods=['DELETE'])
+def delete_draft(draft_id):
+    with get_db() as conn:
+        conn.execute('DELETE FROM draft_recipes WHERE id=?', (draft_id,))
+    return jsonify({'success': True})
+
+
+# ── AI DRAFT SUGGEST ─────────────────────────────────────────────────────────
+
+@app.route('/api/ai/draft-suggest', methods=['POST'])
+def ai_draft_suggest():
+    data = request.json or {}
+    style       = (data.get('style')       or '').strip()
+    event_label = (data.get('event_label') or '').strip()
+    event_desc  = (data.get('event_desc')  or '').strip()
+    notes       = (data.get('notes')       or '').strip()
+    volume      = data.get('volume') or 10
+
+    with get_db() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key='ai_api_key'").fetchone()
+    api_key = row['value'].strip() if row and row['value'] else None
+    if not api_key:
+        return jsonify({'error': 'Clé API Gemini non configurée (Paramètres → IA)'}), 400
+
+    context_parts = []
+    if style:       context_parts.append(f"Style BJCP : {style}")
+    if event_label: context_parts.append(f"Objectif de brassage : {event_label}")
+    if event_desc:  context_parts.append(f"Description de l'événement : {event_desc}")
+    if notes:       context_parts.append(f"Notes du brasseur : {notes}")
+    context_str = '\n'.join(context_parts) if context_parts else "Bière de dégustation générique"
+
+    prompt = f"""Tu es un expert en brassage amateur (homebrewing). Génère une recette de bière pour un brassin de {volume} litres.
+
+{context_str}
+
+Retourne UNIQUEMENT un objet JSON valide (sans markdown, sans backticks, sans commentaires) avec cette structure exacte :
+{{
+  "title": "Nom suggéré pour la bière",
+  "ingredients": [
+    {{"type": "malt", "name": "Pale Ale Malt", "qty": 2.5, "unit": "kg"}},
+    {{"type": "houblon", "name": "Cascade", "qty": 25, "unit": "g"}},
+    {{"type": "levure", "name": "Safale US-05", "qty": 1, "unit": "sachet"}}
+  ],
+  "notes": "OG cible, FG cible, température de fermentation, durée, conseils de brassage..."
+}}
+
+Règles :
+- Types autorisés pour "type" : "malt", "houblon", "levure", "autre"
+- Unités pour malts : "kg" ou "g"
+- Unités pour houblons : "g"
+- Unités pour levures : "sachet", "g" ou "mL"
+- Adapte les quantités pour exactement {volume} litres
+- Inclus tous les malts, houblons (palier amertume + arôme), et la levure"""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={api_key}"
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"}
+    }).encode('utf-8')
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+        # Gemini peut renvoyer promptFeedback sans candidates (safety/quota)
+        if 'candidates' not in result:
+            feedback = result.get('promptFeedback', {})
+            reason   = feedback.get('blockReason', 'Réponse vide de Gemini')
+            app.logger.warning(f"Gemini no candidates: {result}")
+            return jsonify({'error': f"Gemini : {reason}"}), 502
+        text   = result['candidates'][0]['content']['parts'][0]['text']
+        recipe = json.loads(text)
+        return jsonify(recipe)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', errors='replace')
+        app.logger.warning(f"Gemini HTTPError {e.code}: {body[:400]}")
+        try:
+            err_msg = json.loads(body).get('error', {}).get('message', body)
+        except Exception:
+            err_msg = body[:300]
+        return jsonify({'error': f"Gemini {e.code} : {err_msg}"}), 502
+    except urllib.error.URLError as e:
+        app.logger.warning(f"Gemini URLError: {e.reason}")
+        return jsonify({'error': f"Réseau : {e.reason}"}), 502
+    except Exception as e:
+        app.logger.exception("Gemini draft-suggest error")
+        return jsonify({'error': str(e)}), 500
+
+
+# ── EXPORT / IMPORT : BROUILLONS ─────────────────────────────────────────────
+
+@app.route('/api/export/drafts')
+def export_drafts():
+    with get_db() as conn:
+        rows = conn.execute('SELECT * FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/import/drafts', methods=['POST'])
+def import_drafts():
+    data = request.json or []
+    if isinstance(data, dict):
+        data = [data]
+    imported = 0
+    with get_db() as conn:
+        for d in data:
+            if not d.get('title'):
+                continue
+            try:
+                conn.execute(
+                    '''INSERT INTO draft_recipes
+                       (title, style, volume, ingredients, notes, color,
+                        target_date, event_label, sort_order, image)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                    (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
+                     d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
+                     d.get('target_date'), d.get('event_label'),
+                     d.get('sort_order', 0), d.get('image'))
+                )
+                imported += 1
+            except Exception:
+                pass
+    return jsonify({'imported': imported})
+
+
+# ── EXPORT / IMPORT : CALENDRIER (événements personnalisés) ──────────────────
+
+@app.route('/api/export/calendar')
+def export_calendar():
+    with get_db() as conn:
+        rows = conn.execute('SELECT * FROM custom_calendar_events ORDER BY event_date').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/import/calendar', methods=['POST'])
+def import_calendar():
+    data = request.json or []
+    if isinstance(data, dict):
+        data = [data]
+    imported = 0
+    with get_db() as conn:
+        for ev in data:
+            if not ev.get('title') or not ev.get('event_date'):
+                continue
+            try:
+                conn.execute(
+                    '''INSERT INTO custom_calendar_events
+                       (title, emoji, event_date, color, notes,
+                        brew_reminder, telegram_notify, style, recipe_id, draft_id)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                    (ev.get('title'), ev.get('emoji', '📅'), ev['event_date'],
+                     ev.get('color', '#f59e0b'), ev.get('notes'),
+                     ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
+                     ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'))
+                )
+                imported += 1
+            except Exception:
+                pass
+    return jsonify({'imported': imported})
 
 
 # ── MAIN ─────────────────────────────────────────────────────────────────────
@@ -2057,4 +3319,13 @@ if __name__ == '__main__':
     init_db()
     init_readings_db()
     migrate_db()
+    _scheduler.start()
+    try:
+        reschedule_telegram()
+    except Exception as e:
+        app.logger.warning(f"Telegram scheduler init error: {e}")
+    try:
+        reschedule_github_backup()
+    except Exception as e:
+        app.logger.warning(f"GitHub backup scheduler init error: {e}")
     app.run(host='0.0.0.0', port=5000, debug=False)

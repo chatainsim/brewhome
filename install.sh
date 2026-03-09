@@ -138,7 +138,9 @@ info "Installation des dépendances Python…"
 "${VENV_DIR}/bin/pip" install --quiet -r "${INSTALL_DIR}/requirements.txt"
 
 chown -R "${APP_USER}:${APP_USER}" "${VENV_DIR}"
-success "Dépendances installées ($(${VENV_DIR}/bin/pip show flask | grep ^Version | awk '{print "Flask "$2}'))"
+FLASK_VER=$(${VENV_DIR}/bin/pip show flask 2>/dev/null | grep ^Version | awk '{print $2}')
+APScheduler_VER=$(${VENV_DIR}/bin/pip show apscheduler 2>/dev/null | grep ^Version | awk '{print $2}')
+success "Dépendances installées (Flask ${FLASK_VER}, APScheduler ${APScheduler_VER})"
 
 # =============================================================================
 step "5/6 — Service ${SERVICE_MANAGER}"
