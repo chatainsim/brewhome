@@ -15,8 +15,9 @@ from apscheduler.triggers.cron import CronTrigger
 
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
-DB_PATH       = os.path.join(os.path.dirname(__file__), 'brewhome.db')
+DB_PATH          = os.path.join(os.path.dirname(__file__), 'brewhome.db')
 READINGS_DB_PATH = os.path.join(os.path.dirname(__file__), 'brewhome_readings.db')
+APP_VERSION      = "0.0.4"
 
 # ── Limite taille image base64 ───────────────────────────────────────────────
 # 2 Mo de données brutes ≈ 2,7 Mo en base64 ; on bloque à 3 Mo de chaîne base64
@@ -302,6 +303,7 @@ def migrate_db():
             "ALTER TABLE inventory_items ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE recipes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE brews ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE brews ADD COLUMN ferm_time INTEGER",
             "ALTER TABLE beers ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE beers ADD COLUMN initial_33cl INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE beers ADD COLUMN initial_75cl INTEGER NOT NULL DEFAULT 0",
@@ -1150,7 +1152,9 @@ def get_brews():
     with get_db() as conn:
         rows = conn.execute(
             '''SELECT b.*, r.name as recipe_name, r.style as recipe_style,
-                      r.ferm_time,
+                      COALESCE(b.ferm_time, r.ferm_time) as ferm_time,
+                      b.ferm_time as brew_ferm_time,
+                      r.ferm_time as recipe_ferm_time,
                       (SELECT COUNT(*) FROM brew_fermentation_readings WHERE brew_id=b.id) as fermentation_count,
                       (SELECT MIN(bottling_date) FROM beers WHERE brew_id=b.id AND bottling_date IS NOT NULL) as bottling_date
                FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id
@@ -1248,10 +1252,12 @@ def update_brew(brew_id):
     d = request.json
     with get_db() as conn:
         cur = conn.execute(
-            'UPDATE brews SET name=?,brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,notes=?,status=? WHERE id=?',
+            'UPDATE brews SET name=?,brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,notes=?,status=?,ferm_time=? WHERE id=?',
             (d.get('name'), d.get('brew_date'), d.get('volume_brewed'),
              d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
-             d.get('status', 'completed'), brew_id)
+             d.get('status', 'completed'),
+             int(d['ferm_time']) if d.get('ferm_time') is not None else None,
+             brew_id)
         )
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
@@ -1278,8 +1284,12 @@ def update_brew(brew_id):
                 conn.execute('DELETE FROM rdb.spindle_readings WHERE spindle_id=?', (sp['id'],))
             # La sonde de température reste liée après complétion (refermentation, garde…)
         row = conn.execute(
-            '''SELECT b.*, r.name as recipe_name FROM brews b
-               LEFT JOIN recipes r ON b.recipe_id=r.id WHERE b.id=?''',
+            '''SELECT b.*, r.name as recipe_name, r.style as recipe_style,
+                      COALESCE(b.ferm_time, r.ferm_time) as ferm_time,
+                      b.ferm_time as brew_ferm_time,
+                      r.ferm_time as recipe_ferm_time,
+                      (SELECT MIN(bottling_date) FROM beers WHERE brew_id=b.id AND bottling_date IS NOT NULL) as bottling_date
+               FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id WHERE b.id=?''',
             (brew_id,)
         ).fetchone()
         return jsonify(dict(row))
@@ -2537,6 +2547,7 @@ def get_stats():
             'inventory_count': scalar('SELECT COUNT(*) FROM inventory_items WHERE archived=0'),
             'recipes_count':   scalar('SELECT COUNT(*) FROM recipes   WHERE archived=0'),
             'brews_count':     scalar('SELECT COUNT(*) FROM brews      WHERE archived=0'),
+            'brews_active':    scalar("SELECT COUNT(*) FROM brews WHERE archived=0 AND status IN ('planned','in_progress','fermenting')"),
             'beers_count':     scalar('SELECT COUNT(*) FROM beers      WHERE archived=0'),
             'kegs_count':      scalar('SELECT COUNT(*) FROM soda_kegs  WHERE archived=0'),
             'total_33cl':      scalar('SELECT COALESCE(SUM(stock_33cl),0) FROM beers WHERE archived=0'),
@@ -2545,6 +2556,44 @@ def get_stats():
                 'SELECT COALESCE(SUM(stock_33cl*0.33 + stock_75cl*0.75),0) FROM beers WHERE archived=0'
             ),
         })
+
+
+# ── VÉRIFICATION DE VERSION ──────────────────────────────────────────────────
+
+_version_cache = {'result': None, 'ts': 0}
+
+def _parse_semver(v):
+    v = v.strip().lstrip('v')
+    try:
+        return tuple(int(x) for x in v.split('.'))
+    except Exception:
+        return (0,)
+
+@app.route('/api/version/check')
+def check_app_version():
+    now = time.time()
+    if _version_cache['result'] and now - _version_cache['ts'] < 6 * 3600:
+        return jsonify(_version_cache['result'])
+    try:
+        req = urllib.request.Request(
+            'https://api.github.com/repos/chatainsim/brewhome/releases/latest',
+            headers={'User-Agent': f'BrewHome/{APP_VERSION}', 'Accept': 'application/vnd.github+json'}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        latest = data.get('tag_name', '').lstrip('v')
+        result = {
+            'current': APP_VERSION,
+            'latest': latest,
+            'update_available': _parse_semver(latest) > _parse_semver(APP_VERSION),
+            'release_url': data.get('html_url', 'https://github.com/chatainsim/brewhome/releases'),
+        }
+    except Exception as e:
+        app.logger.debug(f"check_app_version: {e}")
+        result = {'current': APP_VERSION, 'latest': None, 'update_available': False, 'error': str(e)}
+    _version_cache['result'] = result
+    _version_cache['ts'] = now
+    return jsonify(result)
 
 
 # ── TELEGRAM NOTIFICATIONS ───────────────────────────────────────────────────
