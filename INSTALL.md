@@ -35,7 +35,7 @@ Le script effectue automatiquement :
 1. Installation de Python 3, pip, venv et curl via le gestionnaire de paquets
 2. Création d'un utilisateur système dédié `brewhome`
 3. Copie des fichiers dans `/opt/brewhome` (les bases de données existantes sont préservées)
-4. Création d'un environnement virtuel Python et installation des dépendances (Flask, APScheduler)
+4. Création d'un environnement virtuel Python et installation des dépendances (Flask, APScheduler, Pillow)
 5. Enregistrement et activation d'un service **systemd** (ou **OpenRC** sous Alpine)
 6. Démarrage du service
 
@@ -111,7 +111,7 @@ Double-cliquez sur `brewhome\install.bat` ou exécutez-le depuis une invite de c
 Le script effectue :
 1. Détection de Python
 2. Création de l'environnement virtuel `venv\`
-3. Installation des dépendances Python (Flask, APScheduler)
+3. Installation des dépendances Python (Flask, APScheduler, Pillow)
 4. Création d'un raccourci **BrewHome** sur le bureau (lance en arrière-plan)
 5. Proposition d'activation du **démarrage automatique** à l'ouverture de session
 
@@ -176,7 +176,7 @@ Le script détecte l'installation existante, met à jour les fichiers et redéma
 ```
 brewhome/
 ├── app.py                  Application Flask (backend + routes API)
-├── requirements.txt        Dépendances Python (Flask, APScheduler)
+├── requirements.txt        Dépendances Python (Flask, APScheduler, Pillow)
 ├── brewhome.db             Base de données principale (SQLite, créée au 1er lancement)
 ├── brewhome_readings.db    Base de données des mesures densimètre/température (SQLite)
 ├── templates/
@@ -480,7 +480,7 @@ BrewHome peut envoyer des notifications automatiques dans Telegram : résumé qu
 | 🍺 **Brassins en cours** | Quotidien | Nom, statut, OG/FG, ABV, date de brassage. Si un densimètre est associé au brassin : dernière densité mesurée, température et ancienneté de la mesure |
 | 🍾 **État de la cave** | Mensuel | Bières avec stock (bouteilles 33cl / 75cl / fût en litres) puis bières épuisées dans une section séparée |
 | 📦 **Inventaire** | Mensuel | Un message par catégorie non vide : 🌾 Malts, 🌿 Houblons, 🧫 Levures, 🔮 Autres — quantités et unités par article |
-| 📅 **Événements calendrier** | Jour J (+ J-45 si activé) | Titre, notes et rappel de brassage pour chaque événement personnalisé avec Telegram activé |
+| 📅 **Événements calendrier** | Jour J (+ rappel configurable si activé) | Titre, notes et rappel de brassage pour chaque événement personnalisé avec Telegram activé |
 
 ### 1. Créer un bot Telegram
 
@@ -525,6 +525,6 @@ Pour trouver votre fuseau : [en.wikipedia.org/wiki/List_of_tz_database_time_zone
 ## Notes
 
 - Le port par défaut est **5000**. Il est fixé dans `app.py` et dans le service systemd/OpenRC.
-- Les deux bases de données SQLite (`brewhome.db` et `brewhome_readings.db`) sont créées automatiquement au premier démarrage. `brewhome_readings.db` contient les mesures des densimètres **et** des sondes de température. La table `soda_kegs` est créée automatiquement à la migration (premier démarrage après mise à jour).
+- Les deux bases de données SQLite (`brewhome.db` et `brewhome_readings.db`) sont créées automatiquement au premier démarrage. `brewhome_readings.db` contient les mesures des densimètres **et** des sondes de température. Les nouvelles colonnes (`recurrence`, `brew_reminder_days`, etc.) sont ajoutées automatiquement par migration au premier démarrage après mise à jour — aucune intervention manuelle n'est nécessaire.
 - Aucune connexion Internet n'est requise pour le fonctionnement de base. La récupération des données d'eau (HubEau), la synchronisation GitHub, la génération d'images par IA, la suggestion de recette par IA et les notifications Telegram nécessitent un accès réseau.
-- Tous les paramètres avancés (seuils, eau, énergie, GitHub, IA, Telegram) sont **synchronisés en base de données** et retrouvés automatiquement sur tout appareil accédant à l'instance BrewHome. Les tokens GitHub, les clés IA et le token Telegram sont inclus dans cette synchronisation mais exclus de l'export JSON.
+- Tous les paramètres avancés (seuils, eau, énergie, GitHub, IA, Telegram) sont **synchronisés en base de données** et retrouvés automatiquement sur tout appareil accédant à l'instance BrewHome. Les tokens GitHub, les clés IA et le token Telegram sont inclus dans cette synchronisation, visibles en clair dans l'interface de configuration, mais **exclus de l'export JSON** pour éviter toute diffusion accidentelle.

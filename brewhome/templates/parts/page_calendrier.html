@@ -89,12 +89,41 @@
       <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:12px">
         <div>
           <label class="form-label"><span data-i18n="cal.event_date">Date</span> <span class="req">*</span></label>
-          <input id="ce-date" type="date" class="form-control">
+          <input id="ce-date" type="date" class="form-control" oninput="_ceOnDateChange()">
         </div>
         <div>
           <label class="form-label" data-i18n="common.color">Couleur</label>
           <input id="ce-color" type="color" value="#f59e0b"
             style="width:48px;height:38px;border:none;border-radius:8px;cursor:pointer;background:none;padding:0;margin-top:2px">
+        </div>
+      </div>
+
+      <!-- Récurrence -->
+      <div style="margin-bottom:12px">
+        <label class="form-label">🔁 <span data-i18n="cal.recurrence">Récurrence</span></label>
+        <select id="ce-recurrence" class="form-control" onchange="_ceUpdateRecurrenceUI()">
+          <option value="" data-i18n="cal.rec_none">Aucune (ponctuel)</option>
+          <option value="yearly" data-i18n="cal.rec_yearly">Annuelle — même date</option>
+          <option value="yearly_nth_dow" data-i18n="cal.rec_yearly_nth">Annuelle — Nième jour de la semaine</option>
+        </select>
+        <div id="ce-rec-nth-wrap" style="display:none;margin-top:8px;align-items:center;gap:6px;flex-wrap:wrap">
+          <select id="ce-rec-nth" class="form-control" style="width:auto">
+            <option value="1" data-i18n="cal.rec_1st">1er</option>
+            <option value="2" data-i18n="cal.rec_2nd">2e</option>
+            <option value="3" data-i18n="cal.rec_3rd">3e</option>
+            <option value="4" data-i18n="cal.rec_4th">4e</option>
+            <option value="-1" data-i18n="cal.rec_last">Dernier</option>
+          </select>
+          <select id="ce-rec-dow" class="form-control" style="width:auto">
+            <option value="1" data-i18n="cal.rec_dow_1">Lundi</option>
+            <option value="2" data-i18n="cal.rec_dow_2">Mardi</option>
+            <option value="3" data-i18n="cal.rec_dow_3">Mercredi</option>
+            <option value="4" data-i18n="cal.rec_dow_4">Jeudi</option>
+            <option value="5" data-i18n="cal.rec_dow_5">Vendredi</option>
+            <option value="6" data-i18n="cal.rec_dow_6">Samedi</option>
+            <option value="0" data-i18n="cal.rec_dow_0">Dimanche</option>
+          </select>
+          <span style="font-size:.78rem;color:var(--muted)" data-i18n="cal.rec_of_month">du mois (chaque année)</span>
         </div>
       </div>
 
@@ -146,13 +175,21 @@
 
       <!-- Options -->
       <div style="display:flex;flex-direction:column;gap:10px;padding:12px;background:rgba(255,255,255,.04);border-radius:10px;border:1px solid var(--border)">
-        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
-          <input id="ce-brew-reminder" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0">
-          <div>
-            <div style="font-weight:600;font-size:.875rem">🔔 <span data-i18n="cal.event_remind">Rappel de brassage J-45</span></div>
-            <div style="font-size:.75rem;color:var(--muted)" data-i18n="cal.event_remind_hint">Affiche un rappel 45 jours avant dans le calendrier</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1;min-width:0">
+            <input id="ce-brew-reminder" type="checkbox" style="width:auto;flex-shrink:0">
+            <div>
+              <div style="font-weight:600;font-size:.875rem">🔔 <span data-i18n="cal.event_remind">Rappel de brassage</span></div>
+              <div style="font-size:.75rem;color:var(--muted)" data-i18n="cal.event_remind_hint">Affiche un rappel dans le calendrier</div>
+            </div>
+          </label>
+          <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+            <input id="ce-brew-reminder-days" type="number" min="1" max="365" value="45"
+              style="width:58px;text-align:center;padding:4px 6px;border-radius:6px;
+              border:1px solid var(--border);background:var(--input,var(--card));color:var(--text);font-size:.85rem">
+            <span style="font-size:.78rem;color:var(--muted)" data-i18n="cal.event_remind_days">j. avant</span>
           </div>
-        </label>
+        </div>
         <label id="ce-tg-wrap" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
           <input id="ce-telegram" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0">
           <div>

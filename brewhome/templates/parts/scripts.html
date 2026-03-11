@@ -52,6 +52,7 @@ function _syncSettingsToServer() {
     hidden_world_events:  appSettings.hiddenWorldEvents?.length ? JSON.stringify(appSettings.hiddenWorldEvents) : null,
     world_event_overrides: appSettings.worldEventOverrides && Object.keys(appSettings.worldEventOverrides).length
       ? JSON.stringify(appSettings.worldEventOverrides) : null,
+    default_brew_reminder_days: appSettings.defaultBrewReminderDays != null ? String(appSettings.defaultBrewReminderDays) : null,
   };
   api('PUT', '/api/app-settings', payload).catch(() => {});
 }
@@ -83,7 +84,7 @@ function _loadSettingsFromServer(srv) {
     appSettings.github.vitrine = appSettings.github.vitrine || {};
     if (srv.gh_vitrine_repo   != null) appSettings.github.vitrine.repo   = srv.gh_vitrine_repo   || '';
     if (srv.gh_vitrine_branch != null) appSettings.github.vitrine.branch = srv.gh_vitrine_branch || 'main';
-    if (srv.gh_vitrine_pat    != null) appSettings.github.vitrine.pat    = srv.gh_vitrine_pat    || '';
+    if (srv.gh_vitrine_pat != null) appSettings.github.vitrine.pat = srv.gh_vitrine_pat || '';
   }
   if (srv.gh_data_repo != null || srv.gh_data_branch != null || srv.gh_data_pat != null) {
     appSettings.github = appSettings.github || {};
@@ -112,7 +113,7 @@ function _loadSettingsFromServer(srv) {
     if (srv.ai_model    != null) appSettings.ai.model    = srv.ai_model;
     if (srv.ai_size     != null) appSettings.ai.size     = srv.ai_size;
     if (srv.ai_quality  != null) appSettings.ai.quality  = srv.ai_quality;
-    if (srv.ai_api_key  != null) appSettings.ai.apiKey   = srv.ai_api_key;
+    if (srv.ai_api_key  != null) appSettings.ai.apiKey = srv.ai_api_key;
   }
   // Telegram
   if (srv.telegram_token != null || srv.telegram_chat_id != null ||
@@ -134,6 +135,8 @@ function _loadSettingsFromServer(srv) {
   if (srv.world_event_overrides != null) {
     try { appSettings.worldEventOverrides = JSON.parse(srv.world_event_overrides); } catch(e) {}
   }
+  if (srv.default_brew_reminder_days != null)
+    appSettings.defaultBrewReminderDays = parseInt(srv.default_brew_reminder_days) || 45;
   localStorage.setItem('brewSettings', JSON.stringify(appSettings));
 }
 // Normalise une quantité vers l'unité de base de sa dimension
@@ -162,9 +165,35 @@ const LOCALES = {
 
     // ── Navigation ────────────────────────────────────────────────────────────
     nav: {
+      dashboard: 'Tableau de bord',
       inventaire: 'Inventaire', recettes: 'Recettes', brassins: 'Brassins',
       cave: 'Cave', spindles: 'Capteurs', calendrier: 'Calendrier',
       brouillons: 'Brouillons', settings: 'Paramètres avancés', kegs: 'Kegs',
+    },
+
+    // ── Dashboard ─────────────────────────────────────────────────────────────
+    dash: {
+      stat_vol: 'Volume brassé',
+      stat_recipes: 'Recettes',
+      stat_brews: 'Brassins réalisés',
+      stat_cave: 'Stock cave',
+      active_title: '🔥 ${n} brassin en cours',
+      active_title_plural: '🔥 ${n} brassins en cours',
+      status_planned: 'Planifié',
+      status_in_progress: 'En cours',
+      status_fermenting: 'Fermentation',
+      top_recipes: '⭐ Top recettes',
+      top_styles: '🍺 Styles brassés',
+      brew_count: '${n} brassin',
+      brew_count_plural: '${n} brassins',
+      no_ratings: 'Notez vos recettes pour voir le classement ici.',
+      highlights: '📊 Chiffres clés',
+      avg_abv: 'ABV moyen',
+      last_brew: 'Dernier brassin',
+      top_style: 'Style dominant',
+      low_stock: '⚠️ Stock bas (${n})',
+      low_stock_more: '+${n} autres',
+      inv_ok: 'Inventaire OK',
     },
 
     // ── Soda Kegs ─────────────────────────────────────────────────────────────
@@ -173,9 +202,14 @@ const LOCALES = {
       type_corny19: 'Corny Keg / Soda Keg 19 L', type_corny6: 'Corny Keg 6 L',
       type_other: 'Autre',
       field_name: 'Nom / étiquette', field_type: 'Type',
+      field_manufacturer: 'Fabricant',
       field_volume: 'Volume total (L)', field_ferment: 'Volume fermentation (L)',
       field_weight: 'Poids à vide (kg)',
       field_color: 'Couleur', field_photo: 'Photo',
+      field_last_revision: 'Dernière révision', field_revision_interval: 'Intervalle de révision',
+      interval_months: 'mois', interval_6m: '6 mois', interval_1y: '1 an', interval_2y: '2 ans',
+      next_revision_label: 'Prochaine révision :',
+      revision_overdue: 'Révision dépassée', revision_soon: 'Révision dans ${days} j',
       status_label: 'Statut',
       status_empty: 'Vide', status_fermenting: 'En fermentation',
       status_serving: 'En service', status_cleaning: 'Nettoyage',
@@ -192,6 +226,14 @@ const LOCALES = {
       err_save: 'Erreur lors de la sauvegarde',
       fill_pct: '${pct}% rempli', fill_liters: '${cur} / ${tot} L',
       none: 'Aucun',
+      drag_to_reorder: 'Glisser pour réorganiser',
+      pour_amount: 'Litres à débiter', pour_save: 'Valider',
+      pour_current: 'Volume actuel : ${cur} L / ${tot} L',
+      pour_remaining: 'Restant après débit : ${rem} L',
+      pour_empty_warn: 'Le fût sera vide après débit.',
+      pour_negative_warn: 'Quantité supérieure au volume disponible.',
+      pour_saved: 'Volume mis à jour',
+      detail_specs: 'Caractéristiques', detail_assoc: 'Contenu actuel',
     },
 
     // ── Catégories ingrédients ────────────────────────────────────────────────
@@ -206,7 +248,7 @@ const LOCALES = {
       add: 'Ajouter', close: 'Fermer', confirm: 'Confirmer', search: 'Rechercher',
       export: 'Exporter', import: 'Importer', loading: 'Chargement…',
       yes: 'Oui', no: 'Non', none: 'Aucun', optional: '(optionnel)',
-      required: 'requis', today: "Aujourd'hui", back: 'Retour',
+      required: 'requis', today: "Aujourd'hui", back: 'Retour', no_results: 'Aucun résultat',
       show_archived: 'Voir archivés', hide_archived: 'Masquer archivés',
       archive: 'Archiver', restore: 'Restaurer', duplicate: 'Dupliquer',
       created: 'Créé le', updated: 'Modifié le',
@@ -422,6 +464,24 @@ const LOCALES = {
     },
 
     // ── Cave ──────────────────────────────────────────────────────────────────
+    tasting: {
+      btn: 'Dégustation',
+      date: 'Date de dégustation',
+      appearance: 'Apparence', aroma: 'Arôme', flavor: 'Goût',
+      bitterness: 'Amertume', mouthfeel: 'Bouche', overall_notes: 'Commentaire global',
+      rating: 'Note globale',
+      ph_appearance: 'Robe, couleur, limpidité, mousse…',
+      ph_aroma: 'Houblon, malt, levure, fruits…',
+      ph_flavor: 'Profil aromatique, saveurs…',
+      ph_bitterness: 'Intensité, qualité, persistance…',
+      ph_mouthfeel: 'Corps, carbonatation, texture…',
+      ph_overall: 'Impressions générales…',
+      saved: 'Fiche de dégustation enregistrée',
+      err_save: 'Erreur lors de la sauvegarde',
+      section_title: 'Fiche de dégustation',
+      no_notes: 'Aucune note de dégustation',
+    },
+
     cave: {
       title: 'Cave', new: 'Ajouter à la cave', empty: 'La cave est vide',
       field_name: 'Nom de la bière', field_style: 'Style',
@@ -605,14 +665,24 @@ const LOCALES = {
       event_new: 'Nouvel événement', event_edit: "Modifier l'événement",
       event_title: 'Titre', event_date: 'Date', event_emoji: 'Emoji',
       event_color: 'Couleur', event_notes: 'Notes',
-      event_remind: 'Rappel de brassage J-45',
-      event_remind_hint: 'Affiche un rappel 45 jours avant dans le calendrier',
+      recurrence: 'Récurrence',
+      rec_none: 'Aucune (ponctuel)', rec_yearly: 'Annuelle — même date',
+      rec_yearly_nth: 'Annuelle — Nième jour de la semaine',
+      rec_yearly_short: 'Annuel',
+      rec_1st: '1er', rec_2nd: '2e', rec_3rd: '3e', rec_4th: '4e', rec_last: 'Dernier',
+      rec_dow_0: 'Dimanche', rec_dow_1: 'Lundi', rec_dow_2: 'Mardi', rec_dow_3: 'Mercredi',
+      rec_dow_4: 'Jeudi', rec_dow_5: 'Vendredi', rec_dow_6: 'Samedi',
+      rec_of_month: 'du mois (chaque année)',
+      rec_of: 'de',
+      event_remind: 'Rappel de brassage',
+      event_remind_hint: 'Affiche un rappel dans le calendrier',
+      event_remind_days: 'j. avant',
       event_telegram: 'Notification Telegram',
       event_telegram_hint: 'Envoie un message le jour J (et le rappel J-45 si activé)',
       event_assoc: 'Association (optionnel)', event_style: 'Style BJCP',
       event_recipe: 'Recette associée', event_draft: 'Brouillon associé',
       prepare_draft: 'Préparer un brouillon', open_brew: 'Voir le brassin',
-      remind_label: 'Rappel brassage — J-45',
+      remind_label: 'Rappel brassage',
       remind_msg: "C'est le moment de lancer le brassage !",
       style_recommended: 'Style conseillé',
       recipe_linked: 'Recette', draft_linked: 'Brouillon',
@@ -711,6 +781,8 @@ const LOCALES = {
         field_name: 'Nom', field_desc: 'Description',
         field_style: 'Style conseillé', field_date: 'Date',
         btn_add: 'Ajouter',
+        default_remind_title: 'Rappel de brassage — délai par défaut',
+        default_remind_hint: 'Nombre de jours avant l\'événement pour afficher le rappel. Peut être surchargé par événement.',
       },
       notif: {
         token: 'Token du bot', chat_id: 'Chat ID', tz: 'Fuseau horaire',
@@ -931,9 +1003,35 @@ const LOCALES = {
     _meta: { name: 'English', flag: '🇬🇧', code: 'en' },
 
     nav: {
+      dashboard: 'Dashboard',
       inventaire: 'Inventory', recettes: 'Recipes', brassins: 'Brews',
       cave: 'Cellar', spindles: 'Sensors', calendrier: 'Calendar',
       brouillons: 'Drafts', settings: 'Advanced settings', kegs: 'Kegs',
+    },
+
+    // ── Dashboard ─────────────────────────────────────────────────────────────
+    dash: {
+      stat_vol: 'Volume brewed',
+      stat_recipes: 'Recipes',
+      stat_brews: 'Brews completed',
+      stat_cave: 'Cellar stock',
+      active_title: '🔥 ${n} brew in progress',
+      active_title_plural: '🔥 ${n} brews in progress',
+      status_planned: 'Planned',
+      status_in_progress: 'In progress',
+      status_fermenting: 'Fermenting',
+      top_recipes: '⭐ Top recipes',
+      top_styles: '🍺 Brewed styles',
+      brew_count: '${n} brew',
+      brew_count_plural: '${n} brews',
+      no_ratings: 'Rate your recipes to see the ranking here.',
+      highlights: '📊 Key figures',
+      avg_abv: 'Average ABV',
+      last_brew: 'Last brew',
+      top_style: 'Top style',
+      low_stock: '⚠️ Low stock (${n})',
+      low_stock_more: '+${n} more',
+      inv_ok: 'Inventory OK',
     },
 
     // ── Soda Kegs ─────────────────────────────────────────────────────────────
@@ -942,9 +1040,14 @@ const LOCALES = {
       type_corny19: 'Corny Keg / Soda Keg 19 L', type_corny6: 'Corny Keg 6 L',
       type_other: 'Other',
       field_name: 'Name / label', field_type: 'Type',
+      field_manufacturer: 'Manufacturer',
       field_volume: 'Total volume (L)', field_ferment: 'Fermentation volume (L)',
       field_weight: 'Empty weight (kg)',
       field_color: 'Color', field_photo: 'Photo',
+      field_last_revision: 'Last revision', field_revision_interval: 'Revision interval',
+      interval_months: 'months', interval_6m: '6 months', interval_1y: '1 year', interval_2y: '2 years',
+      next_revision_label: 'Next revision:',
+      revision_overdue: 'Revision overdue', revision_soon: 'Revision in ${days} d',
       status_label: 'Status',
       status_empty: 'Empty', status_fermenting: 'Fermenting',
       status_serving: 'Serving', status_cleaning: 'Cleaning',
@@ -961,6 +1064,14 @@ const LOCALES = {
       err_save: 'Error saving keg',
       fill_pct: '${pct}% full', fill_liters: '${cur} / ${tot} L',
       none: 'None',
+      drag_to_reorder: 'Drag to reorder',
+      pour_amount: 'Liters to pour', pour_save: 'Confirm',
+      pour_current: 'Current volume: ${cur} L / ${tot} L',
+      pour_remaining: 'Remaining after pour: ${rem} L',
+      pour_empty_warn: 'The keg will be empty after this pour.',
+      pour_negative_warn: 'Amount exceeds available volume.',
+      pour_saved: 'Volume updated',
+      detail_specs: 'Specifications', detail_assoc: 'Current content',
     },
 
     cat: {
@@ -973,7 +1084,7 @@ const LOCALES = {
       add: 'Add', close: 'Close', confirm: 'Confirm', search: 'Search',
       export: 'Export', import: 'Import', loading: 'Loading…',
       yes: 'Yes', no: 'No', none: 'None', optional: '(optional)',
-      required: 'required', today: 'Today', back: 'Back',
+      required: 'required', today: 'Today', back: 'Back', no_results: 'No results',
       show_archived: 'Show archived', hide_archived: 'Hide archived',
       archive: 'Archive', restore: 'Restore', duplicate: 'Duplicate',
       created: 'Created on', updated: 'Updated on',
@@ -1185,6 +1296,24 @@ const LOCALES = {
       abv_chart_label: 'Est. ABV (max OG in window: ${og})',
     },
 
+    tasting: {
+      btn: 'Tasting notes',
+      date: 'Tasting date',
+      appearance: 'Appearance', aroma: 'Aroma', flavor: 'Flavor',
+      bitterness: 'Bitterness', mouthfeel: 'Mouthfeel', overall_notes: 'Overall notes',
+      rating: 'Overall rating',
+      ph_appearance: 'Color, clarity, head…',
+      ph_aroma: 'Hops, malt, yeast, fruit…',
+      ph_flavor: 'Flavor profile, taste…',
+      ph_bitterness: 'Intensity, quality, finish…',
+      ph_mouthfeel: 'Body, carbonation, texture…',
+      ph_overall: 'General impressions…',
+      saved: 'Tasting notes saved',
+      err_save: 'Error saving tasting notes',
+      section_title: 'Tasting notes',
+      no_notes: 'No tasting notes',
+    },
+
     cave: {
       title: 'Cellar', new: 'Add to cellar', empty: 'The cellar is empty',
       field_name: 'Beer name', field_style: 'Style',
@@ -1366,14 +1495,24 @@ const LOCALES = {
       event_new: 'New event', event_edit: 'Edit event',
       event_title: 'Title', event_date: 'Date', event_emoji: 'Emoji',
       event_color: 'Color', event_notes: 'Notes',
-      event_remind: 'Brew reminder D-45',
-      event_remind_hint: 'Shows a reminder 45 days before in the calendar',
+      recurrence: 'Recurrence',
+      rec_none: 'None (one-time)', rec_yearly: 'Yearly — same date',
+      rec_yearly_nth: 'Yearly — Nth weekday',
+      rec_yearly_short: 'Yearly',
+      rec_1st: '1st', rec_2nd: '2nd', rec_3rd: '3rd', rec_4th: '4th', rec_last: 'Last',
+      rec_dow_0: 'Sunday', rec_dow_1: 'Monday', rec_dow_2: 'Tuesday', rec_dow_3: 'Wednesday',
+      rec_dow_4: 'Thursday', rec_dow_5: 'Friday', rec_dow_6: 'Saturday',
+      rec_of_month: 'of the month (every year)',
+      rec_of: 'of',
+      event_remind: 'Brew reminder',
+      event_remind_hint: 'Shows a reminder in the calendar',
+      event_remind_days: 'd. before',
       event_telegram: 'Telegram notification',
       event_telegram_hint: 'Sends a message on the day (and D-45 reminder if enabled)',
       event_assoc: 'Association (optional)', event_style: 'BJCP Style',
       event_recipe: 'Associated recipe', event_draft: 'Associated draft',
       prepare_draft: 'Prepare a draft', open_brew: 'View brew',
-      remind_label: 'Brew reminder — D-45',
+      remind_label: 'Brew reminder',
       remind_msg: "It's the right time to start brewing!",
       style_recommended: 'Recommended style',
       recipe_linked: 'Recipe', draft_linked: 'Draft',
@@ -1470,6 +1609,8 @@ const LOCALES = {
         field_name: 'Name', field_desc: 'Description',
         field_style: 'Recommended style', field_date: 'Date',
         btn_add: 'Add',
+        default_remind_title: 'Brew reminder — default delay',
+        default_remind_hint: 'Number of days before the event to show the reminder. Can be overridden per event.',
       },
       notif: {
         token: 'Bot token', chat_id: 'Chat ID', tz: 'Timezone',
@@ -1728,7 +1869,16 @@ function navigate(page) {
 
 async function _refreshPage(page) {
   try {
-    if (page === 'inventaire') {
+    if (page === 'dashboard') {
+      [S.recipes, S.brews, S.beers, S.inventory, S.sodaKegs] = await Promise.all([
+        api('GET', '/api/recipes'),
+        api('GET', '/api/brews'),
+        api('GET', '/api/beers'),
+        api('GET', '/api/inventory'),
+        api('GET', '/api/soda-kegs'),
+      ]);
+      renderDashboard();
+    } else if (page === 'inventaire') {
       S.inventory = await api('GET', '/api/inventory');
       renderInventaire();
     } else if (page === 'recettes') {
@@ -1763,6 +1913,7 @@ async function _refreshPage(page) {
       ]);
       renderCalendar();
     } else if (page === 'brouillons') {
+      if (S.drafts.length) renderBrouillons(); // rendu immédiat avec cache
       S.drafts = await api('GET', '/api/drafts');
       renderBrouillons();
     } else if (page === 'kegs') {
@@ -1785,7 +1936,7 @@ function toast(msg, type = 'info') {
   const el = document.createElement('div');
   el.className = `toast-item toast-${type}`;
   const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'circle-xmark' : 'circle-info';
-  el.innerHTML = `<i class="fas fa-${icon}"></i><span style="flex:1">${msg}</span><button class="toast-close" onclick="this.parentElement.remove()" title="${t('common.close')}">✕</button>`;
+  el.innerHTML = `<i class="fas fa-${icon}"></i><span style="flex:1">${esc(msg)}</span><button class="toast-close" onclick="this.parentElement.remove()" title="${esc(t('common.close'))}">✕</button>`;
   document.getElementById('toast').appendChild(el);
   // Auto-fermeture : 5s pour les erreurs, 3s pour les autres
   const delay = type === 'error' ? 15000 : 5000;
@@ -2028,7 +2179,17 @@ const AUTRE_UNITS = ['g','kg','mL','L','pièce','sachet'];
 // ── Calendrier settings ────────────────────────────────────────────────────
 let _editingWorldEv = null;
 
+function saveDefaultBrewReminderDays(val) {
+  const days = parseInt(val);
+  appSettings.defaultBrewReminderDays = (days > 0 && days <= 365) ? days : 45;
+  document.getElementById('settings-default-remind-days').value = appSettings.defaultBrewReminderDays;
+  saveSettings();
+  renderCalendar();
+}
+
 function renderSettingsCalendrier() {
+  const inp = document.getElementById('settings-default-remind-days');
+  if (inp) inp.value = appSettings.defaultBrewReminderDays || 45;
   _renderSettingsWorldEvents();
   _renderSettingsCustomEvents();
 }
@@ -2089,6 +2250,10 @@ function _renderSettingsWorldEvents() {
               style="font-size:.8rem;width:148px" title="${t('settings.cal.field_date')}">
           </div>
         </div>
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;padding:5px 8px;
+          background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:6px">
+          ${_worldEvRecurrenceLabel(eKey)}
+        </div>
         <div style="margin-bottom:8px">
           <div style="font-size:.68rem;color:var(--muted);margin-bottom:3px">${t('settings.cal.field_desc')}</div>
           <textarea id="wev-desc-${id}" class="form-control" rows="2" style="font-size:.82rem;resize:vertical"
@@ -2123,7 +2288,10 @@ function _renderSettingsWorldEvents() {
       </div>
       ${hasOv ? `<span style="font-size:.65rem;color:var(--amber);padding:1px 5px;border-radius:4px;
         background:rgba(245,158,11,.12);flex-shrink:0">${t('settings.cal.modified_badge')}</span>` : ''}
-      <span style="font-size:.72rem;color:var(--muted);flex-shrink:0">${ov.date_mmdd ? new Date(`${new Date().getFullYear()}-${ov.date_mmdd}T00:00:00`).toLocaleDateString(_lang||'fr',{day:'numeric',month:'short'}) : _worldEvMonthLabel(eKey)}</span>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:.72rem;color:var(--muted)">${ov.date_mmdd ? new Date(`${new Date().getFullYear()}-${ov.date_mmdd}T00:00:00`).toLocaleDateString(_lang||'fr',{day:'numeric',month:'short'}) : _worldEvMonthLabel(eKey)}</div>
+        <div style="font-size:.65rem;color:var(--muted);opacity:.7">${_worldEvRecurrenceLabel(eKey).split('·')[0].trim()}</div>
+      </div>
       <button class="btn btn-ghost btn-icon btn-sm" title="${t('common.edit')}"
         onclick="_editingWorldEv='${safeOrig}';_renderSettingsWorldEvents()">
         <i class="fas fa-pen" style="font-size:.7rem"></i>
@@ -2141,6 +2309,28 @@ function _renderSettingsWorldEvents() {
 }
 
 function _wevId(label) { return label.replace(/[^a-zA-Z0-9]/g, '-'); }
+
+function _worldEvRecurrenceLabel(eKey) {
+  const year  = new Date().getFullYear();
+  const evCur  = _brewingEvents(year).find(e => (e.canonical || e.label) === eKey);
+  const evNext = _brewingEvents(year + 1).find(e => (e.canonical || e.label) === eKey);
+  if (!evCur) return '';
+  const cur  = evCur.date;
+  const MONTHS = t('cal.months');
+  const dCur = new Date(cur + 'T00:00:00');
+  const month = dCur.getMonth(); // 0-indexed
+  if (!evNext || cur.slice(5) === evNext.date.slice(5)) {
+    // Même MM-JJ chaque année
+    return `🔁 ${t('cal.rec_yearly')} · ${dCur.toLocaleDateString(_lang || 'fr', { day: 'numeric', month: 'long' })}`;
+  }
+  // Nième jour de la semaine du mois
+  const nth    = Math.ceil(dCur.getDate() / 7);
+  const dow    = dCur.getDay();
+  const nthLbls = [null, t('cal.rec_1st'), t('cal.rec_2nd'), t('cal.rec_3rd'), t('cal.rec_4th')];
+  const dowLbls = [t('cal.rec_dow_0'), t('cal.rec_dow_1'), t('cal.rec_dow_2'),
+                   t('cal.rec_dow_3'), t('cal.rec_dow_4'), t('cal.rec_dow_5'), t('cal.rec_dow_6')];
+  return `🔁 ${nthLbls[nth] || nth + 'e'} ${dowLbls[dow]} ${t('cal.rec_of')} ${MONTHS[month]}`;
+}
 
 function _worldEvMonthLabel(canonicalOrLabel) {
   const year = new Date().getFullYear();
@@ -2235,7 +2425,8 @@ function _renderSettingsCustomEvents() {
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ev.title)}</div>
         <div style="font-size:.72rem;color:var(--muted)">${dateStr}
-          ${ev.brew_reminder ? ' · <i class="fas fa-bell" style="color:#a855f7"></i> J-45' : ''}
+          ${ev.recurrence ? ' · 🔁 ' + t('cal.rec_yearly_short') : ''}
+          ${ev.brew_reminder ? ` · <i class="fas fa-bell" style="color:#a855f7"></i> J-${ev.brew_reminder_days ?? appSettings.defaultBrewReminderDays ?? 45}` : ''}
           ${ev.telegram_notify ? ' · <i class="fas fa-paper-plane" style="color:#0088cc"></i>' : ''}
         </div>
       </div>
@@ -2440,7 +2631,7 @@ async function hubEauFetch() {
         </div>`;
     }
   } catch (e) {
-    resultDiv.innerHTML = `<p style="font-size:.85rem;color:var(--danger)"><i class="fas fa-triangle-exclamation"></i> ${t('settings.water.hubeau_err')} ${e.message}</p>`;
+    resultDiv.innerHTML = `<p style="font-size:.85rem;color:var(--danger)"><i class="fas fa-triangle-exclamation"></i> ${t('settings.water.hubeau_err')} ${esc(e.message)}</p>`;
   }
   resultDiv.style.display = 'block';
   btn.disabled  = false;
@@ -2493,26 +2684,18 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 // LOAD ALL DATA
 // ══════════════════════════════════════════════════════════════════════════════
 async function loadAll() {
-  const [inv, rec, bra, beerList, stats, catalog, bjcp, spindles, tempSensors, serverAppSettings, customEvents, drafts] = await Promise.all([
-    api('GET', '/api/inventory'),
-    api('GET', '/api/recipes'),
-    api('GET', '/api/brews'),
-    api('GET', '/api/beers'),
+  // Chargement minimal : données communes à toutes les pages
+  const [stats, catalog, bjcp, serverAppSettings, customEvents, drafts, spindles, tempSensors] = await Promise.all([
     api('GET', '/api/stats'),
     api('GET', '/api/catalog'),
     api('GET', '/api/bjcp'),
-    api('GET', '/api/spindles'),
-    api('GET', '/api/temperature'),
     api('GET', '/api/app-settings').catch(() => ({})),
     api('GET', '/api/custom_events').catch(() => []),
     api('GET', '/api/drafts').catch(() => []),
+    api('GET', '/api/spindles'),
+    api('GET', '/api/temperature'),
   ]);
-  // Charger tous les paramètres depuis le serveur (priorité sur localStorage)
   _loadSettingsFromServer(serverAppSettings);
-  S.inventory    = inv;
-  S.recipes      = rec;
-  S.brews        = bra;
-  S.beers        = beerList;
   S.catalog      = catalog;
   S.bjcp         = bjcp;
   S.spindles     = spindles;
@@ -2520,16 +2703,15 @@ async function loadAll() {
   S.customEvents = customEvents;
   S.drafts       = drafts;
   updateNavBadges(stats);
-  renderCalendar();   // peuple _calEvStore → badge calendrier
-  renderInventaire();
-  renderRecipeList();
-  renderBrassins();
-  renderCave();
+  renderCalendar();     // peuple _calEvStore → badge calendrier
   renderSpindles();
   renderTempSensors();
+  // Chargement de la page d'accueil (les autres pages chargent leurs données à la navigation)
+  await _refreshPage('dashboard');
 }
 
 function updateNavBadges(stats) {
+  if (!stats) return;
   document.getElementById('nb-inv').textContent = stats.inventory_count;
   document.getElementById('nb-rec').textContent = stats.recipes_count;
   document.getElementById('nb-bra').textContent = stats.brews_count;
@@ -2557,6 +2739,141 @@ function updateCalBadge() {
 // ── INVENTAIRE ───────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 function catLabel(c) { return t('cat.' + c, {malt:'Malt',houblon:'Houblon',levure:'Levure',autre:'Autre'}[c] || c); }
+
+function renderDashboard() {
+  const brews   = S.brews.filter(b => !b.archived);
+  const recipes = S.recipes.filter(r => !r.archived);
+  const beers   = S.beers.filter(b => !b.archived);
+  const inv     = S.inventory.filter(i => !i.archived);
+
+  // ── Chiffres clés ──────────────────────────────────────────────────────────
+  const completed   = brews.filter(b => b.status === 'completed');
+  const active      = brews.filter(b => ['planned','in_progress','fermenting'].includes(b.status));
+  const totalVol    = brews.reduce((s,b) => s + (b.volume_brewed||0), 0);
+  const abvBrews    = completed.filter(b => b.abv);
+  const avgAbv      = abvBrews.length ? (abvBrews.reduce((s,b)=>s+b.abv,0)/abvBrews.length) : null;
+  const caveL       = beers.reduce((s,b)=>s+(b.stock_33cl||0)*0.33+(b.stock_75cl||0)*0.75+(b.keg_liters||0),0);
+
+  document.getElementById('dash-big-stats').innerHTML = `
+    <div class="stat"><div class="stat-val" style="color:var(--info)">${totalVol.toFixed(0)} L</div><div class="stat-lbl">${t('dash.stat_vol')}</div></div>
+    <div class="stat"><div class="stat-val">${recipes.length}</div><div class="stat-lbl">${t('dash.stat_recipes')}</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--hop)">${completed.length}<span style="font-size:.9rem;font-weight:400;color:var(--muted)"> / ${brews.length}</span></div><div class="stat-lbl">${t('dash.stat_brews')}</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--amber)">${caveL.toFixed(1)} L</div><div class="stat-lbl">${t('dash.stat_cave')}</div></div>`;
+
+  // ── Brassins actifs ────────────────────────────────────────────────────────
+  const STATUS_COLOR = { planned:'var(--info)', in_progress:'var(--amber)', fermenting:'var(--hop)' };
+  const STATUS_LABEL = { planned: t('dash.status_planned'), in_progress: t('dash.status_in_progress'), fermenting: t('dash.status_fermenting') };
+  const activeEl = document.getElementById('dash-active');
+  const activeList = document.getElementById('dash-active-list');
+  if (active.length) {
+    document.getElementById('dash-active-title').textContent = active.length > 1 ? t('dash.active_title_plural').replace('${n}', active.length) : t('dash.active_title').replace('${n}', active.length);
+    activeList.innerHTML = active.map(b => {
+      const sp = S.spindles?.find(s => s.brew_id === b.id);
+      const grav = sp?.last_gravity ? `<span style="color:var(--info);font-weight:700;font-size:.82rem">${sp.last_gravity.toFixed(3)}</span>` : '';
+      return `<div class="card" style="flex:1;min-width:180px;max-width:260px;padding:14px;cursor:pointer" onclick="navigate('brassins')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+          <div style="font-weight:700;font-size:.9rem">${esc(b.name)}</div>
+          <span style="background:${STATUS_COLOR[b.status]};color:#000;border-radius:20px;padding:2px 8px;font-size:.7rem;white-space:nowrap;font-weight:700">${STATUS_LABEL[b.status]||b.status}</span>
+        </div>
+        ${b.recipe_name ? `<div style="font-size:.75rem;color:var(--muted);margin-bottom:4px"><i class="fas fa-scroll"></i> ${esc(b.recipe_name)}</div>` : ''}
+        <div style="display:flex;gap:10px;font-size:.78rem;color:var(--muted)">
+          ${b.volume_brewed ? `<span><i class="fas fa-droplet"></i> ${b.volume_brewed} L</span>` : ''}
+          ${b.og ? `<span>OG ${b.og}</span>` : ''}
+          ${grav}
+        </div>
+      </div>`;
+    }).join('');
+    activeEl.style.display = '';
+  } else {
+    activeEl.style.display = 'none';
+  }
+
+  // ── Colonne gauche : Top recettes + Stats styles ───────────────────────────
+  const rated = [...recipes].filter(r => r.rating).sort((a,b) => b.rating-a.rating).slice(0,5);
+  const styleCounts = {};
+  brews.forEach(b => {
+    const r = S.recipes.find(x => x.id === b.recipe_id);
+    if (r?.style) styleCounts[r.style] = (styleCounts[r.style]||0) + 1;
+  });
+  const topStyles = Object.entries(styleCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  let leftHtml = '';
+  if (rated.length) {
+    leftHtml += `<div class="card" style="margin-bottom:16px">
+      <div class="section-label" style="margin-bottom:12px">${t('dash.top_recipes')}</div>
+      ${rated.map((r,i) => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;${i<rated.length-1?'border-bottom:1px solid var(--border)':''};cursor:pointer" onclick="navigate('recettes')">
+          <div style="font-size:1rem;font-weight:800;color:var(--muted);width:20px;text-align:center">${i+1}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.name)}</div>
+            ${r.style ? `<div style="font-size:.75rem;color:var(--muted)">${esc(r.style)}</div>` : ''}
+          </div>
+          <div style="white-space:nowrap">${Array.from({length:5},(_,j)=>`<span style="color:${j<r.rating?'var(--amber)':'var(--border)'}">★</span>`).join('')}</div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  if (topStyles.length) {
+    const maxCount = topStyles[0][1];
+    leftHtml += `<div class="card">
+      <div class="section-label" style="margin-bottom:12px">${t('dash.top_styles')}</div>
+      ${topStyles.map(([style, count]) => `
+        <div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
+            <span>${esc(style)}</span>
+            <span style="color:var(--muted)">${count > 1 ? t('dash.brew_count_plural').replace('${n}', count) : t('dash.brew_count').replace('${n}', count)}</span>
+          </div>
+          <div class="bottle-bar"><div class="bottle-bar-fill" style="width:${Math.round(count/maxCount*100)}%;background:var(--amber)"></div></div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  document.getElementById('dash-left').innerHTML = leftHtml || `<div class="card" style="color:var(--muted);font-size:.88rem;padding:20px">${t('dash.no_ratings')}</div>`;
+
+  // ── Colonne droite : Highlights + Alertes inventaire ──────────────────────
+  let rightHtml = '';
+
+  // Highlights
+  const highlights = [];
+  if (avgAbv !== null)
+    highlights.push(`<div style="text-align:center"><div style="font-size:1.8rem;font-weight:800;color:var(--amber)">${avgAbv.toFixed(1)}%</div><div style="font-size:.78rem;color:var(--muted)">${t('dash.avg_abv')}</div></div>`);
+  if (completed.length) {
+    const lastBrew = completed.sort((a,b)=>(b.id||0)-(a.id||0))[0];
+    highlights.push(`<div style="text-align:center"><div style="font-size:.88rem;font-weight:700;max-width:120px;margin:0 auto;line-height:1.3">${esc(lastBrew.name)}</div><div style="font-size:.78rem;color:var(--muted)">${t('dash.last_brew')}</div></div>`);
+  }
+  if (topStyles[0])
+    highlights.push(`<div style="text-align:center"><div style="font-size:.88rem;font-weight:700;max-width:120px;margin:0 auto;line-height:1.3">${esc(topStyles[0][0])}</div><div style="font-size:.78rem;color:var(--muted)">${t('dash.top_style')}</div></div>`);
+
+  if (highlights.length) {
+    rightHtml += `<div class="card" style="margin-bottom:16px">
+      <div class="section-label" style="margin-bottom:14px">${t('dash.highlights')}</div>
+      <div style="display:flex;justify-content:space-around;gap:8px;flex-wrap:wrap">${highlights.join('')}</div>
+    </div>`;
+  }
+
+  // Alertes inventaire
+  const lowStock = inv.filter(i => {
+    const qty = (i.quantity||0) * (i.unit==='kg'?1000:1);
+    return qty < getThresh(i.category);
+  });
+  if (lowStock.length) {
+    const CAT_ICON = {malt:'fa-wheat-awn',houblon:'fa-seedling',levure:'fa-flask',autre:'fa-box'};
+    rightHtml += `<div class="card">
+      <div class="section-label" style="margin-bottom:12px;color:var(--danger)">${t('dash.low_stock').replace('${n}', lowStock.length)}</div>
+      ${lowStock.slice(0,8).map(i => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;${lowStock.indexOf(i)<lowStock.length-1?'border-bottom:1px solid var(--border)':''}">
+          <i class="fas ${CAT_ICON[i.category]||'fa-box'}" style="color:var(--muted);width:14px"></i>
+          <span style="flex:1;font-size:.83rem">${esc(i.name)}</span>
+          <span style="font-size:.78rem;color:var(--danger);font-weight:600">${i.quantity||0} ${i.unit}</span>
+        </div>`).join('')}
+      ${lowStock.length>8?`<div style="font-size:.75rem;color:var(--muted);margin-top:8px;text-align:center">${t('dash.low_stock_more').replace('${n}', lowStock.length-8)}</div>`:''}
+    </div>`;
+  } else {
+    rightHtml += `<div class="card" style="color:var(--success);font-size:.85rem;padding:16px;text-align:center"><i class="fas fa-check-circle"></i> ${t('dash.inv_ok')}</div>`;
+  }
+
+  document.getElementById('dash-right').innerHTML = rightHtml;
+}
 
 function renderInventaire() {
   const filtered = S.inventory.filter(i => invFilter === 'all' || i.category === invFilter);
@@ -2678,11 +2995,15 @@ function renderInventaire() {
   }
 }
 
-async function saveInvOrder() {
-  try {
-    await api('PUT', '/api/inventory/reorder',
-      S.inventory.map(item => ({ id: item.id, sort_order: item.sort_order ?? 9999 })));
-  } catch(e) { toast(t('inv.err_save_order'), 'error'); }
+let _saveInvOrderTimer = null;
+function saveInvOrder() {
+  clearTimeout(_saveInvOrderTimer);
+  _saveInvOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/inventory/reorder',
+        S.inventory.map(item => ({ id: item.id, sort_order: item.sort_order ?? 9999 })));
+    } catch(e) { toast(t('inv.err_save_order'), 'error'); }
+  }, 600);
 }
 
 function setInvFilter(cat, btn) {
@@ -2918,10 +3239,13 @@ function renderRecipeList() {
   const sortSel = document.getElementById('rec-sort-select');
   if (sortSel) sortSel.value = recSort;
 
+  const q = (document.getElementById('rec-search')?.value || '').toLowerCase();
+
   const c = document.getElementById('recipe-list-container');
   const active = S.recipes.filter(r => !r.archived);
   const arch   = S.recipes.filter(r => r.archived);
-  const shown  = showArchivedRec ? [...active, ...arch] : active;
+  const shown  = (showArchivedRec ? [...active, ...arch] : active)
+    .filter(r => !q || r.name.toLowerCase().includes(q) || (r.style || '').toLowerCase().includes(q));
 
   // Apply sort (archives always follow actives)
   const sortFn = {
@@ -2931,14 +3255,10 @@ function renderRecipeList() {
     volume: (a, b) => b.volume - a.volume,
     recent: () => 0,
   }[recSort] || (() => 0);
-  if (recSort !== 'recent') {
-    active.sort(sortFn);
-    arch.sort(sortFn);
-    shown.splice(0, shown.length, ...active, ...(showArchivedRec ? arch : []));
-  }
+  if (recSort !== 'recent') shown.sort(sortFn);
 
-  if (!S.recipes.length) {
-    c.innerHTML = '<div class="empty" id="recipe-list-empty"><i class="fas fa-scroll"></i><p>Aucune recette</p></div>';
+  if (!shown.length) {
+    c.innerHTML = `<div class="empty" id="recipe-list-empty"><i class="fas fa-scroll"></i><p>${q ? t('common.no_results') : t('rec.list_empty')}</p></div>`;
   } else {
     const BREW_STATUS = {
       planned:    { icon:'calendar-plus',      color:'var(--muted)',    label:t('brew.status_planned') },
@@ -3059,11 +3379,15 @@ function renderRecipeList() {
   }
 }
 
-async function saveRecipeOrder() {
-  try {
-    await api('PUT', '/api/recipes/reorder',
-      S.recipes.map((r, i) => ({ id: r.id, sort_order: i })));
-  } catch(e) { toast(t('rec.err_save_order'), 'error'); }
+let _saveRecipeOrderTimer = null;
+function saveRecipeOrder() {
+  clearTimeout(_saveRecipeOrderTimer);
+  _saveRecipeOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/recipes/reorder',
+        S.recipes.map((r, i) => ({ id: r.id, sort_order: i })));
+    } catch(e) { toast(t('rec.err_save_order'), 'error'); }
+  }, 600);
 }
 
 function clearRecipeForm() {
@@ -3599,10 +3923,22 @@ async function saveRecipe(silent = false) {
       if (idx !== -1) S.recipes[idx] = updated;
       if (!silent) toast(t('rec.updated'), 'success');
     } else {
-      if (_pendingDraftId) { payload.draft_id = _pendingDraftId; _pendingDraftId = null; }
+      let usedDraftId = null;
+      if (_pendingDraftId) { usedDraftId = _pendingDraftId; payload.draft_id = _pendingDraftId; _pendingDraftId = null; }
       const created = await api('POST', '/api/recipes', payload);
       S.recipes.unshift(created);
       recEditingId = created.id;
+      // Lier l'événement calendrier du brouillon à la nouvelle recette
+      if (usedDraftId) {
+        const ce = (S.customEvents || []).find(e => e.draft_id === usedDraftId && !e.recipe_id);
+        if (ce) {
+          try {
+            const updatedEv = await api('PUT', `/api/custom_events/${ce.id}`, { ...ce, recipe_id: created.id });
+            const idx = S.customEvents.findIndex(x => x.id === ce.id);
+            if (idx !== -1) S.customEvents[idx] = updatedEv;
+          } catch(_) {}
+        }
+      }
       if (!silent) toast(t('rec.saved'), 'success');
     }
     renderRecipeList();
@@ -3752,7 +4088,7 @@ function renderRecipeView() {
   const rvStarsHtml = Array.from({length:5}, (_, i) => {
     const v = i + 1;
     const filled = (r.rating || 0) >= v;
-    return `<span onclick="rateRecipe(${r.id},${v})" title="${STAR_LABELS[v]}" style="cursor:pointer;font-size:1.5rem;line-height:1;color:${filled?'var(--amber)':'var(--border)'};transition:opacity .15s" onmouseover="this.style.opacity='.6'" onmouseout="this.style.opacity='1'">\u2605</span>`;
+    return `<span onclick="rateRecipe(${r.id},${v})" title="${STAR_LABELS()[v]}" style="cursor:pointer;font-size:1.5rem;line-height:1;color:${filled?'var(--amber)':'var(--border)'};transition:opacity .15s" onmouseover="this.style.opacity='.6'" onmouseout="this.style.opacity='1'">\u2605</span>`;
   }).join('');
 
   // Image du brouillon d'origine
@@ -3781,7 +4117,7 @@ function renderRecipeView() {
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
         <div style="display:flex;gap:2px">${rvStarsHtml}</div>
-        <span style="font-size:.82rem;color:var(--muted)">${STAR_LABELS[r.rating||0]}</span>
+        <span style="font-size:.82rem;color:var(--muted)">${STAR_LABELS()[r.rating||0]}</span>
       </div>
     </div>
 
@@ -4132,11 +4468,13 @@ function _spindleAgo(dateStr) {
 }
 
 function renderBrassins() {
+  const q      = (document.getElementById('brew-search')?.value || '').toLowerCase();
   const active = S.brews.filter(b => !b.archived);
   const arch   = S.brews.filter(b => b.archived);
-  const shown  = showArchivedBrew ? [...active, ...arch] : active;
+  const shown  = (showArchivedBrew ? [...active, ...arch] : active)
+    .filter(b => !q || b.name.toLowerCase().includes(q) || (b.recipe_name || '').toLowerCase().includes(q));
 
-  // Stats on active brews only
+  // Stats on active brews only (not affected by search)
   document.getElementById('brew-stats').innerHTML = `
     <div class="stat"><div class="stat-val">${active.length}</div><div class="stat-lbl">${t('brew.stat_total')}</div></div>
     <div class="stat"><div class="stat-val" style="color:var(--hop)">${active.filter(b=>b.status==='completed').length}</div><div class="stat-lbl">${t('brew.stat_completed')}</div></div>
@@ -4144,7 +4482,9 @@ function renderBrassins() {
     <div class="stat"><div class="stat-val" style="color:var(--info)">${active.length ? active.filter(b=>b.volume_brewed).reduce((s,b)=>s+(b.volume_brewed||0),0).toFixed(0)+'L' : '–'}</div><div class="stat-lbl">${t('brew.stat_vol_total')}</div></div>`;
 
   const list = document.getElementById('brew-list');
-  document.getElementById('brew-empty').style.display = shown.length ? 'none' : 'block';
+  const emptyEl = document.getElementById('brew-empty');
+  emptyEl.style.display = shown.length ? 'none' : 'block';
+  if (!shown.length) emptyEl.querySelector('p').textContent = q ? t('common.no_results') : t('brew.empty_none');
 
   if (!shown.length) { list.innerHTML = ''; }
   else {
@@ -4289,11 +4629,15 @@ function renderBrassins() {
   });
 }
 
-async function saveBrewOrder() {
-  try {
-    await api('PUT', '/api/brews/reorder',
-      S.brews.map((b, i) => ({ id: b.id, sort_order: i })));
-  } catch(e) { toast(t('brew.err_save_order'), 'error'); }
+let _saveBrewOrderTimer = null;
+function saveBrewOrder() {
+  clearTimeout(_saveBrewOrderTimer);
+  _saveBrewOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/brews/reorder',
+        S.brews.map((b, i) => ({ id: b.id, sort_order: i })));
+    } catch(e) { toast(t('brew.err_save_order'), 'error'); }
+  }, 600);
 }
 
 function openBrewModal() {
@@ -4688,6 +5032,7 @@ function renderCave() {
           </div>
           <div style="display:flex;gap:5px">
             <button class="btn btn-sm btn-ghost" onclick="editBeer(${b.id})" style="flex:1"><i class="fas fa-pen"></i> ${t('common.edit')}</button>
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="openTastingModal(${b.id})" title="${t('tasting.btn')}" style="${b.taste_rating||b.taste_appearance?'color:var(--amber)':''}"><i class="fas fa-wine-glass"></i></button>
             <button class="btn btn-icon btn-ghost btn-sm" onclick="openCaveKegModal(${b.id})" title="${linkedKeg ? esc(linkedKeg.name) : t('cave.keg_assign')}" style="${linkedKeg ? 'color:var(--amber)' : ''}"><i class="fas fa-jar"></i></button>
             <button class="btn btn-icon btn-ghost btn-sm" onclick="archiveItem('cave',${b.id},${b.archived?0:1})" title="${b.archived?t('common.restore'):t('common.archive')}"><i class="fas fa-${b.archived?'box-open':'box-archive'}"></i></button>
             <button class="btn btn-icon btn-ghost btn-sm" onclick="event.stopPropagation();printBeerLabel(${b.id})" title="${t('cave.print_label')}"><i class="fas fa-tag"></i></button>
@@ -4767,11 +5112,15 @@ function renderCave() {
   });
 }
 
-async function saveCaveOrder() {
-  try {
-    await api('PUT', '/api/beers/reorder',
-      S.beers.map((b, i) => ({ id: b.id, sort_order: i })));
-  } catch(e) { toast(t('cave.err_save_order'), 'error'); }
+let _saveCaveOrderTimer = null;
+function saveCaveOrder() {
+  clearTimeout(_saveCaveOrderTimer);
+  _saveCaveOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/beers/reorder',
+        S.beers.map((b, i) => ({ id: b.id, sort_order: i })));
+    } catch(e) { toast(t('cave.err_save_order'), 'error'); }
+  }, 600);
 }
 
 function openImgLightbox(src, name = '') {
@@ -4779,7 +5128,6 @@ function openImgLightbox(src, name = '') {
   document.getElementById('beer-lightbox-img').alt  = name;
   document.getElementById('beer-lightbox-name').textContent = name;
   document.getElementById('beer-lightbox').style.display = 'flex';
-  document.addEventListener('keydown', _lbKeyClose);
 }
 
 function openBeerLightbox(id) {
@@ -4790,16 +5138,12 @@ function openBeerLightbox(id) {
   document.getElementById('beer-lightbox-img').alt  = b.name || '';
   document.getElementById('beer-lightbox-name').textContent = b.name || '';
   lb.style.display = 'flex';
-  document.addEventListener('keydown', _lbKeyClose);
 }
 
 function closeBeerLightbox() {
   document.getElementById('beer-lightbox').style.display = 'none';
   document.getElementById('beer-lightbox-img').src = '';
-  document.removeEventListener('keydown', _lbKeyClose);
 }
-
-function _lbKeyClose(e) { if (e.key === 'Escape') closeBeerLightbox(); }
 
 let _beerDetailId = null;
 function _bdPhotoClick() { if (_beerDetailId) openBeerLightbox(_beerDetailId); }
@@ -4877,6 +5221,51 @@ function openBeerDetail(id) {
     const metaEl = get('bd-meta');
     if (metaEl) metaEl.innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
 
+    // Section dégustation
+    const tastingEl = get('bd-tasting');
+    if (tastingEl) {
+      const hasTasting = b.taste_appearance || b.taste_aroma || b.taste_flavor ||
+                         b.taste_bitterness || b.taste_mouthfeel || b.taste_overall || b.taste_rating;
+      if (hasTasting) {
+        const fmtDate = d => d ? d.split('-').reverse().join('/') : null;
+        const starsHtml = b.taste_rating
+          ? Array.from({length:5}, (_,i) =>
+              `<span style="color:${i<b.taste_rating?'var(--amber)':'var(--border)'}">★</span>`).join('')
+          : '';
+        const TASTING_FIELDS = [
+          ['fa-eye',              'var(--info)',  t('tasting.appearance'),   b.taste_appearance],
+          ['fa-wind',             'var(--hop)',   t('tasting.aroma'),        b.taste_aroma],
+          ['fa-droplet',          'var(--malt)',  t('tasting.flavor'),       b.taste_flavor],
+          ['fa-fire',             'var(--amber)', t('tasting.bitterness'),   b.taste_bitterness],
+          ['fa-circle-half-stroke','var(--info)', t('tasting.mouthfeel'),    b.taste_mouthfeel],
+          ['fa-comment',          'var(--muted)', t('tasting.overall_notes'),b.taste_overall],
+        ].filter(f => f[3]);
+        tastingEl.innerHTML = `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <i class="fas fa-wine-glass" style="color:var(--amber)"></i>
+            <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber)">${t('tasting.section_title')}</span>
+            ${starsHtml ? `<span style="margin-left:auto;font-size:1rem">${starsHtml}</span>` : ''}
+            ${b.taste_date ? `<span style="font-size:.75rem;color:var(--muted)">${fmtDate(b.taste_date)}</span>` : ''}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            ${TASTING_FIELDS.map(([icon, color, label, val]) => `
+              <div style="background:var(--card2);border-radius:9px;padding:10px">
+                <div style="font-size:.72rem;font-weight:700;color:${color};margin-bottom:4px">
+                  <i class="fas ${icon}"></i> ${label}
+                </div>
+                <div style="font-size:.82rem;line-height:1.5;white-space:pre-wrap">${esc(val)}</div>
+              </div>`).join('')}
+          </div>`;
+        tastingEl.style.display = '';
+      } else {
+        tastingEl.style.display = 'none';
+      }
+    }
+
+    // Bouton Dégustation
+    const tastingBtn = get('bd-tasting-btn');
+    if (tastingBtn) tastingBtn.onclick = () => { closeModal('beer-detail-modal'); openTastingModal(id); };
+
     // Bouton Étiquette
     const printBtn = get('bd-print-btn');
     if (printBtn) printBtn.onclick = () => printBeerLabel(id);
@@ -4888,6 +5277,64 @@ function openBeerDetail(id) {
   } catch(e) {
     console.error('openBeerDetail:', e);
   }
+}
+
+function openTastingModal(beerId) {
+  const b = S.beers.find(x => x.id === beerId);
+  if (!b) return;
+  document.getElementById('tasting-f-beer-id').value     = beerId;
+  document.getElementById('tasting-modal-title').textContent = b.name;
+  document.getElementById('tasting-f-date').value        = b.taste_date || new Date().toISOString().split('T')[0];
+  document.getElementById('tasting-f-appearance').value  = b.taste_appearance || '';
+  document.getElementById('tasting-f-aroma').value       = b.taste_aroma      || '';
+  document.getElementById('tasting-f-flavor').value      = b.taste_flavor     || '';
+  document.getElementById('tasting-f-bitterness').value  = b.taste_bitterness || '';
+  document.getElementById('tasting-f-mouthfeel').value   = b.taste_mouthfeel  || '';
+  document.getElementById('tasting-f-overall').value     = b.taste_overall    || '';
+  document.getElementById('tasting-f-rating').value      = b.taste_rating     || '';
+  // Apply placeholders via i18n
+  ['appearance','aroma','flavor','bitterness','mouthfeel','overall'].forEach(k => {
+    const el = document.getElementById(`tasting-f-${k}`);
+    if (el) el.placeholder = t(`tasting.ph_${k}`);
+  });
+  renderTastingStars(b.taste_rating || 0);
+  openModal('tasting-modal');
+}
+
+function setTastingRating(v) {
+  const current = parseInt(document.getElementById('tasting-f-rating').value) || 0;
+  const newVal = current === v ? 0 : v;
+  document.getElementById('tasting-f-rating').value = newVal || '';
+  renderTastingStars(newVal);
+}
+
+function renderTastingStars(n) {
+  document.querySelectorAll('#tasting-star-input .star').forEach((el, i) => {
+    el.classList.toggle('on', i < n);
+  });
+  document.getElementById('tasting-rating-label').textContent = STAR_LABELS()[n] || STAR_LABELS()[0];
+}
+
+async function saveTasting() {
+  const beerId = parseInt(document.getElementById('tasting-f-beer-id').value);
+  const payload = {
+    taste_date:        document.getElementById('tasting-f-date').value        || null,
+    taste_appearance:  document.getElementById('tasting-f-appearance').value  || null,
+    taste_aroma:       document.getElementById('tasting-f-aroma').value       || null,
+    taste_flavor:      document.getElementById('tasting-f-flavor').value      || null,
+    taste_bitterness:  document.getElementById('tasting-f-bitterness').value  || null,
+    taste_mouthfeel:   document.getElementById('tasting-f-mouthfeel').value   || null,
+    taste_overall:     document.getElementById('tasting-f-overall').value     || null,
+    taste_rating:      parseInt(document.getElementById('tasting-f-rating').value) || null,
+  };
+  try {
+    const updated = await api('PUT', `/api/beers/${beerId}/tasting`, payload);
+    const idx = S.beers.findIndex(b => b.id === beerId);
+    if (idx !== -1) S.beers[idx] = { ...S.beers[idx], ...updated };
+    closeModal('tasting-modal');
+    renderCave();
+    toast(t('tasting.saved'), 'success');
+  } catch(e) { toast(t('tasting.err_save'), 'error'); }
 }
 
 function openBeerModal(beer = null) {
@@ -5555,6 +6002,7 @@ function selectBeerType(type) {
 // ══════════════════════════════════════════════════════════════════════════════
 let _spindleChart = null;
 let _spindleChartId = null;
+let _spindleChartSeq = 0;  // anti-race : ignore les réponses obsolètes
 
 function spindleAge(dateStr) {
   if (!dateStr) return { color: 'var(--muted)', label: t('spin.age_no_data'), fresh: false };
@@ -5618,11 +6066,8 @@ function renderKegs() {
       ? `<i class="fas fa-flask" style="font-size:2.4rem;color:${color}"></i>`
       : `<i class="fas fa-jar" style="font-size:2.8rem;color:${color}"></i>`;
     const photoHtml = k.photo
-      ? `<div class="beer-photo"><img src="${esc(k.photo)}" alt="${esc(k.name)}"></div>`
-      : `<div class="beer-photo" style="background:var(--card2);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px">
-           ${kegIcon}
-           <span style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.04em">${k.keg_type === 'corny19' ? '19 L' : k.keg_type === 'corny6' ? '6 L' : ''}</span>
-         </div>`;
+      ? `<div class="beer-photo" style="cursor:pointer" onclick="openKegDetail(${k.id})"><img src="${esc(k.photo)}" alt="${esc(k.name)}"></div>`
+      : `<div style="width:100%;height:160px;position:relative;background:var(--card2);overflow:hidden;cursor:pointer" onclick="openKegDetail(${k.id})"><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:4px">${kegIcon}${k.volume_total ? `<span style="font-size:.7rem;font-weight:600;color:var(--muted);letter-spacing:.04em">${k.volume_total} L</span>` : ''}</div></div>`;
 
     // Barre de volume — pattern bottle-bar du thème
     let volumeHtml = '';
@@ -5641,15 +6086,15 @@ function renderKegs() {
         </div>`;
     }
 
-    // Lien brassin / bière associé
+    // Lien brassin / bière associé (lien direct vers la fiche)
     let linkHtml = '';
     if (k.status === 'fermenting' && k.brew_name) {
       linkHtml = `<div style="font-size:.78rem;margin-top:4px;margin-bottom:2px">
-        <a href="#" onclick="event.preventDefault();navigate('brassins')" style="color:var(--amber)">
+        <a href="#" onclick="event.preventDefault();goToBrew(${k.brew_id})" style="color:var(--amber)">
           <i class="fas fa-fire-burner"></i> ${esc(k.brew_name)}</a></div>`;
     } else if (k.status === 'serving' && k.beer_name) {
       linkHtml = `<div style="font-size:.78rem;margin-top:4px;margin-bottom:2px">
-        <a href="#" onclick="event.preventDefault();navigate('cave')" style="color:var(--success)">
+        <a href="#" onclick="event.preventDefault();goToBeerDetail(${k.beer_id})" style="color:var(--success)">
           <i class="fas fa-beer-mug-empty"></i> ${esc(k.beer_name)}</a></div>`;
     }
 
@@ -5660,25 +6105,153 @@ function renderKegs() {
       k.weight_empty   ? `<i class="fas fa-weight-scale" style="font-size:.7rem"></i> ${k.weight_empty} kg` : '',
     ].filter(Boolean).join(' · ');
 
-    return `<div class="beer-card" data-id="${k.id}">
+    return `<div class="beer-card" data-id="${k.id}" draggable="true" style="position:relative">
+      <span class="beer-drag-handle" title="${t('keg.drag_to_reorder')}"><i class="fas fa-grip-vertical"></i></span>
       ${photoHtml}
       <div class="beer-body">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;cursor:pointer" onclick="openKegDetail(${k.id})">
           <div class="beer-name">${esc(k.name)}</div>
           <span style="background:${sColor};color:#fff;padding:2px 9px;border-radius:20px;font-size:.72rem;white-space:nowrap;margin-left:6px">${sLabel}</span>
         </div>
-        <div class="beer-type">${tLabel}${tLabel && meta ? ' · ' : ''}${meta}</div>
+        <div class="beer-type" style="cursor:pointer" onclick="openKegDetail(${k.id})">${k.manufacturer ? `<span style="color:var(--muted)">${esc(k.manufacturer)}</span>${tLabel || meta ? ' · ' : ''}` : ''}${tLabel}${tLabel && meta ? ' · ' : ''}${meta}</div>
         ${volumeHtml}
         ${linkHtml}
         ${k.notes ? `<div style="font-size:.78rem;color:var(--muted);margin-top:6px;font-style:italic;line-height:1.4">${esc(k.notes).substring(0,100)}${k.notes.length>100?'…':''}</div>` : ''}
+        ${(() => { if (!k.next_revision_date) return ''; const rev = new Date(k.next_revision_date); const today = new Date(); today.setHours(0,0,0,0); const days = Math.round((rev - today) / 86400000); if (days < 0) return `<div style="font-size:.75rem;margin-top:5px;color:var(--danger)"><i class="fas fa-triangle-exclamation"></i> ${t('keg.revision_overdue')}</div>`; if (days <= 30) return `<div style="font-size:.75rem;margin-top:5px;color:var(--amber)"><i class="fas fa-clock"></i> ${t('keg.revision_soon').replace('${days}', days)}</div>`; return `<div style="font-size:.75rem;margin-top:5px;color:var(--muted)"><i class="fas fa-calendar-check"></i> ${k.next_revision_date}</div>`; })()}
         <div style="display:flex;gap:5px;margin-top:10px">
-          <button class="btn btn-sm btn-ghost" onclick="openKegStatusModal(${k.id})" style="flex:1"><i class="fas fa-toggle-on"></i> ${t('keg.status_label')}</button>
+          ${k.status === 'serving' ? `<button class="btn btn-sm btn-ghost" onclick="openKegPourModal(${k.id})" style="flex:1;color:var(--amber)"><i class="fas fa-beer-mug-empty"></i> ${t('keg.pour_amount')}</button>` : `<button class="btn btn-sm btn-ghost" onclick="openKegStatusModal(${k.id})" style="flex:1"><i class="fas fa-toggle-on"></i> ${t('keg.status_label')}</button>`}
+          <button class="btn btn-icon btn-ghost btn-sm" onclick="openKegStatusModal(${k.id})" title="${t('keg.status_label')}"><i class="fas fa-toggle-on"></i></button>
           <button class="btn btn-icon btn-ghost btn-sm" onclick="openKegModal(${k.id})" title="${t('common.edit')}"><i class="fas fa-pen"></i></button>
           <button class="btn btn-icon btn-danger btn-sm" onclick="deleteKeg(${k.id})" title="${t('common.delete')}"><i class="fas fa-trash"></i></button>
         </div>
       </div>
     </div>`;
   }).join('');
+
+  // ── Drag & drop reorder ──
+  grid.querySelectorAll('.beer-card[draggable]').forEach(card => {
+    card.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', card.dataset.id);
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => card.classList.add('dragging'), 0);
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      grid.querySelectorAll('.beer-card').forEach(c => c.classList.remove('drag-over'));
+    });
+    card.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      grid.querySelectorAll('.beer-card').forEach(c => c.classList.remove('drag-over'));
+      const srcId = parseInt(e.dataTransfer.getData('text/plain'));
+      if (srcId !== parseInt(card.dataset.id)) card.classList.add('drag-over');
+    });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      const srcId = parseInt(e.dataTransfer.getData('text/plain'));
+      const tgtId = parseInt(card.dataset.id);
+      if (!srcId || srcId === tgtId) return;
+      const mi = S.sodaKegs.findIndex(k => k.id === srcId);
+      const ti = S.sodaKegs.findIndex(k => k.id === tgtId);
+      if (mi === -1 || ti === -1) return;
+      const [moved] = S.sodaKegs.splice(mi, 1);
+      S.sodaKegs.splice(ti, 0, moved);
+      saveKegOrder();
+      renderKegs();
+    });
+  });
+}
+
+let _saveKegOrderTimer = null;
+function saveKegOrder() {
+  clearTimeout(_saveKegOrderTimer);
+  _saveKegOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/soda-kegs/reorder',
+        S.sodaKegs.map((k, i) => ({ id: k.id, sort_order: i })));
+    } catch(e) { toast(t('keg.err_save'), 'error'); }
+  }, 600);
+}
+
+function goToBeerDetail(beerId) {
+  navigate('cave');
+  // S.beers déjà chargé sur la page kegs — ouvre le détail immédiatement
+  setTimeout(() => openBeerDetail(beerId), 50);
+}
+
+function goToBrew(brewId) {
+  navigate('brassins');
+  // Attend le rendu puis scroll + highlight
+  setTimeout(() => {
+    const card = document.querySelector(`.brew-card[data-id="${brewId}"]`);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('card-highlight');
+    setTimeout(() => card.classList.remove('card-highlight'), 2000);
+  }, 450);
+}
+
+function openKegPourModal(kegId) {
+  const k = S.sodaKegs.find(k => k.id === kegId);
+  if (!k) return;
+  document.getElementById('keg-pour-id').value    = kegId;
+  document.getElementById('keg-pour-title').textContent = k.name;
+  document.getElementById('keg-pour-amount').value = '';
+  document.getElementById('keg-pour-result').innerHTML  = '';
+  document.getElementById('keg-pour-save-btn').disabled = false;
+  const cur = k.current_liters ?? 0;
+  const tot = k.volume_total   ?? '?';
+  document.getElementById('keg-pour-current').innerHTML =
+    `<i class="fas fa-jar" style="color:var(--amber);margin-right:6px"></i>${t('keg.pour_current').replace('${cur}', cur).replace('${tot}', tot)}`;
+  openModal('keg-pour-modal');
+}
+
+function updateKegPourCalc() {
+  const kegId  = parseInt(document.getElementById('keg-pour-id').value);
+  const k      = S.sodaKegs.find(k => k.id === kegId);
+  if (!k) return;
+  const amount = parseFloat(document.getElementById('keg-pour-amount').value) || 0;
+  const result = document.getElementById('keg-pour-result');
+  const btn    = document.getElementById('keg-pour-save-btn');
+  if (amount <= 0) { result.innerHTML = ''; btn.disabled = false; return; }
+  const rem = Math.round(((k.current_liters ?? 0) - amount) * 10) / 10;
+  if (rem < 0) {
+    result.innerHTML = `<span style="color:var(--danger)"><i class="fas fa-triangle-exclamation"></i> ${t('keg.pour_negative_warn')}</span>`;
+    btn.disabled = true;
+  } else if (rem === 0) {
+    result.innerHTML = `<span style="color:var(--amber)"><i class="fas fa-triangle-exclamation"></i> ${t('keg.pour_empty_warn')}</span>`;
+    btn.disabled = false;
+  } else {
+    result.innerHTML = t('keg.pour_remaining').replace('${rem}', rem);
+    btn.disabled = false;
+  }
+}
+
+async function saveKegPour() {
+  const kegId  = parseInt(document.getElementById('keg-pour-id').value);
+  const k      = S.sodaKegs.find(k => k.id === kegId);
+  if (!k) return;
+  const amount = parseFloat(document.getElementById('keg-pour-amount').value);
+  if (!amount || amount <= 0) return;
+  const newLiters = Math.max(0, Math.round(((k.current_liters ?? 0) - amount) * 10) / 10);
+  const payload = {
+    name: k.name, keg_type: k.keg_type, volume_total: k.volume_total,
+    volume_ferment: k.volume_ferment, weight_empty: k.weight_empty,
+    status:        newLiters <= 0 ? 'empty' : k.status,
+    current_liters: newLiters <= 0 ? 0 : newLiters,
+    beer_id: newLiters <= 0 ? null : k.beer_id,
+    brew_id: newLiters <= 0 ? null : k.brew_id,
+    notes: k.notes, color: k.color, photo: k.photo,
+  };
+  try {
+    const updated = await api('PUT', `/api/soda-kegs/${kegId}`, payload);
+    const idx = S.sodaKegs.findIndex(k => k.id === kegId);
+    if (idx !== -1) S.sodaKegs[idx] = updated;
+    closeModal('keg-pour-modal');
+    renderKegs();
+    toast(t('keg.pour_saved'));
+  } catch(e) { toast(t('keg.err_save'), 'error'); }
 }
 
 function openCaveKegModal(beerId) {
@@ -5822,8 +6395,13 @@ function openKegModal(id) {
   document.getElementById('keg-f-volume').value   = keg ? (keg.volume_total || '') : '';
   document.getElementById('keg-f-ferment').value  = keg ? (keg.volume_ferment || '') : '';
   document.getElementById('keg-f-weight').value   = keg ? (keg.weight_empty || '') : '';
-  document.getElementById('keg-f-color').value    = keg ? (keg.color || '#f59e0b') : '#f59e0b';
-  document.getElementById('keg-f-notes').value    = keg ? (keg.notes || '') : '';
+  document.getElementById('keg-f-color').value        = keg ? (keg.color || '#f59e0b') : '#f59e0b';
+  document.getElementById('keg-f-notes').value        = keg ? (keg.notes || '') : '';
+  document.getElementById('keg-f-manufacturer').value          = keg ? (keg.manufacturer || '') : '';
+  document.getElementById('keg-f-last-revision').value         = keg ? (keg.last_revision_date || '') : '';
+  document.getElementById('keg-f-revision-interval').value     = keg ? (keg.revision_interval_months || 12) : 12;
+  updateKegRevisionPreview();
+  hideKegManufacturer();
   document.getElementById('keg-f-photo-b64').value = '';
   const prev = document.getElementById('keg-f-photo-preview');
   const rem  = document.getElementById('keg-f-photo-remove');
@@ -5834,6 +6412,155 @@ function openKegModal(id) {
   }
   document.getElementById('keg-f-photo').value = '';
   openModal('keg-modal');
+}
+
+function openKegDetail(id) {
+  const k = S.sodaKegs.find(x => x.id === id);
+  if (!k) return;
+
+  const get = elId => document.getElementById(elId);
+  const color = k.color || '#f59e0b';
+  const statusColors = { empty: 'var(--muted)', fermenting: 'var(--amber)', serving: 'var(--success)', cleaning: 'var(--info)' };
+  const statusLabels = { empty: t('keg.status_empty'), fermenting: t('keg.status_fermenting'), serving: t('keg.status_serving'), cleaning: t('keg.status_cleaning') };
+  const typeLabels   = { corny19: t('keg.type_corny19'), corny6: t('keg.type_corny6') };
+
+  // Titre + icône
+  const iconHtml = k.keg_type === 'corny6'
+    ? `<i class="fas fa-flask" style="color:${color}"></i>`
+    : `<i class="fas fa-jar" style="color:${color}"></i>`;
+  get('kd-title-icon').innerHTML = iconHtml;
+  get('kd-title-text').textContent = k.name;
+
+  // Photo ou placeholder
+  if (k.photo) {
+    get('kd-photo').src = k.photo;
+    get('kd-photo').alt = k.name;
+    get('kd-photo-wrap').style.display = '';
+    get('kd-no-photo').style.display   = 'none';
+  } else {
+    get('kd-photo-wrap').style.display = 'none';
+    get('kd-no-photo').style.display   = '';
+    get('kd-icon-placeholder').innerHTML = k.keg_type === 'corny6'
+      ? `<i class="fas fa-flask" style="color:${color}"></i>`
+      : `<i class="fas fa-jar" style="color:${color}"></i>`;
+  }
+
+  // Badges
+  const sColor = statusColors[k.status] || 'var(--muted)';
+  const sLabel = statusLabels[k.status] || k.status;
+  const tLabel = typeLabels[k.keg_type] || (k.keg_type && k.keg_type !== 'other' ? k.keg_type : '');
+  const badges = [];
+  badges.push(`<span class="badge" style="background:${sColor};color:#fff">${sLabel}</span>`);
+  if (tLabel) badges.push(`<span class="badge" style="background:var(--card2);color:var(--muted)">${esc(tLabel)}</span>`);
+  if (k.manufacturer) badges.push(`<span class="badge" style="background:var(--card2);color:var(--muted)"><i class="fas fa-industry"></i> ${esc(k.manufacturer)}</span>`);
+  get('kd-badges').innerHTML = badges.join('');
+
+  // Barre de volume
+  let volHtml = '';
+  if (k.volume_total && k.current_liters != null) {
+    const pct      = Math.min(100, Math.round((k.current_liters / k.volume_total) * 100));
+    const barColor = pct > 50 ? 'var(--success)' : pct > 20 ? 'var(--amber)' : 'var(--danger)';
+    volHtml = `
+      <div style="padding:12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <i class="fas fa-jar" style="color:${color}"></i>
+          <span style="font-weight:700;font-size:1.05rem">${k.current_liters} L</span>
+          <span style="color:var(--muted);font-size:.85rem">/ ${k.volume_total} L</span>
+          <span style="color:var(--muted);font-size:.8rem;margin-left:auto">${pct}%</span>
+        </div>
+        <div class="bottle-bar" style="width:100%"><div class="bottle-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+      </div>`;
+  }
+  get('kd-volume').innerHTML = volHtml;
+
+  // Specs
+  const specs = [];
+  if (k.volume_total)   specs.push({ icon:'fa-jar',            label:t('keg.field_volume'),  val:`${k.volume_total} L` });
+  if (k.volume_ferment) specs.push({ icon:'fa-temperature-arrow-up', label:t('keg.field_ferment'), val:`${k.volume_ferment} L` });
+  if (k.weight_empty)   specs.push({ icon:'fa-weight-scale',   label:t('keg.field_weight'),  val:`${k.weight_empty} kg` });
+  get('kd-specs').style.display = specs.length ? '' : 'none';
+  get('kd-specs').innerHTML = specs.map(s =>
+    `<div style="background:var(--card2);border-radius:9px;padding:10px;text-align:center">
+       <div style="font-size:.72rem;color:var(--muted);margin-bottom:4px"><i class="fas ${s.icon}"></i> ${s.label}</div>
+       <div style="font-weight:700;font-size:.95rem">${s.val}</div>
+     </div>`).join('');
+
+  // Association bière / brassin
+  let assocHtml = '';
+  if (k.status === 'fermenting' && k.brew_name) {
+    assocHtml = `<div style="font-size:.85rem;padding:8px 12px;background:rgba(245,158,11,.07);border-radius:8px">
+      <i class="fas fa-fire-burner" style="color:var(--amber)"></i>
+      <a href="#" onclick="event.preventDefault();closeModal('keg-detail-modal');goToBrew(${k.brew_id})" style="color:var(--amber);margin-left:5px">${esc(k.brew_name)}</a>
+    </div>`;
+  } else if (k.status === 'serving' && k.beer_name) {
+    assocHtml = `<div style="font-size:.85rem;padding:8px 12px;background:rgba(34,197,94,.07);border-radius:8px">
+      <i class="fas fa-beer-mug-empty" style="color:var(--success)"></i>
+      <a href="#" onclick="event.preventDefault();closeModal('keg-detail-modal');goToBeerDetail(${k.beer_id})" style="color:var(--success);margin-left:5px">${esc(k.beer_name)}</a>
+    </div>`;
+  }
+  get('kd-assoc').innerHTML = assocHtml;
+
+  // Révision
+  let revHtml = '';
+  if (k.next_revision_date) {
+    const rev   = new Date(k.next_revision_date);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const days  = Math.round((rev - today) / 86400000);
+    const fmtDate = d => d.split('-').reverse().join('/');
+    if (days < 0) {
+      revHtml = `<div style="font-size:.83rem;color:var(--danger);padding:7px 12px;background:rgba(239,68,68,.08);border-radius:8px"><i class="fas fa-triangle-exclamation"></i> ${t('keg.revision_overdue')} — ${fmtDate(k.next_revision_date)}</div>`;
+    } else if (days <= 30) {
+      revHtml = `<div style="font-size:.83rem;color:var(--amber);padding:7px 12px;background:rgba(245,158,11,.08);border-radius:8px"><i class="fas fa-clock"></i> ${t('keg.revision_soon').replace('${days}', days)} — ${fmtDate(k.next_revision_date)}</div>`;
+    } else {
+      revHtml = `<div style="font-size:.83rem;color:var(--muted);padding:7px 12px;background:var(--card2);border-radius:8px"><i class="fas fa-calendar-check"></i> ${t('keg.next_revision_label')} ${fmtDate(k.next_revision_date)}</div>`;
+    }
+  }
+  get('kd-revision').innerHTML = revHtml;
+
+  // Notes
+  const notesEl = get('kd-notes');
+  notesEl.textContent  = k.notes || '';
+  notesEl.style.display = k.notes ? '' : 'none';
+
+  // Boutons footer
+  const pourBtn   = get('kd-pour-btn');
+  const statusBtn = get('kd-status-btn');
+  const editBtn   = get('kd-edit-btn');
+  pourBtn.style.display = k.status === 'serving' ? '' : 'none';
+  pourBtn.onclick   = () => { closeModal('keg-detail-modal'); openKegPourModal(id); };
+  statusBtn.onclick = () => { closeModal('keg-detail-modal'); openKegStatusModal(id); };
+  editBtn.onclick   = () => { closeModal('keg-detail-modal'); openKegModal(id); };
+
+  openModal('keg-detail-modal');
+}
+
+function _calcNextRevDate(lastDate, intervalMonths) {
+  if (!lastDate || !intervalMonths) return null;
+  const d = new Date(lastDate);
+  d.setMonth(d.getMonth() + parseInt(intervalMonths));
+  return d.toISOString().split('T')[0];
+}
+
+function setKegInterval(months) {
+  document.getElementById('keg-f-revision-interval').value = months;
+  updateKegRevisionPreview();
+}
+
+function updateKegRevisionPreview() {
+  const last     = document.getElementById('keg-f-last-revision').value;
+  const interval = document.getElementById('keg-f-revision-interval').value;
+  const preview  = document.getElementById('keg-f-next-revision-preview');
+  if (!preview) return;
+  const next = _calcNextRevDate(last, interval);
+  if (!next) { preview.style.display = 'none'; return; }
+  const fmtDate = d => d.split('-').reverse().join('/');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const days  = Math.round((new Date(next) - today) / 86400000);
+  let color = 'var(--success)'; let icon = 'fa-calendar-check';
+  if (days < 0)       { color = 'var(--danger)'; icon = 'fa-triangle-exclamation'; }
+  else if (days <= 30){ color = 'var(--amber)';  icon = 'fa-clock'; }
+  preview.innerHTML = `<i class="fas ${icon}" style="color:${color}"></i> <span style="color:${color}">${t('keg.next_revision_label')}</span> <strong>${fmtDate(next)}</strong>`;
+  preview.style.display = '';
 }
 
 function toggleKegTypeOther() {
@@ -5864,16 +6591,28 @@ async function saveKeg() {
   if (!name) { toast(t('keg.err_name'), 'error'); return; }
   const id = document.getElementById('keg-f-id').value;
   const b64 = document.getElementById('keg-f-photo-b64').value;
-  const existingPhoto = id ? (S.sodaKegs.find(k => k.id == id) || {}).photo : null;
+  const existing = id ? (S.sodaKegs.find(k => k.id == id) || {}) : {};
   const payload = {
     name,
     keg_type:      (() => { const v = document.getElementById('keg-f-type').value; return v === 'other' ? (document.getElementById('keg-f-type-other').value.trim() || 'other') : v; })(),
+    manufacturer:  document.getElementById('keg-f-manufacturer').value.trim() || null,
     volume_total:  parseFloat(document.getElementById('keg-f-volume').value) || null,
     volume_ferment:parseFloat(document.getElementById('keg-f-ferment').value) || null,
     weight_empty:  parseFloat(document.getElementById('keg-f-weight').value) || null,
-    color:         document.getElementById('keg-f-color').value,
-    notes:         document.getElementById('keg-f-notes').value.trim() || null,
-    photo:         b64 || (id ? existingPhoto : null),
+    color:                     document.getElementById('keg-f-color').value,
+    notes:                     document.getElementById('keg-f-notes').value.trim() || null,
+    last_revision_date:        document.getElementById('keg-f-last-revision').value || null,
+    revision_interval_months:  parseInt(document.getElementById('keg-f-revision-interval').value) || 12,
+    next_revision_date:        _calcNextRevDate(
+                                 document.getElementById('keg-f-last-revision').value,
+                                 document.getElementById('keg-f-revision-interval').value
+                               ),
+    photo:                     b64 || (id ? existing.photo : null),
+    // Préserver le statut et les associations lors d'une modification
+    status:         existing.status        || 'empty',
+    current_liters: existing.current_liters ?? null,
+    beer_id:        existing.beer_id       ?? null,
+    brew_id:        existing.brew_id       ?? null,
   };
   try {
     if (id) {
@@ -5991,6 +6730,29 @@ function removeKegPhoto() {
     const keg = S.sodaKegs.find(k => k.id == id);
     if (keg) keg._photoRemoved = true;
   }
+}
+
+const _KEG_MANUFACTURERS = [
+  'Cornelius','Firestone','AEB Group','KegLand','Keg King',
+  'SS Brewtech','Spike Brewing','Blichmann Engineering','Torpedo Kegs','Fermtech',
+];
+function filterKegManufacturer() {
+  const input = document.getElementById('keg-f-manufacturer');
+  const box   = document.getElementById('keg-manufacturer-suggest');
+  const q     = input.value.trim().toLowerCase();
+  const items = q ? _KEG_MANUFACTURERS.filter(m => m.toLowerCase().includes(q)) : _KEG_MANUFACTURERS;
+  if (!items.length) { box.classList.remove('open'); return; }
+  box.innerHTML = items.map(m =>
+    `<div class="ing-suggest-item" onmousedown="selectKegManufacturer('${m.replace(/'/g,"\\'")}')"><span>${esc(m)}</span></div>`
+  ).join('');
+  box.classList.add('open');
+}
+function selectKegManufacturer(name) {
+  document.getElementById('keg-f-manufacturer').value = name;
+  hideKegManufacturer();
+}
+function hideKegManufacturer() {
+  document.getElementById('keg-manufacturer-suggest').classList.remove('open');
 }
 
 function renderSpindles() {
@@ -6119,11 +6881,15 @@ function renderSpindles() {
   loadSpindleStats();
 }
 
-async function saveSpindleOrder() {
-  try {
-    await api('PUT', '/api/spindles/reorder',
-      S.spindles.map((s, i) => ({ id: s.id, sort_order: i })));
-  } catch(e) { toast(t('spin.err_save_order'), 'error'); }
+let _saveSpindleOrderTimer = null;
+function saveSpindleOrder() {
+  clearTimeout(_saveSpindleOrderTimer);
+  _saveSpindleOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/spindles/reorder',
+        S.spindles.map((s, i) => ({ id: s.id, sort_order: i })));
+    } catch(e) { toast(t('spin.err_save_order'), 'error'); }
+  }, 600);
 }
 
 async function openBrewFermentationChart(brewId) {
@@ -6449,6 +7215,7 @@ async function openSpindleChart(spindleId) {
 }
 
 async function _loadSpindleChart({ hours, from, to } = {}) {
+  const seq = ++_spindleChartSeq;
   if (_spindleChart) { _spindleChart.destroy(); _spindleChart = null; }
   const stale = Chart.getChart('spindle-chart-canvas');
   if (stale) stale.destroy();
@@ -6462,6 +7229,7 @@ async function _loadSpindleChart({ hours, from, to } = {}) {
     if (to)     url += `&to=${encodeURIComponent(to)}`;
 
     const readings = await api('GET', url);
+    if (seq !== _spindleChartSeq) return;  // requête obsolète, une plus récente a pris le relais
 
     if (!readings.length) {
       document.getElementById('spindle-chart-table').innerHTML =
@@ -6599,7 +7367,7 @@ async function _loadSpindleChart({ hours, from, to } = {}) {
           }).join('')}
         </tbody>
       </table></div>`;
-  } catch(e) { toast(t('spin.err_load'), 'error'); }
+  } catch(e) { if (seq === _spindleChartSeq) toast(t('spin.err_load'), 'error'); }
 }
 
 function setSpindleRange(btn, range) {
@@ -6696,6 +7464,7 @@ async function purgeReadings() {
 let _editTempId   = null;
 let _tempChart    = null;
 let _tempSensorId = null;
+let _tempChartSeq = 0;  // anti-race : ignore les réponses obsolètes
 
 function renderTempSensors() {
   const grid  = document.getElementById('temp-sensor-grid');
@@ -7007,6 +7776,7 @@ async function openTempChart(sensorId) {
 }
 
 async function _loadTempChart({ hours, from, to } = {}) {
+  const seq = ++_tempChartSeq;
   if (_tempChart) { _tempChart.destroy(); _tempChart = null; }
   const stale = Chart.getChart('temp-chart-canvas');
   if (stale) stale.destroy();
@@ -7023,6 +7793,7 @@ async function _loadTempChart({ hours, from, to } = {}) {
 
   try {
     const readings = await api('GET', url);
+    if (seq !== _tempChartSeq) return;  // requête obsolète, une plus récente a pris le relais
     const s = S.tempSensors.find(x => x.id === _tempSensorId);
     const tz = getTzOffset ? getTzOffset() : 0;
     const labels = readings.map(r => {
@@ -7114,7 +7885,8 @@ async function _loadTempChart({ hours, from, to } = {}) {
         </table>`;
     }
   } catch(e) {
-    document.getElementById('temp-chart-table').innerHTML = `<p style="color:var(--danger);text-align:center">${e.message}</p>`;
+    if (seq === _tempChartSeq)
+      document.getElementById('temp-chart-table').innerHTML = `<p style="color:var(--danger);text-align:center">${esc(e.message)}</p>`;
   }
 }
 
@@ -7566,11 +8338,11 @@ function calcWaterCorrection() {
                so4: parseFloat(w.so4)||0, cl: parseFloat(w.cl)||0, hco3: parseFloat(w.hco3)||0 };
 
   const readT = id => { const v = parseFloat(document.getElementById(id)?.value); return isNaN(v) ? null : v; };
-  const t = { ca: readT('wc-t-ca'), mg: readT('wc-t-mg'), na: readT('wc-t-na'),
-              so4: readT('wc-t-so4'), cl: readT('wc-t-cl'), hco3: readT('wc-t-hco3'),
-              ph: readT('wc-t-ph') };
+  const tgt = { ca: readT('wc-t-ca'), mg: readT('wc-t-mg'), na: readT('wc-t-na'),
+                so4: readT('wc-t-so4'), cl: readT('wc-t-cl'), hco3: readT('wc-t-hco3'),
+                ph: readT('wc-t-ph') };
 
-  const hasTarget = ['ca','mg','na','so4','cl','hco3'].some(k => t[k] !== null);
+  const hasTarget = ['ca','mg','na','so4','cl','hco3'].some(k => tgt[k] !== null);
   const resMash   = document.getElementById('wc-results-mash');
   const resSparge = document.getElementById('wc-results-sparge');
 
@@ -7581,17 +8353,17 @@ function calcWaterCorrection() {
   }
 
   if (volMash > 0) {
-    const { delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g } = _computeWCDoses(volMash, s, t);
-    _renderWCResults(s, t, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, 'wc-results-mash', t('rec.wc_mash'), 'empatage');
+    const { delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g } = _computeWCDoses(volMash, s, tgt);
+    _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, 'wc-results-mash', t('rec.wc_mash'), 'empatage');
   } else if (resMash) resMash.style.display = 'none';
 
   if (volSparge > 0) {
-    const { delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g } = _computeWCDoses(volSparge, s, t);
-    _renderWCResults(s, t, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, 'wc-results-sparge', t('rec.wc_sparge'), 'sparge');
+    const { delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g } = _computeWCDoses(volSparge, s, tgt);
+    _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, 'wc-results-sparge', t('rec.wc_sparge'), 'sparge');
   } else if (resSparge) resSparge.style.display = 'none';
 }
 
-function _renderWCResults(s, t, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, containerId, label, suffix) {
+function _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, altCaCO3g, altNaHCO3g, containerId, label, suffix) {
   const otherType = suffix === 'empatage' ? 'empatage' : 'sparge';
   const ION_META = [
     { k: 'ca',   label: t('rec.wc_ca')   },
@@ -7620,21 +8392,21 @@ function _renderWCResults(s, t, delta, doses, acidDoses, result, altCaCl2g, altC
 
   ION_META.forEach(({ k, label }) => {
     const src = s[k] ?? 0;
-    const tgt = t[k];
+    const ionTgt = tgt[k];
     const res = result[k] ?? 0;
-    const hasTgt = tgt !== null;
+    const hasTgt = ionTgt !== null;
     const d = hasTgt ? delta[k] : null;
     const dStr  = d === null ? '–' : (d >= 0 ? `+${d.toFixed(0)}` : d.toFixed(0));
     const dCol  = d === null ? '' : d > 0 ? 'color:var(--info)' : d < 0 ? 'color:var(--danger)' : '';
-    const diff  = hasTgt ? Math.abs(res - tgt) : null;
+    const diff  = hasTgt ? Math.abs(res - ionTgt) : null;
     const resCol= diff === null ? '' : diff < 5 ? 'color:var(--success)' : diff < 15 ? 'color:var(--amber)' : 'color:var(--danger)';
     // Warning when source already exceeds target
-    const exceeded = hasTgt && tgt !== null && src > tgt + 1;
+    const exceeded = hasTgt && ionTgt !== null && src > ionTgt + 1;
     html += `
       <tr style="border-bottom:1px solid var(--border)22">
         <td style="padding:3px 8px;font-weight:600">${label}</td>
         <td style="text-align:right;padding:3px 8px">${src.toFixed(0)}</td>
-        <td style="text-align:right;padding:3px 8px">${hasTgt ? tgt.toFixed(0) : '–'}</td>
+        <td style="text-align:right;padding:3px 8px">${hasTgt ? ionTgt.toFixed(0) : '–'}</td>
         <td style="text-align:right;padding:3px 8px;${dCol}">${dStr}${exceeded ? ` <i class="fas fa-circle-exclamation" style="color:var(--amber);font-size:.7rem" title="${t('rec.wc_src_exceeds')}"></i>` : ''}</td>
         <td style="text-align:right;padding:3px 8px;font-weight:700;${resCol}">${res.toFixed(1)}</td>
       </tr>`;
@@ -8272,10 +9044,11 @@ function applyAppearance() {
   const brand = document.getElementById('nav-brand');
   if (brand) {
     if (icon) {
-      brand.innerHTML = `<img src="${icon}" alt="${name}" style="height:34px;width:auto;object-fit:contain;border-radius:5px;vertical-align:middle;cursor:zoom-in" onclick="openAppIconLightbox()">`;
+      brand.innerHTML = `<img src="${esc(icon)}" alt="${esc(name)}" style="height:34px;width:auto;object-fit:contain;border-radius:5px;vertical-align:middle;cursor:zoom-in" onclick="openAppIconLightbox()">`;
     } else {
-      const mid = Math.ceil(name.length / 2);
-      brand.innerHTML = `${name.slice(0, mid)}<span>${name.slice(mid)}</span>`;
+      const safeName = esc(name);
+      const mid = Math.ceil(safeName.length / 2);
+      brand.innerHTML = `${safeName.slice(0, mid)}<span>${safeName.slice(mid)}</span>`;
     }
   }
 
@@ -8289,7 +9062,7 @@ function applyAppearance() {
   // Favicon
   const fav = document.getElementById('app-favicon');
   if (fav) {
-    fav.href = icon || `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍺</text></svg>`;
+    fav.href = icon || '/static/favicon.png';
   }
 }
 
@@ -8609,7 +9382,22 @@ function closeLb() {
   document.getElementById('lb').classList.remove('open');
   document.body.style.overflow = '';
 }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLb(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  // Lightbox image (vitrine)
+  const lb = document.getElementById('lb');
+  if (lb?.classList.contains('open')) { closeLb(); return; }
+  // Beer photo lightbox
+  const beerLb = document.getElementById('beer-lightbox');
+  if (beerLb?.style.display === 'flex') { closeBeerLightbox(); return; }
+  // Modal overlays — ferme le dernier ouvert
+  const openModals = [...document.querySelectorAll('.modal-overlay.open')];
+  if (!openModals.length) return;
+  const m = openModals[openModals.length - 1];
+  if (m.id === 'modal-settings') closeSettings();
+  else if (m.id === 'modal-scale') closeScaleModal();
+  else closeModal(m.id);
+});
 <\/script>
 </body>
 </html>`;
@@ -8894,7 +9682,12 @@ function _nthDow(year, month, dow, nth) {
     return d;
   }
 }
-function _ymd(d) { return d.toISOString().slice(0, 10); }
+function _ymd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 function _brewingEvents(year) {
   const ev = [];
@@ -8950,7 +9743,7 @@ function _brewingEvents(year) {
   add(fd(10,27), 'National American Beer Day',      '🇺🇸', '#3b82f6');
   // ── Novembre ──────────────────────────────────────────────────────────────
   add(fd(11, 5), 'International Stout Day',         '🖤', '#374151');
-  add(fd(11, 7), 'Learn to Homebrew Day',           '🏠', '#8b5cf6');
+  add(_ymd(_nthDow(year, 10, 6, 1)), 'Learn to Homebrew Day', '🏠', '#8b5cf6'); // 1er samedi de novembre
   add(fd(11,12), 'National Happy Hour Day',         '🍺', '#f59e0b');
   add(fd(11,17), 'International Happy Gose Day',    '🧂', '#06b6d4');
   add(fd(11,29), 'Small Brewery Sunday',            '🏠', '#8b5cf6');
@@ -8991,6 +9784,23 @@ function calGoToday() {
   renderCalendar();
 }
 
+function _expandCustomEvent(ev) {
+  const rec = ev.recurrence
+    ? (typeof ev.recurrence === 'string' ? JSON.parse(ev.recurrence) : ev.recurrence)
+    : null;
+  if (!rec?.type) return [ev.event_date];
+  const years = [_calYear - 1, _calYear, _calYear + 1];
+  return years.map(year => {
+    if (rec.type === 'yearly') {
+      return `${year}-${ev.event_date.slice(5, 10)}`;
+    } else if (rec.type === 'yearly_nth_dow') {
+      const month = parseInt(ev.event_date.slice(5, 7)) - 1;
+      return _ymd(_nthDow(year, month, rec.dow, rec.nth));
+    }
+    return null;
+  }).filter(Boolean);
+}
+
 function renderCalendar() {
   const MONTHS = t('cal.months');
   document.getElementById('cal-title').textContent = `${MONTHS[_calMonth]} ${_calYear}`;
@@ -9010,9 +9820,9 @@ function renderCalendar() {
     if (b.brew_date)     addEv(b.brew_date,    { type: 'brew',   label, id: b.id });
     if (b.bottling_date) addEv(b.bottling_date, { type: 'bottle', label, id: b.id });
     if (b.brew_date && b.ferm_time) {
-      const d = new Date(b.brew_date);
+      const d = new Date(b.brew_date + 'T00:00:00');
       d.setDate(d.getDate() + (b.ferm_time | 0));
-      addEv(d.toISOString().slice(0, 10), { type: 'ferm', label: `${label} ${t('cal.ferm_abbr')}`, id: b.id });
+      addEv(_ymd(d), { type: 'ferm', label: `${label} ${t('cal.ferm_abbr')}`, id: b.id });
     }
   });
 
@@ -9024,12 +9834,16 @@ function renderCalendar() {
   // Événements personnalisés + leur rappel J-45
   (S.customEvents || []).forEach(ev => {
     const c = ev.color || '#f59e0b';
-    addEv(ev.event_date, { type: 'custom', label: (ev.emoji || '📅') + ' ' + ev.title, color: c, customId: ev.id });
-    if (ev.brew_reminder) {
-      const rd = new Date(ev.event_date + 'T00:00:00');
-      rd.setDate(rd.getDate() - 45);
-      addEv(_ymd(rd), { type: 'custom_remind', label: '🔔 ' + t('cal.brew_for') + ' ' + ev.title, color: '#a855f7', eventDate: ev.event_date, customId: ev.id });
-    }
+    const occurrences = _expandCustomEvent(ev);
+    occurrences.forEach(eventDate => {
+      addEv(eventDate, { type: 'custom', label: (ev.emoji || '📅') + ' ' + ev.title, color: c, customId: ev.id });
+      if (ev.brew_reminder) {
+        const days = ev.brew_reminder_days ?? appSettings.defaultBrewReminderDays ?? 45;
+        const rd = new Date(eventDate + 'T00:00:00');
+        rd.setDate(rd.getDate() - days);
+        addEv(_ymd(rd), { type: 'custom_remind', label: '🔔 ' + t('cal.brew_for') + ' ' + ev.title, color: '#a855f7', eventDate, reminderDays: days, customId: ev.id });
+      }
+    });
   });
 
   // Événements brassicoles mondiaux + rappels J-45
@@ -9049,10 +9863,11 @@ function renderCalendar() {
     const evYear = e.date.slice(0, 4);
     const date  = ov.date_mmdd ? `${evYear}-${ov.date_mmdd}` : e.date;
     addEv(date, { type: 'world', label: emoji + ' ' + lbl, color, origLabel: eKey });
-    // Rappel J-45
+    // Rappel brassage (délai global)
+    const _remDays = appSettings.defaultBrewReminderDays ?? 45;
     const rd = new Date(date + 'T00:00:00');
-    rd.setDate(rd.getDate() - 45);
-    addEv(_ymd(rd), { type: 'remind', label: '🔔 ' + t('cal.brew_for') + ' ' + lbl, color: '#a855f7', eventDate: date, origLabel: eKey });
+    rd.setDate(rd.getDate() - _remDays);
+    addEv(_ymd(rd), { type: 'remind', label: '🔔 ' + t('cal.brew_for') + ' ' + lbl, color: '#a855f7', eventDate: date, reminderDays: _remDays, origLabel: eKey });
   });
 
   // Calcul des cellules du mois
@@ -9068,7 +9883,7 @@ function renderCalendar() {
     const cellDate = new Date(_calYear, _calMonth, 1 - startDow + i);
     const isOther  = cellDate.getMonth() !== _calMonth;
     const isToday  = cellDate.getTime() === today.getTime();
-    const key      = cellDate.toISOString().slice(0, 10);
+    const key      = _ymd(cellDate);
     const dayEvs   = events[key] || [];
 
     const evHtml = dayEvs.map(ev => {
@@ -9258,7 +10073,7 @@ function calEvClick(e, idx) {
       d.target_date === ev.eventDate || d.event_label === evLabel
     );
     html = `
-      <div style="color:#a855f7;font-weight:700;font-size:.82rem;margin-bottom:6px"><i class="fas fa-bell"></i> ${t('cal.remind_label')}</div>
+      <div style="color:#a855f7;font-weight:700;font-size:.82rem;margin-bottom:6px"><i class="fas fa-bell"></i> ${t('cal.remind_label')} — J-${ev.reminderDays || 45}</div>
       <div style="font-size:.92rem;font-weight:600;margin-bottom:4px">${esc(evDisplayLabel)}</div>
       ${evDateStr ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:6px">${t('cal.event_date')} <strong>${evDateStr}</strong></div>` : ''}
       ${details.desc ? `<div style="font-size:.8rem;color:var(--text);line-height:1.4;margin-bottom:6px">${esc(_lang === 'en' ? (details.desc_en || details.desc) : details.desc)}</div>` : ''}
@@ -9312,7 +10127,7 @@ function calEvClick(e, idx) {
       ? new Date(ev.eventDate + 'T00:00:00').toLocaleDateString(_lang || 'fr', { day:'numeric', month:'long' })
       : '';
     html = `
-      <div style="color:#a855f7;font-weight:700;font-size:.82rem;margin-bottom:6px"><i class="fas fa-bell"></i> ${t('cal.remind_label')}</div>
+      <div style="color:#a855f7;font-weight:700;font-size:.82rem;margin-bottom:6px"><i class="fas fa-bell"></i> ${t('cal.remind_label')} — J-${ev.reminderDays || 45}</div>
       <div style="font-size:.92rem;font-weight:600;margin-bottom:4px">${ce?.emoji || '📅'} ${esc(ce?.title || '')}</div>
       ${evDateStr ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:8px">${t('cal.event_date')} <strong>${evDateStr}</strong></div>` : ''}
       ${ce?.notes ? `<div style="font-size:.8rem;color:var(--text);line-height:1.4;margin-bottom:8px">${esc(ce.notes)}</div>` : ''}
@@ -9524,19 +10339,70 @@ function _ceResetAssoc() {
   document.getElementById('ce-draft-id').value    = '';
 }
 
+function _ceUpdateRecurrenceUI() {
+  const type = document.getElementById('ce-recurrence').value;
+  const wrap = document.getElementById('ce-rec-nth-wrap');
+  if (type === 'yearly_nth_dow') {
+    wrap.style.display = 'flex';
+    _ceAutoDetectNthDow(document.getElementById('ce-date').value);
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+function _ceOnDateChange() {
+  if (document.getElementById('ce-recurrence').value === 'yearly_nth_dow')
+    _ceAutoDetectNthDow(document.getElementById('ce-date').value);
+}
+
+function _ceAutoDetectNthDow(dateStr) {
+  if (!dateStr) return;
+  const d = new Date(dateStr + 'T00:00:00');
+  document.getElementById('ce-rec-dow').value = d.getDay();
+  document.getElementById('ce-rec-nth').value = Math.ceil(d.getDate() / 7);
+}
+
+function _ceGetRecurrence() {
+  const type = document.getElementById('ce-recurrence').value;
+  if (!type) return null;
+  if (type === 'yearly') return JSON.stringify({ type: 'yearly' });
+  if (type === 'yearly_nth_dow') return JSON.stringify({
+    type: 'yearly_nth_dow',
+    nth: parseInt(document.getElementById('ce-rec-nth').value),
+    dow: parseInt(document.getElementById('ce-rec-dow').value),
+  });
+  return null;
+}
+
+function _ceSetRecurrence(rec) {
+  const obj = rec ? (typeof rec === 'string' ? JSON.parse(rec) : rec) : null;
+  const sel = document.getElementById('ce-recurrence');
+  sel.value = obj?.type || '';
+  if (obj?.type === 'yearly_nth_dow') {
+    document.getElementById('ce-rec-nth-wrap').style.display = 'flex';
+    document.getElementById('ce-rec-nth').value = obj.nth ?? 1;
+    document.getElementById('ce-rec-dow').value  = obj.dow ?? 1;
+  } else {
+    document.getElementById('ce-rec-nth-wrap').style.display = 'none';
+  }
+}
+
 function openCustomEventModal(prefillDate) {
   document.getElementById('ce-id').value   = '';
   document.getElementById('ce-title').value= '';
-  document.getElementById('ce-date').value = prefillDate || new Date().toISOString().slice(0, 10);
+  document.getElementById('ce-date').value = prefillDate || _ymd(new Date());
   document.getElementById('ce-color').value= '#f59e0b';
   document.getElementById('ce-notes').value= '';
-  document.getElementById('ce-brew-reminder').checked = false;
-  document.getElementById('ce-telegram').checked      = false;
+  document.getElementById('ce-brew-reminder').checked          = false;
+  document.getElementById('ce-brew-reminder-days').value       = '';
+  document.getElementById('ce-brew-reminder-days').placeholder = String(appSettings.defaultBrewReminderDays || 45);
+  document.getElementById('ce-telegram').checked               = false;
   document.getElementById('ce-delete-btn').style.display = 'none';
   document.getElementById('custom-event-modal-title').innerHTML =
     '<i class="fas fa-calendar-plus" style="color:var(--amber)"></i> Nouvel événement';
   _ceSetEmoji('📅');
   _ceResetAssoc();
+  _ceSetRecurrence(null);
   _ceAlert('');
   const hasTg = !!(appSettings.telegram?.token || appSettings.telegram?.chatId);
   document.getElementById('ce-tg-wrap').style.display = hasTg ? '' : 'none';
@@ -9552,8 +10418,10 @@ function editCustomEvent(id) {
   document.getElementById('ce-date').value = ev.event_date || '';
   document.getElementById('ce-color').value= ev.color      || '#f59e0b';
   document.getElementById('ce-notes').value= ev.notes      || '';
-  document.getElementById('ce-brew-reminder').checked = !!ev.brew_reminder;
-  document.getElementById('ce-telegram').checked      = !!ev.telegram_notify;
+  document.getElementById('ce-brew-reminder').checked          = !!ev.brew_reminder;
+  document.getElementById('ce-brew-reminder-days').value       = ev.brew_reminder_days != null ? ev.brew_reminder_days : '';
+  document.getElementById('ce-brew-reminder-days').placeholder = String(appSettings.defaultBrewReminderDays || 45);
+  document.getElementById('ce-telegram').checked               = !!ev.telegram_notify;
   // Association
   document.getElementById('ce-style').value      = ev.style || '';
   document.getElementById('ce-recipe-id').value   = ev.recipe_id || '';
@@ -9566,6 +10434,7 @@ function editCustomEvent(id) {
   document.getElementById('custom-event-modal-title').innerHTML =
     `<i class="fas fa-pen" style="color:var(--amber)"></i> ${t('cal.event_edit')}`;
   _ceSetEmoji(ev.emoji || '📅');
+  _ceSetRecurrence(ev.recurrence || null);
   _ceAlert('');
   const hasTg = !!(appSettings.telegram?.token || appSettings.telegram?.chatId);
   document.getElementById('ce-tg-wrap').style.display = hasTg ? '' : 'none';
@@ -9584,11 +10453,15 @@ async function saveCustomEvent() {
     event_date:     date,
     color:          document.getElementById('ce-color').value,
     notes:          document.getElementById('ce-notes').value.trim() || null,
-    brew_reminder:  document.getElementById('ce-brew-reminder').checked,
-    telegram_notify:document.getElementById('ce-telegram').checked,
+    brew_reminder:       document.getElementById('ce-brew-reminder').checked,
+    brew_reminder_days:  document.getElementById('ce-brew-reminder-days').value !== ''
+                           ? parseInt(document.getElementById('ce-brew-reminder-days').value) || null
+                           : null,
+    telegram_notify:     document.getElementById('ce-telegram').checked,
     style:          document.getElementById('ce-style').value.trim() || null,
     recipe_id:      parseInt(document.getElementById('ce-recipe-id').value) || null,
     draft_id:       parseInt(document.getElementById('ce-draft-id').value)  || null,
+    recurrence:     _ceGetRecurrence(),
   };
 
   const id = document.getElementById('ce-id').value;
@@ -9892,9 +10765,6 @@ function renderBrouillons() {
       }
 
       const sub = [d.style ? `<em>${d.style}</em>` : '', ingCount ? `${ingCount} ing.` : '', !d.target_date ? modDate : ''].filter(Boolean).join(' · ');
-      const thumb = d.image
-        ? `<img src="${d.image}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;flex-shrink:0">`
-        : '';
       return `<div class="card draft-list-item" draggable="true" data-id="${d.id}"
                 style="padding:10px 14px;cursor:pointer;border:2px solid transparent;${active}"
                 onclick="openDraft(${d.id})">
@@ -9903,14 +10773,14 @@ function renderBrouillons() {
             style="color:var(--muted);cursor:grab;flex-shrink:0;padding:0 2px">
             <i class="fas fa-grip-vertical"></i>
           </span>
-          ${thumb || `<span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>`}
+          <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
           <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.title || t('draft.untitled')}</span>
           <button class="btn btn-ghost btn-sm" style="padding:2px 6px;color:var(--danger);flex-shrink:0"
             onclick="event.stopPropagation();deleteDraft(${d.id})" title="${t('common.delete')}">
             <i class="fas fa-trash"></i>
           </button>
         </div>
-        ${sub ? `<div style="font-size:.75rem;color:var(--muted);padding-left:${d.image ? '0' : '26px'}">${sub}</div>` : ''}
+        ${sub ? `<div style="font-size:.75rem;color:var(--muted);padding-left:26px">${sub}</div>` : ''}
         ${dateLine}
       </div>`;
     }).join('');
@@ -9960,11 +10830,15 @@ function renderBrouillons() {
   updateBrouillonsBadge();
 }
 
-async function saveDraftOrder() {
-  try {
-    await api('PUT', '/api/drafts/reorder',
-      S.drafts.map((d, i) => ({ id: d.id, sort_order: i })));
-  } catch(e) { toast(t('inv.err_save_order'), 'error'); }
+let _saveDraftOrderTimer = null;
+function saveDraftOrder() {
+  clearTimeout(_saveDraftOrderTimer);
+  _saveDraftOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/drafts/reorder',
+        S.drafts.map((d, i) => ({ id: d.id, sort_order: i })));
+    } catch(e) { toast(t('inv.err_save_order'), 'error'); }
+  }, 600);
 }
 
 function _showEditor(show) {
@@ -9974,7 +10848,7 @@ function _showEditor(show) {
   if (ph) ph.style.display = show ? 'none'  : 'flex';
 }
 
-function openDraft(id) {
+async function openDraft(id) {
   _currentDraftId = id;
   const d = S.drafts.find(x => x.id === id);
   if (!d) return;
@@ -9985,7 +10859,7 @@ function openDraft(id) {
   document.getElementById('draft-color').value  = d.color  || '#ff9500';
   document.getElementById('draft-save-status').textContent = '';
   _renderDraftEventLink(d.target_date || null, d.event_label || null);
-  // Image
+  // Image : affiche ce qui est en cache (null si pas encore chargé)
   _setDraftImage(d.image || null, false);
   // Deserialize ingredients
   try { _draftIngredients = JSON.parse(d.ingredients || '[]'); } catch(e) { _draftIngredients = []; }
@@ -9994,6 +10868,17 @@ function openDraft(id) {
   _showEditor(true);
   setDraftMode('view');
   renderBrouillons(); // highlight selected card
+  // Lazy-load image si pas encore en cache (image exclue de la liste API)
+  if (!('image' in d)) {
+    try {
+      const full = await api('GET', `/api/drafts/${id}`);
+      d.image = full.image ?? null;
+      if (_currentDraftId === id) {
+        _setDraftImage(d.image || null, false);
+        if (_draftMode === 'view') renderDraftView();
+      }
+    } catch(e) { d.image = null; }
+  }
 }
 
 async function newDraft() {
@@ -10468,12 +11353,10 @@ async function generateDraftImage() {
 
   const title  = document.getElementById('draft-title').value.trim() || 'bière artisanale';
   const style  = document.getElementById('draft-style').value.trim();
-  const notes  = document.getElementById('draft-notes').value.trim();
   const extra  = (document.getElementById('draft-img-extra')?.value || '').trim();
 
   const prompt = `A craft beer label artwork for a homebrew beer named "${title}"` +
     (style ? `, style: ${style}` : '') +
-    (notes ? `. ${notes.slice(0, 120)}` : '') +
     (extra ? `. ${extra}` : '') +
     '. Flat rectangular label, illustrated decorative border, ingredients-inspired background art, beer name prominently displayed. No bottle, no glass, no hands, no ABV, no volume. Print-ready flat lay label only.';
 

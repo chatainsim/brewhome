@@ -3,7 +3,10 @@
 <nav>
   <div class="nav-brand" id="nav-brand">Brew<span>Home</span></div>
   <div class="nav-links">
-    <button class="nav-btn active" onclick="navigate('inventaire')" id="nav-inventaire">
+    <button class="nav-btn active" onclick="navigate('dashboard')" id="nav-dashboard">
+      <i class="fas fa-house"></i> <span data-i18n="nav.dashboard">Tableau de bord</span>
+    </button>
+    <button class="nav-btn" onclick="navigate('inventaire')" id="nav-inventaire">
       <i class="fas fa-boxes-stacked"></i> <span data-i18n="nav.inventaire">Inventaire</span> <span class="nav-badge" id="nb-inv">0</span>
     </button>
     <button class="nav-btn" onclick="navigate('recettes')" id="nav-recettes">
@@ -16,7 +19,7 @@
       <i class="fas fa-beer-mug-empty"></i> <span data-i18n="nav.cave">Cave</span> <span class="nav-badge" id="nb-cav">0</span>
     </button>
     <button class="nav-btn" onclick="navigate('kegs')" id="nav-kegs">
-      <i class="fas fa-barrel"></i> <span data-i18n="nav.kegs">Kegs</span> <span class="nav-badge" id="nb-kegs"></span>
+      <i class="fas fa-jar"></i> <span data-i18n="nav.kegs">Kegs</span> <span class="nav-badge" id="nb-kegs"></span>
     </button>
     <button class="nav-btn" onclick="navigate('spindles')" id="nav-spindles">
       <i class="fas fa-gauge-high"></i> <span data-i18n="nav.spindles">Capteurs</span> <span class="nav-badge" id="nb-spin">0</span>

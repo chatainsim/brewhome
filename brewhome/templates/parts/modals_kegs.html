@@ -14,14 +14,34 @@
           <input type="text" id="keg-f-type-other" placeholder="Ex : Mini keg 5 L" style="display:none;margin-top:6px">
         </div>
       </div>
+      <div class="form-row cols-2">
+        <div class="field" style="position:relative">
+          <label data-i18n="keg.field_manufacturer">Fabricant</label>
+          <input type="text" id="keg-f-manufacturer" placeholder="Ex : Cornelius" autocomplete="off"
+                 oninput="filterKegManufacturer()" onfocus="filterKegManufacturer()" onblur="setTimeout(()=>hideKegManufacturer(),150)">
+          <div class="ing-suggest" id="keg-manufacturer-suggest"></div>
+        </div>
+        <div class="field"><label data-i18n="common.notes">Notes</label><input type="text" id="keg-f-notes" placeholder=""></div>
+      </div>
       <div class="form-row cols-3">
         <div class="field"><label data-i18n="keg.field_volume">Volume total (L)</label><input type="number" id="keg-f-volume" step="0.1" min="0" placeholder="Ex : 19" onblur="suggestFermentVolume()"></div>
         <div class="field"><label><span data-i18n="keg.field_ferment">Volume fermentation (L)</span> <span id="keg-f-ferment-hint" style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="keg.suggest_ferment">(80% suggéré)</span></label><input type="number" id="keg-f-ferment" step="0.1" min="0" placeholder="Ex : 15.2"></div>
         <div class="field"><label data-i18n="keg.field_weight">Poids à vide (kg)</label><input type="number" id="keg-f-weight" step="0.1" min="0" placeholder="Ex : 4.5"></div>
       </div>
-      <div class="form-row cols-2">
-        <div class="field"><label data-i18n="keg.field_color">Couleur</label><input type="color" id="keg-f-color" value="#f59e0b" style="height:42px;padding:4px 6px"></div>
-        <div class="field"><label data-i18n="common.notes">Notes</label><input type="text" id="keg-f-notes" placeholder=""></div>
+      <div class="form-row cols-2" style="align-items:end">
+        <div class="field"><label data-i18n="keg.field_color">Couleur</label><input type="color" id="keg-f-color" value="#f59e0b" style="height:42px;padding:4px 6px;width:100%"></div>
+        <div class="field"><label data-i18n="keg.field_last_revision">Dernière révision</label><input type="date" id="keg-f-last-revision" oninput="updateKegRevisionPreview()"></div>
+      </div>
+      <div class="field">
+        <label data-i18n="keg.field_revision_interval">Intervalle de révision</label>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input type="number" id="keg-f-revision-interval" value="12" min="1" max="120" style="width:72px" oninput="updateKegRevisionPreview()">
+          <span style="font-size:.82rem;color:var(--muted)" data-i18n="keg.interval_months">mois</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="setKegInterval(6)"  data-i18n="keg.interval_6m">6 mois</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="setKegInterval(12)" data-i18n="keg.interval_1y">1 an</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="setKegInterval(24)" data-i18n="keg.interval_2y">2 ans</button>
+        </div>
+        <div id="keg-f-next-revision-preview" style="margin-top:7px;font-size:.82rem;display:none"></div>
       </div>
       <div class="field">
         <label data-i18n="keg.field_photo">Photo</label>
@@ -42,6 +62,29 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('keg-modal')" data-i18n="common.cancel">Annuler</button>
       <button class="btn btn-primary" onclick="saveKeg()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Débit rapide fût -->
+<div class="modal-overlay" id="keg-pour-modal" onclick="if(event.target===this)closeModal('keg-pour-modal')">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-head">
+      <h3><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> <span id="keg-pour-title"></span></h3>
+      <button class="modal-close" onclick="closeModal('keg-pour-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:16px;padding:12px;background:var(--card2);border-radius:9px;font-size:.88rem" id="keg-pour-current"></div>
+      <div class="field" style="margin-bottom:12px">
+        <label data-i18n="keg.pour_amount">Litres à débiter</label>
+        <input type="number" id="keg-pour-amount" step="0.1" min="0.1" placeholder="Ex : 2" oninput="updateKegPourCalc()">
+      </div>
+      <div id="keg-pour-result" style="padding:12px;border-radius:9px;background:var(--card2);font-size:.88rem;min-height:40px;display:flex;align-items:center"></div>
+      <input type="hidden" id="keg-pour-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('keg-pour-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" id="keg-pour-save-btn" onclick="saveKegPour()"><i class="fas fa-check"></i> <span data-i18n="keg.pour_save">Valider</span></button>
     </div>
   </div>
 </div>
@@ -95,6 +138,46 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('keg-status-modal')" data-i18n="common.cancel">Annuler</button>
       <button class="btn btn-primary" onclick="saveKegStatus()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Fiche détail Keg -->
+<div class="modal-overlay" id="keg-detail-modal" onclick="if(event.target===this)closeModal('keg-detail-modal')">
+  <div class="modal modal-lg" style="max-width:560px">
+    <div class="modal-head">
+      <h3 id="kd-title" style="font-size:1.2rem;display:flex;align-items:center;gap:10px">
+        <span id="kd-title-icon"></span><span id="kd-title-text"></span>
+      </h3>
+      <button class="modal-close" onclick="closeModal('keg-detail-modal')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div id="kd-photo-wrap" style="display:none;max-height:280px;overflow:hidden">
+        <img id="kd-photo" src="" alt="" style="width:100%;max-height:280px;object-fit:cover;display:block">
+      </div>
+      <div id="kd-no-photo" style="text-align:center;padding:40px 0;background:var(--card2)">
+        <span id="kd-icon-placeholder" style="font-size:4rem;display:inline-block"></span>
+      </div>
+      <div style="padding:20px 24px">
+        <!-- Badges statut + type -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px" id="kd-badges"></div>
+        <!-- Volume bar -->
+        <div id="kd-volume" style="margin-bottom:14px"></div>
+        <!-- Specs grid -->
+        <div id="kd-specs" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px"></div>
+        <!-- Bière / brassin associé -->
+        <div id="kd-assoc" style="margin-bottom:10px"></div>
+        <!-- Révision -->
+        <div id="kd-revision" style="margin-bottom:10px"></div>
+        <!-- Notes -->
+        <div id="kd-notes" style="font-size:.88rem;color:var(--muted);line-height:1.6;white-space:pre-wrap"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('keg-detail-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-ghost" id="kd-pour-btn" style="display:none"><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> <span data-i18n="keg.pour_amount">Débiter</span></button>
+      <button class="btn btn-ghost" id="kd-status-btn"><i class="fas fa-toggle-on"></i> <span data-i18n="keg.status_label">Statut</span></button>
+      <button class="btn btn-ghost" id="kd-edit-btn"><i class="fas fa-pen"></i> <span data-i18n="common.edit">Modifier</span></button>
     </div>
   </div>
 </div>

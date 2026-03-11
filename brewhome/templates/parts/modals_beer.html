@@ -84,12 +84,79 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px" id="bd-stocks"></div>
         <div id="bd-desc" style="font-size:.9rem;line-height:1.6;color:var(--text);margin-bottom:12px;white-space:pre-wrap"></div>
         <div id="bd-meta" style="font-size:.82rem;color:var(--muted)"></div>
+        <div id="bd-tasting" style="display:none;margin-top:16px;border-top:1px solid var(--border);padding-top:14px"></div>
       </div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('beer-detail-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-ghost" id="bd-tasting-btn"><i class="fas fa-wine-glass"></i> <span data-i18n="tasting.btn">Dégustation</span></button>
       <button class="btn btn-ghost" id="bd-print-btn"><i class="fas fa-tag"></i> <span data-i18n="cave.label">Étiquette</span></button>
       <button class="btn btn-ghost" id="bd-edit-btn" onclick=""><i class="fas fa-pen"></i> <span data-i18n="common.edit">Modifier</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Fiche de dégustation -->
+<div class="modal-overlay" id="tasting-modal" onclick="if(event.target===this)closeModal('tasting-modal')">
+  <div class="modal" style="max-width:620px">
+    <div class="modal-head">
+      <h3><i class="fas fa-wine-glass" style="color:var(--amber)"></i> <span id="tasting-modal-title"></span></h3>
+      <button class="modal-close" onclick="closeModal('tasting-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field" style="margin-bottom:16px">
+        <label data-i18n="tasting.date">Date de dégustation</label>
+        <input type="date" id="tasting-f-date" style="max-width:200px">
+      </div>
+      <div class="form-row cols-2" style="margin-bottom:0">
+        <div class="field">
+          <label><i class="fas fa-eye" style="color:var(--info)"></i> <span data-i18n="tasting.appearance">Apparence</span></label>
+          <textarea id="tasting-f-appearance" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_appearance"></textarea>
+        </div>
+        <div class="field">
+          <label><i class="fas fa-wind" style="color:var(--hop)"></i> <span data-i18n="tasting.aroma">Arôme</span></label>
+          <textarea id="tasting-f-aroma" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_aroma"></textarea>
+        </div>
+      </div>
+      <div class="form-row cols-2" style="margin-bottom:0">
+        <div class="field">
+          <label><i class="fas fa-droplet" style="color:var(--malt)"></i> <span data-i18n="tasting.flavor">Goût</span></label>
+          <textarea id="tasting-f-flavor" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_flavor"></textarea>
+        </div>
+        <div class="field">
+          <label><i class="fas fa-fire" style="color:var(--amber)"></i> <span data-i18n="tasting.bitterness">Amertume</span></label>
+          <textarea id="tasting-f-bitterness" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_bitterness"></textarea>
+        </div>
+      </div>
+      <div class="form-row cols-2" style="margin-bottom:0">
+        <div class="field">
+          <label><i class="fas fa-circle-half-stroke" style="color:var(--info)"></i> <span data-i18n="tasting.mouthfeel">Bouche</span></label>
+          <textarea id="tasting-f-mouthfeel" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_mouthfeel"></textarea>
+        </div>
+        <div class="field">
+          <label><i class="fas fa-comment" style="color:var(--muted)"></i> <span data-i18n="tasting.overall_notes">Commentaire global</span></label>
+          <textarea id="tasting-f-overall" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_overall"></textarea>
+        </div>
+      </div>
+      <div class="field" style="margin-top:4px">
+        <label data-i18n="tasting.rating">Note globale</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="star-input" id="tasting-star-input">
+            <span class="star" onclick="setTastingRating(1)">★</span>
+            <span class="star" onclick="setTastingRating(2)">★</span>
+            <span class="star" onclick="setTastingRating(3)">★</span>
+            <span class="star" onclick="setTastingRating(4)">★</span>
+            <span class="star" onclick="setTastingRating(5)">★</span>
+          </div>
+          <span id="tasting-rating-label" style="font-size:.82rem;color:var(--muted)"></span>
+        </div>
+        <input type="hidden" id="tasting-f-rating">
+      </div>
+      <input type="hidden" id="tasting-f-beer-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('tasting-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="saveTasting()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>

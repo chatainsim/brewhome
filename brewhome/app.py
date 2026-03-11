@@ -3,6 +3,8 @@ import os
 import secrets
 import json
 import base64
+import time
+import threading
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -16,11 +18,79 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 DB_PATH       = os.path.join(os.path.dirname(__file__), 'brewhome.db')
 READINGS_DB_PATH = os.path.join(os.path.dirname(__file__), 'brewhome_readings.db')
 
+# ── Limite taille image base64 ───────────────────────────────────────────────
+# 2 Mo de données brutes ≈ 2,7 Mo en base64 ; on bloque à 3 Mo de chaîne base64
+_MAX_IMAGE_B64_BYTES = 3 * 1024 * 1024
+
+def _image_too_large(image: str | None) -> bool:
+    return image is not None and len(image.encode()) > _MAX_IMAGE_B64_BYTES
+
+def _shrink_image_b64(data_url: str) -> str:
+    """Réduit une image base64 jusqu'à passer sous _MAX_IMAGE_B64_BYTES.
+    Convertit en JPEG, réduit la qualité puis les dimensions si nécessaire.
+    Retourne le data URL réduit, ou le data URL original en cas d'échec."""
+    try:
+        from PIL import Image
+        import io
+        # Extraire le base64 pur (data:image/xxx;base64,<data>)
+        if ',' in data_url:
+            header, b64data = data_url.split(',', 1)
+        else:
+            header, b64data = 'data:image/jpeg;base64', data_url
+        raw = base64.b64decode(b64data)
+        img = Image.open(io.BytesIO(raw)).convert('RGB')
+
+        # Réduire qualité JPEG par paliers
+        for quality in (85, 70, 55, 40):
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=quality, optimize=True)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            result = f'data:image/jpeg;base64,{b64}'
+            if len(result.encode()) <= _MAX_IMAGE_B64_BYTES:
+                return result
+
+        # Toujours trop grand : réduire aussi les dimensions (50 %, puis 35 %)
+        for scale in (0.5, 0.35):
+            w = max(1, int(img.width  * scale))
+            h = max(1, int(img.height * scale))
+            small = img.resize((w, h), Image.LANCZOS)
+            buf = io.BytesIO()
+            small.save(buf, format='JPEG', quality=60, optimize=True)
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            result = f'data:image/jpeg;base64,{b64}'
+            if len(result.encode()) <= _MAX_IMAGE_B64_BYTES:
+                return result
+
+        return result  # dernière tentative même si encore grande
+    except Exception as e:
+        app.logger.warning(f"_shrink_image_b64 failed: {e}")
+        return data_url
+
+# ── Rate limiter capteurs ─────────────────────────────────────────────────────
+# Sliding-window par token : 1 requête toutes les SENSOR_RL_MIN_INTERVAL secondes.
+# Les capteurs physiques envoient typiquement toutes les 2–30 minutes, donc
+# 30 s est largement suffisant pour bloquer les abus sans gêner les devices.
+SENSOR_RL_MIN_INTERVAL = 30  # secondes
+_rl_lock  = threading.Lock()
+_rl_cache: dict[str, float] = {}  # token → timestamp dernière requête acceptée
+
+def _sensor_rate_limit(token: str) -> bool:
+    """Retourne True si la requête est autorisée, False si elle doit être rejetée."""
+    now = time.monotonic()
+    with _rl_lock:
+        last = _rl_cache.get(token, 0.0)
+        if now - last < SENSOR_RL_MIN_INTERVAL:
+            return False
+        _rl_cache[token] = now
+        return True
+
 
 def get_db():
     """Connexion principale + base de mesures attachée en tant que 'rdb'."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("ATTACH DATABASE ? AS rdb", (READINGS_DB_PATH,))
     return conn
@@ -30,6 +100,8 @@ def get_readings_db():
     """Connexion directe à la base de mesures densimètre."""
     conn = sqlite3.connect(READINGS_DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -50,6 +122,7 @@ def init_readings_db():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_sr_spindle ON spindle_readings(spindle_id)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_sr_date    ON spindle_readings(recorded_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_sr_spindle_date ON spindle_readings(spindle_id, recorded_at DESC)')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS temperature_readings (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,6 +136,7 @@ def init_readings_db():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_tr_sensor ON temperature_readings(sensor_id)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_tr_date   ON temperature_readings(recorded_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_tr_sensor_date ON temperature_readings(sensor_id, recorded_at DESC)')
 
 
 def init_db():
@@ -210,11 +284,13 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_catalog_name ON ingredient_catalog(name)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_catalog_cat  ON ingredient_catalog(category)')
         # Migration: add hop_days if missing (safe to run on existing DB)
         try:
             conn.execute('ALTER TABLE recipe_ingredients ADD COLUMN hop_days INTEGER')
-        except Exception:
-            pass
+        except Exception as e:
+            pass  # colonne déjà existante
         _seed_catalog(conn)
         _seed_catalog_extras(conn)
         _seed_bjcp(conn)
@@ -258,6 +334,14 @@ def migrate_db():
             "ALTER TABLE temperature_sensors ADD COLUMN brew_id INTEGER REFERENCES brews(id) ON DELETE SET NULL",
             "ALTER TABLE beers ADD COLUMN keg_liters REAL",
             "ALTER TABLE beers ADD COLUMN keg_initial_liters REAL",
+            "ALTER TABLE beers ADD COLUMN taste_appearance TEXT",
+            "ALTER TABLE beers ADD COLUMN taste_aroma TEXT",
+            "ALTER TABLE beers ADD COLUMN taste_flavor TEXT",
+            "ALTER TABLE beers ADD COLUMN taste_bitterness TEXT",
+            "ALTER TABLE beers ADD COLUMN taste_mouthfeel TEXT",
+            "ALTER TABLE beers ADD COLUMN taste_overall TEXT",
+            "ALTER TABLE beers ADD COLUMN taste_rating INTEGER",
+            "ALTER TABLE beers ADD COLUMN taste_date TEXT",
             """CREATE TABLE IF NOT EXISTS draft_recipes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL DEFAULT 'Nouveau brouillon',
@@ -289,6 +373,8 @@ def migrate_db():
             "ALTER TABLE custom_calendar_events ADD COLUMN style TEXT",
             "ALTER TABLE custom_calendar_events ADD COLUMN recipe_id INTEGER",
             "ALTER TABLE custom_calendar_events ADD COLUMN draft_id INTEGER",
+            "ALTER TABLE custom_calendar_events ADD COLUMN recurrence TEXT",
+            "ALTER TABLE custom_calendar_events ADD COLUMN brew_reminder_days INTEGER",
             """CREATE TABLE IF NOT EXISTS soda_kegs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -310,10 +396,14 @@ def migrate_db():
                 FOREIGN KEY (beer_id) REFERENCES beers(id) ON DELETE SET NULL,
                 FOREIGN KEY (brew_id) REFERENCES brews(id) ON DELETE SET NULL
             )""",
+            "ALTER TABLE soda_kegs ADD COLUMN manufacturer TEXT",
+            "ALTER TABLE soda_kegs ADD COLUMN next_revision_date TEXT",
+            "ALTER TABLE soda_kegs ADD COLUMN last_revision_date TEXT",
+            "ALTER TABLE soda_kegs ADD COLUMN revision_interval_months INTEGER DEFAULT 12",
         ]:
             try:
                 conn.execute(sql)
-            except Exception:
+            except Exception as e:
                 pass  # colonne déjà existante
     # Migrations base de mesures
     with get_readings_db() as rconn:
@@ -323,8 +413,8 @@ def migrate_db():
         ]:
             try:
                 rconn.execute(sql)
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # colonne déjà existante
         # Backfill initial counts for existing beers that don't have them yet
         conn.execute('UPDATE beers SET initial_33cl=stock_33cl WHERE initial_33cl=0 AND stock_33cl>0')
         conn.execute('UPDATE beers SET initial_75cl=stock_75cl WHERE initial_75cl=0 AND stock_75cl>0')
@@ -341,7 +431,7 @@ def migrate_db():
                           r['battery'], r['angle'], r['rssi'], r['recorded_at']) for r in rows]
                     )
             conn.execute('DROP TABLE IF EXISTS main.spindle_readings')
-        except Exception:
+        except Exception as e:
             pass  # table absente = déjà migrée ou installation neuve
 
 
@@ -744,14 +834,16 @@ def get_catalog():
 
 @app.route('/api/catalog', methods=['POST'])
 def create_catalog_item():
-    d = request.json
+    d = request.json or {}
+    if not d.get('name') or not d.get('category'):
+        return jsonify({'error': 'name and category are required'}), 400
     with get_db() as conn:
         cur = conn.execute(
             '''INSERT INTO ingredient_catalog
                (name,category,subcategory,ebc,gu,alpha,yeast_type,default_unit,
                 temp_min,temp_max,dosage_per_liter,attenuation_min,attenuation_max,alcohol_tolerance,max_usage_pct,aroma_spec)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (d['name'], d['category'], d.get('subcategory'), d.get('ebc'), d.get('gu'),
+            (d.get('name'), d.get('category'), d.get('subcategory'), d.get('ebc'), d.get('gu'),
              d.get('alpha'), d.get('yeast_type'), d.get('default_unit', 'g'),
              d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
              d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
@@ -763,21 +855,23 @@ def create_catalog_item():
 
 @app.route('/api/catalog/<int:item_id>', methods=['PUT'])
 def update_catalog_item(item_id):
-    d = request.json
+    d = request.json or {}
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             '''UPDATE ingredient_catalog
                SET name=?, subcategory=?, ebc=?, alpha=?, yeast_type=?, default_unit=?,
                    temp_min=?, temp_max=?, dosage_per_liter=?,
                    attenuation_min=?, attenuation_max=?, alcohol_tolerance=?,
                    max_usage_pct=?, aroma_spec=?
                WHERE id=?''',
-            (d['name'], d.get('subcategory'), d.get('ebc'), d.get('alpha'),
+            (d.get('name'), d.get('subcategory'), d.get('ebc'), d.get('alpha'),
              d.get('yeast_type'), d.get('default_unit', 'g'),
              d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
              d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
              d.get('max_usage_pct'), d.get('aroma_spec'), item_id)
         )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute('SELECT * FROM ingredient_catalog WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
 
@@ -785,7 +879,9 @@ def update_catalog_item(item_id):
 @app.route('/api/catalog/<int:item_id>', methods=['DELETE'])
 def delete_catalog_item(item_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM ingredient_catalog WHERE id=?', (item_id,))
+        cur = conn.execute('DELETE FROM ingredient_catalog WHERE id=?', (item_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
 
 
@@ -802,11 +898,13 @@ def get_inventory():
 
 @app.route('/api/inventory', methods=['POST'])
 def create_inventory_item():
-    d = request.json
+    d = request.json or {}
+    if not d.get('name') or not d.get('category'):
+        return jsonify({'error': 'name and category are required'}), 400
     with get_db() as conn:
         cur = conn.execute(
             'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes,price_per_unit) VALUES (?,?,?,?,?,?,?,?,?)',
-            (d['name'], d['category'], d.get('quantity', 0), d.get('unit', 'kg'),
+            (d.get('name'), d.get('category'), d.get('quantity', 0), d.get('unit', 'kg'),
              d.get('origin'), d.get('ebc'), d.get('alpha'), d.get('notes'),
              d.get('price_per_unit'))
         )
@@ -816,17 +914,19 @@ def create_inventory_item():
 
 @app.route('/api/inventory/<int:item_id>', methods=['PUT'])
 def update_inventory_item(item_id):
-    d = request.json
+    d = request.json or {}
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             '''UPDATE inventory_items
                SET name=?,category=?,quantity=?,unit=?,origin=?,ebc=?,alpha=?,notes=?,
                    price_per_unit=?,updated_at=CURRENT_TIMESTAMP
                WHERE id=?''',
-            (d['name'], d['category'], d['quantity'], d.get('unit', 'kg'),
+            (d.get('name'), d.get('category'), d.get('quantity'), d.get('unit', 'kg'),
              d.get('origin'), d.get('ebc'), d.get('alpha'), d.get('notes'),
              d.get('price_per_unit'), item_id)
         )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
 
@@ -836,6 +936,8 @@ def reorder_inventory():
     items = request.json or []
     with get_db() as conn:
         for item in items:
+            if item.get('id') is None or item.get('sort_order') is None:
+                continue
             conn.execute('UPDATE inventory_items SET sort_order=? WHERE id=?',
                          (item['sort_order'], item['id']))
     return jsonify({'success': True})
@@ -844,18 +946,22 @@ def reorder_inventory():
 @app.route('/api/inventory/<int:item_id>', methods=['DELETE'])
 def delete_inventory_item(item_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM inventory_items WHERE id=?', (item_id,))
+        cur = conn.execute('DELETE FROM inventory_items WHERE id=?', (item_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
 
 
 @app.route('/api/inventory/<int:item_id>/qty', methods=['PATCH'])
 def patch_inventory_qty(item_id):
-    d = request.json
+    d = request.json or {}
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             'UPDATE inventory_items SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
-            (d['quantity'], item_id)
+            (d.get('quantity'), item_id)
         )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
 
@@ -864,8 +970,10 @@ def patch_inventory_qty(item_id):
 def patch_inventory_item(item_id):
     d = request.json
     with get_db() as conn:
-        conn.execute('UPDATE inventory_items SET archived=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                     (1 if d.get('archived') else 0, item_id))
+        cur = conn.execute('UPDATE inventory_items SET archived=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                           (1 if d.get('archived') else 0, item_id))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
 
@@ -904,6 +1012,8 @@ def reorder_recipes():
     items = request.json or []
     with get_db() as conn:
         for item in items:
+            if item.get('id') is None or item.get('sort_order') is None:
+                continue
             conn.execute('UPDATE recipes SET sort_order=? WHERE id=?',
                          (item['sort_order'], item['id']))
     return jsonify({'success': True})
@@ -911,7 +1021,9 @@ def reorder_recipes():
 
 @app.route('/api/recipes', methods=['POST'])
 def create_recipe():
-    d = request.json
+    d = request.json or {}
+    if not d.get('name'):
+        return jsonify({'error': 'name is required'}), 400
     with get_db() as conn:
         cur = conn.execute(
             '''INSERT INTO recipes
@@ -919,7 +1031,7 @@ def create_recipe():
                 boil_time,mash_ratio,evap_rate,grain_absorption,brewhouse_efficiency,
                 ferm_temp,ferm_time,notes,rating,draft_id)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (d.get('batch_no'), d['name'], d.get('style'), d.get('volume', 20),
+            (d.get('batch_no'), d.get('name'), d.get('style'), d.get('volume', 20),
              d.get('brew_date'), d.get('bottling_date'), d.get('mash_temp', 66),
              d.get('mash_time', 60), d.get('boil_time', 60), d.get('mash_ratio', 3.0),
              d.get('evap_rate', 3.0), d.get('grain_absorption', 0.8),
@@ -934,8 +1046,8 @@ def create_recipe():
                    (recipe_id,inventory_item_id,name,category,quantity,unit,
                     hop_time,hop_type,hop_days,other_type,other_time,ebc,alpha,notes)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (recipe_id, ing.get('inventory_item_id'), ing['name'], ing['category'],
-                 ing['quantity'], ing.get('unit', 'g'), ing.get('hop_time'),
+                (recipe_id, ing.get('inventory_item_id'), ing.get('name'), ing.get('category'),
+                 ing.get('quantity'), ing.get('unit', 'g'), ing.get('hop_time'),
                  ing.get('hop_type'), ing.get('hop_days'),
                  ing.get('other_type'), ing.get('other_time'),
                  ing.get('ebc'), ing.get('alpha'), ing.get('notes'))
@@ -954,14 +1066,14 @@ def get_recipe(recipe_id):
 
 @app.route('/api/recipes/<int:recipe_id>', methods=['PUT'])
 def update_recipe(recipe_id):
-    d = request.json
+    d = request.json or {}
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             '''UPDATE recipes SET batch_no=?,name=?,style=?,volume=?,brew_date=?,bottling_date=?,
                mash_temp=?,mash_time=?,boil_time=?,mash_ratio=?,evap_rate=?,grain_absorption=?,
                brewhouse_efficiency=?,ferm_temp=?,ferm_time=?,notes=?,rating=?,draft_id=?
                WHERE id=?''',
-            (d.get('batch_no'), d['name'], d.get('style'), d.get('volume', 20),
+            (d.get('batch_no'), d.get('name'), d.get('style'), d.get('volume', 20),
              d.get('brew_date'), d.get('bottling_date'), d.get('mash_temp', 66),
              d.get('mash_time', 60), d.get('boil_time', 60), d.get('mash_ratio', 3.0),
              d.get('evap_rate', 3.0), d.get('grain_absorption', 0.8),
@@ -969,6 +1081,8 @@ def update_recipe(recipe_id):
              d.get('ferm_temp', 20), d.get('ferm_time', 14), d.get('notes'),
              d.get('rating'), d.get('draft_id'), recipe_id)
         )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id=?', (recipe_id,))
         for ing in d.get('ingredients', []):
             conn.execute(
@@ -976,19 +1090,24 @@ def update_recipe(recipe_id):
                    (recipe_id,inventory_item_id,name,category,quantity,unit,
                     hop_time,hop_type,hop_days,other_type,other_time,ebc,alpha,notes)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (recipe_id, ing.get('inventory_item_id'), ing['name'], ing['category'],
-                 ing['quantity'], ing.get('unit', 'g'), ing.get('hop_time'),
+                (recipe_id, ing.get('inventory_item_id'), ing.get('name'), ing.get('category'),
+                 ing.get('quantity'), ing.get('unit', 'g'), ing.get('hop_time'),
                  ing.get('hop_type'), ing.get('hop_days'),
                  ing.get('other_type'), ing.get('other_time'),
                  ing.get('ebc'), ing.get('alpha'), ing.get('notes'))
             )
-        return jsonify(_recipe_with_ingredients(conn, recipe_id))
+        result = _recipe_with_ingredients(conn, recipe_id)
+        if not result:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify(result)
 
 
 @app.route('/api/recipes/<int:recipe_id>', methods=['DELETE'])
 def delete_recipe(recipe_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM recipes WHERE id=?', (recipe_id,))
+        cur = conn.execute('DELETE FROM recipes WHERE id=?', (recipe_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
 
 
@@ -1003,6 +1122,8 @@ def patch_recipe(recipe_id):
             conn.execute('UPDATE recipes SET rating=? WHERE id=?',
                          (d['rating'], recipe_id))
         row = conn.execute('SELECT id,name,archived,rating FROM recipes WHERE id=?', (recipe_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify(dict(row))
 
 
@@ -1043,6 +1164,8 @@ def reorder_brews():
     items = request.json or []
     with get_db() as conn:
         for item in items:
+            if item.get('id') is None or item.get('sort_order') is None:
+                continue
             conn.execute('UPDATE brews SET sort_order=? WHERE id=?',
                          (item['sort_order'], item['id']))
     return jsonify({'success': True})
@@ -1057,8 +1180,10 @@ def create_brew():
         return jsonify({'error': str(e) or type(e).__name__}), 500
 
 def _do_create_brew():
-    d = request.json
-    recipe_id = d['recipe_id']
+    d = request.json or {}
+    recipe_id = d.get('recipe_id')
+    if not recipe_id:
+        return jsonify({'error': 'recipe_id required'}), 400
     deduct = d.get('deduct_stock', True)
 
     with get_db() as conn:
@@ -1122,12 +1247,14 @@ def _do_create_brew():
 def update_brew(brew_id):
     d = request.json
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             'UPDATE brews SET name=?,brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,notes=?,status=? WHERE id=?',
             (d.get('name'), d.get('brew_date'), d.get('volume_brewed'),
              d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
              d.get('status', 'completed'), brew_id)
         )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         # Quand un brassin passe en "terminé", archiver les mesures du densimètre puis le délier
         if d.get('status') == 'completed':
             sp = conn.execute('SELECT id FROM spindles WHERE brew_id=?', (brew_id,)).fetchone()
@@ -1161,7 +1288,9 @@ def update_brew(brew_id):
 @app.route('/api/brews/<int:brew_id>', methods=['DELETE'])
 def delete_brew(brew_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM brews WHERE id=?', (brew_id,))
+        cur = conn.execute('DELETE FROM brews WHERE id=?', (brew_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
 
 
@@ -1169,8 +1298,10 @@ def delete_brew(brew_id):
 def patch_brew(brew_id):
     d = request.json
     with get_db() as conn:
-        conn.execute('UPDATE brews SET archived=? WHERE id=?',
-                     (1 if d.get('archived') else 0, brew_id))
+        cur = conn.execute('UPDATE brews SET archived=? WHERE id=?',
+                           (1 if d.get('archived') else 0, brew_id))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute(
             'SELECT b.*, r.name as recipe_name FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id WHERE b.id=?',
             (brew_id,)).fetchone()
@@ -1207,6 +1338,8 @@ def reorder_beers():
     items = request.json or []
     with get_db() as conn:
         for item in items:
+            if item.get('id') is None or item.get('sort_order') is None:
+                continue
             conn.execute('UPDATE beers SET sort_order=? WHERE id=?',
                          (item['sort_order'], item['id']))
     return jsonify({'success': True})
@@ -1214,7 +1347,9 @@ def reorder_beers():
 
 @app.route('/api/beers', methods=['POST'])
 def create_beer():
-    d = request.json
+    d = request.json or {}
+    if not d.get('name'):
+        return jsonify({'error': 'name is required'}), 400
     with get_db() as conn:
         s33 = d.get('stock_33cl', 0)
         s75 = d.get('stock_75cl', 0)
@@ -1222,7 +1357,7 @@ def create_beer():
         cur = conn.execute(
             '''INSERT INTO beers (name,type,abv,stock_33cl,stock_75cl,initial_33cl,initial_75cl,keg_liters,keg_initial_liters,origin,description,photo,brew_id,recipe_id,brew_date,bottling_date)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (d['name'], d.get('type'), d.get('abv'), s33, s75,
+            (d.get('name'), d.get('type'), d.get('abv'), s33, s75,
              d.get('initial_33cl', s33), d.get('initial_75cl', s75),
              keg, d.get('keg_initial_liters', keg),
              d.get('origin'), d.get('description'),
@@ -1235,18 +1370,20 @@ def create_beer():
 
 @app.route('/api/beers/<int:beer_id>', methods=['PUT'])
 def update_beer(beer_id):
-    d = request.json
+    d = request.json or {}
     with get_db() as conn:
         # Preserve existing initial values if not provided by client
         existing = conn.execute('SELECT initial_33cl, initial_75cl, keg_initial_liters FROM beers WHERE id=?', (beer_id,)).fetchone()
-        init33 = d['initial_33cl'] if 'initial_33cl' in d else (existing['initial_33cl'] if existing else 0)
-        init75 = d['initial_75cl'] if 'initial_75cl' in d else (existing['initial_75cl'] if existing else 0)
-        keg_init = d['keg_initial_liters'] if 'keg_initial_liters' in d else (existing['keg_initial_liters'] if existing else None)
+        if not existing:
+            return jsonify({'error': 'Not found'}), 404
+        init33 = d['initial_33cl'] if 'initial_33cl' in d else existing['initial_33cl']
+        init75 = d['initial_75cl'] if 'initial_75cl' in d else existing['initial_75cl']
+        keg_init = d['keg_initial_liters'] if 'keg_initial_liters' in d else existing['keg_initial_liters']
         conn.execute(
             '''UPDATE beers SET name=?,type=?,abv=?,stock_33cl=?,stock_75cl=?,
                initial_33cl=?,initial_75cl=?,keg_liters=?,keg_initial_liters=?,origin=?,description=?,photo=?,
                brew_date=?,bottling_date=? WHERE id=?''',
-            (d['name'], d.get('type'), d.get('abv'), d.get('stock_33cl', 0),
+            (d.get('name'), d.get('type'), d.get('abv'), d.get('stock_33cl', 0),
              d.get('stock_75cl', 0), init33, init75,
              d.get('keg_liters'), keg_init,
              d.get('origin'), d.get('description'),
@@ -1256,10 +1393,32 @@ def update_beer(beer_id):
         return jsonify(dict(row))
 
 
+@app.route('/api/beers/<int:beer_id>/tasting', methods=['PUT'])
+def update_beer_tasting(beer_id):
+    d = request.json
+    with get_db() as conn:
+        cur = conn.execute(
+            '''UPDATE beers SET
+               taste_appearance=?, taste_aroma=?, taste_flavor=?,
+               taste_bitterness=?, taste_mouthfeel=?, taste_overall=?,
+               taste_rating=?, taste_date=?
+               WHERE id=?''',
+            (d.get('taste_appearance'), d.get('taste_aroma'), d.get('taste_flavor'),
+             d.get('taste_bitterness'), d.get('taste_mouthfeel'), d.get('taste_overall'),
+             d.get('taste_rating'), d.get('taste_date'), beer_id)
+        )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
+        row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
+        return jsonify(dict(row))
+
+
 @app.route('/api/beers/<int:beer_id>', methods=['DELETE'])
 def delete_beer(beer_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM beers WHERE id=?', (beer_id,))
+        cur = conn.execute('DELETE FROM beers WHERE id=?', (beer_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
 
 
@@ -1274,6 +1433,8 @@ def patch_beer_stock(beer_id):
         if 'keg_liters' in d:
             conn.execute('UPDATE beers SET keg_liters=? WHERE id=?', (d['keg_liters'], beer_id))
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify(dict(row))
 
 
@@ -1281,8 +1442,10 @@ def patch_beer_stock(beer_id):
 def patch_beer(beer_id):
     d = request.json
     with get_db() as conn:
-        conn.execute('UPDATE beers SET archived=? WHERE id=?',
-                     (1 if d.get('archived') else 0, beer_id))
+        cur = conn.execute('UPDATE beers SET archived=? WHERE id=?',
+                           (1 if d.get('archived') else 0, beer_id))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
         return jsonify(dict(row))
 
@@ -1313,6 +1476,8 @@ def reorder_soda_kegs():
     items = request.json or []
     with get_db() as conn:
         for item in items:
+            if item.get('id') is None or item.get('sort_order') is None:
+                continue
             conn.execute('UPDATE soda_kegs SET sort_order=? WHERE id=?',
                          (item['sort_order'], item['id']))
     return jsonify({'success': True})
@@ -1320,18 +1485,22 @@ def reorder_soda_kegs():
 
 @app.route('/api/soda-kegs', methods=['POST'])
 def create_soda_keg():
-    d = request.json
+    d = request.json or {}
     with get_db() as conn:
         cur = conn.execute(
             '''INSERT INTO soda_kegs
-               (name, keg_type, volume_total, volume_ferment, weight_empty,
-                status, current_liters, beer_id, brew_id, notes, color, photo)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (d['name'], d.get('keg_type'), d.get('volume_total'),
-             d.get('volume_ferment'), d.get('weight_empty'),
+               (name, keg_type, manufacturer, volume_total, volume_ferment, weight_empty,
+                status, current_liters, beer_id, brew_id, notes, color, photo,
+                last_revision_date, revision_interval_months, next_revision_date)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (d.get('name'), d.get('keg_type'), d.get('manufacturer'),
+             d.get('volume_total'), d.get('volume_ferment'), d.get('weight_empty'),
              d.get('status', 'empty'), d.get('current_liters'),
              d.get('beer_id'), d.get('brew_id'),
-             d.get('notes'), d.get('color', '#f59e0b'), d.get('photo'))
+             d.get('notes'), d.get('color', '#f59e0b'), d.get('photo'),
+             d.get('last_revision_date') or None,
+             d.get('revision_interval_months') or 12,
+             d.get('next_revision_date') or None)
         )
         row = conn.execute(
             _SODA_KEGS_SELECT + ' WHERE k.id=?', (cur.lastrowid,)
@@ -1341,22 +1510,28 @@ def create_soda_keg():
 
 @app.route('/api/soda-kegs/<int:keg_id>', methods=['PUT'])
 def update_soda_keg(keg_id):
-    d = request.json
+    d = request.json or {}
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             '''UPDATE soda_kegs SET
-               name=?, keg_type=?, volume_total=?, volume_ferment=?,
+               name=?, keg_type=?, manufacturer=?, volume_total=?, volume_ferment=?,
                weight_empty=?, status=?, current_liters=?, beer_id=?,
                brew_id=?, notes=?, color=?, photo=?,
+               last_revision_date=?, revision_interval_months=?, next_revision_date=?,
                updated_at=CURRENT_TIMESTAMP
                WHERE id=?''',
-            (d['name'], d.get('keg_type'), d.get('volume_total'),
-             d.get('volume_ferment'), d.get('weight_empty'),
+            (d.get('name'), d.get('keg_type'), d.get('manufacturer'),
+             d.get('volume_total'), d.get('volume_ferment'), d.get('weight_empty'),
              d.get('status', 'empty'), d.get('current_liters'),
              d.get('beer_id'), d.get('brew_id'),
              d.get('notes'), d.get('color', '#f59e0b'), d.get('photo'),
+             d.get('last_revision_date') or None,
+             d.get('revision_interval_months') or 12,
+             d.get('next_revision_date') or None,
              keg_id)
         )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute(
             _SODA_KEGS_SELECT + ' WHERE k.id=?', (keg_id,)
         ).fetchone()
@@ -1366,12 +1541,18 @@ def update_soda_keg(keg_id):
 @app.route('/api/soda-kegs/<int:keg_id>', methods=['DELETE'])
 def delete_soda_keg(keg_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM soda_kegs WHERE id=?', (keg_id,))
+        cur = conn.execute('DELETE FROM soda_kegs WHERE id=?', (keg_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
 
 
 # ── SPINDLES ─────────────────────────────────────────────────────────────────
 
+# Champs autorisés pour PATCH /api/spindles/<id>
+_SPINDLE_PATCH_FIELDS: frozenset[str] = frozenset({'name', 'brew_id', 'notes', 'device_type'})
+
+# Requête single-row : correlated subqueries (utilisée après POST/PATCH, 1 seule ligne)
 _SPINDLE_SELECT = '''
     SELECT s.*,
            b.name as brew_name,
@@ -1383,23 +1564,48 @@ _SPINDLE_SELECT = '''
     FROM spindles s LEFT JOIN brews b ON s.brew_id=b.id
 '''
 
+# Requête list : CTE + window function — une seule passe sur spindle_readings
+_SPINDLE_SELECT_LIST = '''
+    WITH lr AS (
+        SELECT spindle_id, gravity, temperature, battery, recorded_at,
+               ROW_NUMBER() OVER (PARTITION BY spindle_id ORDER BY recorded_at DESC) AS rn
+        FROM rdb.spindle_readings
+    ),
+    rc AS (
+        SELECT spindle_id, COUNT(*) AS reading_count
+        FROM rdb.spindle_readings
+        GROUP BY spindle_id
+    )
+    SELECT s.*,
+           b.name AS brew_name,
+           lr.gravity        AS last_gravity,
+           lr.temperature    AS last_temperature,
+           lr.battery        AS last_battery,
+           lr.recorded_at    AS last_reading_at,
+           COALESCE(rc.reading_count, 0) AS reading_count
+    FROM spindles s
+    LEFT JOIN brews b ON s.brew_id = b.id
+    LEFT JOIN lr ON lr.spindle_id = s.id AND lr.rn = 1
+    LEFT JOIN rc ON rc.spindle_id = s.id
+'''
+
 
 @app.route('/api/spindles', methods=['GET'])
 def get_spindles():
     with get_db() as conn:
-        rows = conn.execute(_SPINDLE_SELECT + ' ORDER BY COALESCE(s.sort_order, 9999) ASC, s.created_at DESC').fetchall()
+        rows = conn.execute(_SPINDLE_SELECT_LIST + ' ORDER BY COALESCE(s.sort_order, 9999) ASC, s.created_at DESC').fetchall()
         return jsonify([dict(r) for r in rows])
 
 
 @app.route('/api/spindles', methods=['POST'])
 def create_spindle():
-    d = request.json
+    d = request.json or {}
     token = secrets.token_urlsafe(16)
     device_type = d.get('device_type', 'ispindel')
     with get_db() as conn:
         cur = conn.execute(
             'INSERT INTO spindles (name,token,brew_id,notes,device_type) VALUES (?,?,?,?,?)',
-            (d['name'], token, d.get('brew_id'), d.get('notes'), device_type)
+            (d.get('name'), token, d.get('brew_id'), d.get('notes'), device_type)
         )
         row = conn.execute(_SPINDLE_SELECT + ' WHERE s.id=?', (cur.lastrowid,)).fetchone()
         return jsonify(dict(row)), 201
@@ -1407,26 +1613,25 @@ def create_spindle():
 
 @app.route('/api/spindles/<int:spindle_id>', methods=['PATCH'])
 def patch_spindle(spindle_id):
-    d = request.json
+    d = request.json or {}
+    # Seuls les champs de la whitelist peuvent mettre à jour la base
+    updates = {col: d[col] for col in _SPINDLE_PATCH_FIELDS if col in d}
     with get_db() as conn:
-        sets, params = [], []
-        for field in ('name', 'brew_id', 'notes', 'device_type'):
-            if field in d:
-                sets.append(f'{field}=?')
-                params.append(d[field])
-        if sets:
-            conn.execute(
-                f'UPDATE spindles SET {", ".join(sets)} WHERE id=?',
-                params + [spindle_id]
-            )
+        if updates:
+            sql = 'UPDATE spindles SET ' + ', '.join(f'{col}=?' for col in updates) + ' WHERE id=?'
+            conn.execute(sql, [*updates.values(), spindle_id])
         row = conn.execute(_SPINDLE_SELECT + ' WHERE s.id=?', (spindle_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify(dict(row))
 
 
 @app.route('/api/spindles/<int:spindle_id>', methods=['DELETE'])
 def delete_spindle(spindle_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM spindles WHERE id=?', (spindle_id,))
+        cur = conn.execute('DELETE FROM spindles WHERE id=?', (spindle_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
     with get_readings_db() as rconn:
         rconn.execute('DELETE FROM spindle_readings WHERE spindle_id=?', (spindle_id,))
     return jsonify({'success': True})
@@ -1437,6 +1642,8 @@ def reorder_spindles():
     items = request.json or []
     with get_db() as conn:
         for item in items:
+            if item.get('id') is None or item.get('sort_order') is None:
+                continue
             conn.execute('UPDATE spindles SET sort_order=? WHERE id=?',
                          (item['sort_order'], item['id']))
     return jsonify({'success': True})
@@ -1484,6 +1691,8 @@ def receive_spindle_data():
     token = request.args.get('token') or d.get('token') or d.get('Token') or ''
     if not token:
         return jsonify({'error': 'token manquant'}), 401
+    if not _sensor_rate_limit(f's:{token}'):
+        return jsonify({'error': 'trop de requêtes'}), 429
 
     with get_db() as conn:
         spindle = conn.execute(
@@ -1497,7 +1706,7 @@ def receive_spindle_data():
 
     def _f(v):
         try: return float(v) if v is not None else None
-        except: return None
+        except (ValueError, TypeError): return None
 
     # ── Gravité ───────────────────────────────────────────────────────────────
     gravity = _f(d.get('gravity') or d.get('Gravity') or d.get('SG') or
@@ -1527,7 +1736,7 @@ def receive_spindle_data():
     # ── RSSI ──────────────────────────────────────────────────────────────────
     rssi_raw = d.get('RSSI') or d.get('rssi') or d.get('signal') or d.get('Signal')
     try: rssi = int(rssi_raw)
-    except: rssi = None
+    except (ValueError, TypeError): rssi = None
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with get_readings_db() as rconn:
@@ -1561,12 +1770,22 @@ def purge_spindle_readings():
         )
         deleted = cur.rowcount
         remaining = conn.execute('SELECT COUNT(*) FROM spindle_readings').fetchone()[0]
-        conn.execute('VACUUM')
+    # VACUUM doit s'exécuter hors transaction (isolation_level=None = autocommit)
+    vac = sqlite3.connect(READINGS_DB_PATH)
+    try:
+        vac.isolation_level = None
+        vac.execute('VACUUM')
+    finally:
+        vac.close()
     return jsonify({'deleted': deleted, 'remaining': remaining})
 
 
 # ── SONDES DE TEMPÉRATURE ──────────────────────────────────────
 
+# Champs autorisés pour PATCH /api/temperature/<id>
+_TEMP_PATCH_FIELDS: frozenset[str] = frozenset({'name', 'notes', 'temp_min', 'temp_max', 'sensor_type', 'ha_entity', 'ha_entity_hum', 'brew_id'})
+
+# Requête single-row : correlated subqueries (utilisée après POST/PATCH, 1 seule ligne)
 _TEMP_SELECT = '''
     SELECT ts.*,
            b.name as brew_name,
@@ -1579,17 +1798,43 @@ _TEMP_SELECT = '''
     FROM temperature_sensors ts LEFT JOIN brews b ON ts.brew_id=b.id
 '''
 
+# Requête list : CTE + window function — une seule passe sur temperature_readings
+_TEMP_SELECT_LIST = '''
+    WITH lr AS (
+        SELECT sensor_id, temperature, humidity, target_temp, hvac_mode, recorded_at,
+               ROW_NUMBER() OVER (PARTITION BY sensor_id ORDER BY recorded_at DESC) AS rn
+        FROM rdb.temperature_readings
+    ),
+    rc AS (
+        SELECT sensor_id, COUNT(*) AS reading_count
+        FROM rdb.temperature_readings
+        GROUP BY sensor_id
+    )
+    SELECT ts.*,
+           b.name AS brew_name,
+           lr.temperature  AS last_temperature,
+           lr.humidity     AS last_humidity,
+           lr.target_temp  AS last_target_temp,
+           lr.hvac_mode    AS last_hvac_mode,
+           lr.recorded_at  AS last_reading_at,
+           COALESCE(rc.reading_count, 0) AS reading_count
+    FROM temperature_sensors ts
+    LEFT JOIN brews b ON ts.brew_id = b.id
+    LEFT JOIN lr ON lr.sensor_id = ts.id AND lr.rn = 1
+    LEFT JOIN rc ON rc.sensor_id = ts.id
+'''
+
 
 @app.route('/api/temperature', methods=['GET'])
 def get_temp_sensors():
     with get_db() as conn:
-        rows = conn.execute(_TEMP_SELECT + ' ORDER BY COALESCE(ts.sort_order,9999) ASC, ts.created_at DESC').fetchall()
+        rows = conn.execute(_TEMP_SELECT_LIST + ' ORDER BY COALESCE(ts.sort_order,9999) ASC, ts.created_at DESC').fetchall()
         return jsonify([dict(r) for r in rows])
 
 
 @app.route('/api/temperature', methods=['POST'])
 def create_temp_sensor():
-    d = request.json
+    d = request.json or {}
     token = secrets.token_urlsafe(16)
     sensor_type = d.get('sensor_type', 'sensor')
     if sensor_type not in ('sensor', 'thermostat'):
@@ -1597,7 +1842,7 @@ def create_temp_sensor():
     with get_db() as conn:
         cur = conn.execute(
             'INSERT INTO temperature_sensors (name,token,notes,temp_min,temp_max,sensor_type,ha_entity,ha_entity_hum) VALUES (?,?,?,?,?,?,?,?)',
-            (d['name'], token, d.get('notes'), d.get('temp_min'), d.get('temp_max'), sensor_type,
+            (d.get('name'), token, d.get('notes'), d.get('temp_min'), d.get('temp_max'), sensor_type,
              d.get('ha_entity') or None, d.get('ha_entity_hum') or None)
         )
         row = conn.execute(_TEMP_SELECT + ' WHERE ts.id=?', (cur.lastrowid,)).fetchone()
@@ -1606,23 +1851,25 @@ def create_temp_sensor():
 
 @app.route('/api/temperature/<int:sensor_id>', methods=['PATCH'])
 def patch_temp_sensor(sensor_id):
-    d = request.json
+    d = request.json or {}
+    # Seuls les champs de la whitelist peuvent mettre à jour la base
+    updates = {col: d[col] for col in _TEMP_PATCH_FIELDS if col in d}
     with get_db() as conn:
-        sets, params = [], []
-        for field in ('name', 'notes', 'temp_min', 'temp_max', 'sensor_type', 'ha_entity', 'ha_entity_hum', 'brew_id'):
-            if field in d:
-                sets.append(f'{field}=?')
-                params.append(d[field])
-        if sets:
-            conn.execute(f'UPDATE temperature_sensors SET {", ".join(sets)} WHERE id=?', params + [sensor_id])
+        if updates:
+            sql = 'UPDATE temperature_sensors SET ' + ', '.join(f'{col}=?' for col in updates) + ' WHERE id=?'
+            conn.execute(sql, [*updates.values(), sensor_id])
         row = conn.execute(_TEMP_SELECT + ' WHERE ts.id=?', (sensor_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify(dict(row))
 
 
 @app.route('/api/temperature/<int:sensor_id>', methods=['DELETE'])
 def delete_temp_sensor(sensor_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM temperature_sensors WHERE id=?', (sensor_id,))
+        cur = conn.execute('DELETE FROM temperature_sensors WHERE id=?', (sensor_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
     with get_readings_db() as rconn:
         rconn.execute('DELETE FROM temperature_readings WHERE sensor_id=?', (sensor_id,))
     return jsonify({'success': True})
@@ -1633,6 +1880,8 @@ def reorder_temp_sensors():
     items = request.json or []
     with get_db() as conn:
         for item in items:
+            if item.get('id') is None or item.get('sort_order') is None:
+                continue
             conn.execute('UPDATE temperature_sensors SET sort_order=? WHERE id=?',
                          (item['sort_order'], item['id']))
     return jsonify({'success': True})
@@ -1648,6 +1897,8 @@ def receive_temp_data():
     token = request.args.get('token') or d.get('token') or d.get('Token') or ''
     if not token:
         return jsonify({'error': 'token manquant'}), 401
+    if not _sensor_rate_limit(f't:{token}'):
+        return jsonify({'error': 'trop de requêtes'}), 429
 
     with get_db() as conn:
         sensor = conn.execute('SELECT id FROM temperature_sensors WHERE token=?', (token,)).fetchone()
@@ -1657,7 +1908,7 @@ def receive_temp_data():
 
     def _f(v):
         try: return float(v) if v is not None else None
-        except: return None
+        except (ValueError, TypeError): return None
 
     temperature = _f(d.get('temperature') or d.get('Temperature') or
                      d.get('temp') or d.get('value'))
@@ -1856,8 +2107,8 @@ def import_inventory():
                      item.get('origin'), item.get('ebc'), item.get('alpha'), item.get('notes'))
                 )
                 imported += 1
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.warning(f"import_inventory: skipped item {item.get('name')!r}: {e}")
     return jsonify({'imported': imported})
 
 
@@ -1865,12 +2116,17 @@ def import_inventory():
 def export_recipes():
     with get_db() as conn:
         recipes = conn.execute('SELECT * FROM recipes ORDER BY id').fetchall()
-        result = []
-        for r in recipes:
-            recipe = dict(r)
-            ings = conn.execute('SELECT * FROM recipe_ingredients WHERE recipe_id=?', (r['id'],)).fetchall()
-            recipe['ingredients'] = [dict(i) for i in ings]
-            result.append(recipe)
+        ings_rows = conn.execute(
+            'SELECT * FROM recipe_ingredients ORDER BY recipe_id, id'
+        ).fetchall()
+    ings_by_recipe: dict = {}
+    for i in ings_rows:
+        ings_by_recipe.setdefault(i['recipe_id'], []).append(dict(i))
+    result = []
+    for r in recipes:
+        recipe = dict(r)
+        recipe['ingredients'] = ings_by_recipe.get(r['id'], [])
+        result.append(recipe)
     return jsonify(result)
 
 
@@ -1882,15 +2138,18 @@ def export_brews():
                FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id
                ORDER BY b.created_at DESC'''
         ).fetchall()
-        result = []
-        for b in brews:
-            brew = dict(b)
-            ferm = conn.execute(
-                'SELECT * FROM brew_fermentation_readings WHERE brew_id=? ORDER BY recorded_at',
-                (b['id'],)
-            ).fetchall()
-            brew['fermentation'] = [dict(f) for f in ferm]
-            result.append(brew)
+        # Charger toutes les lectures de fermentation en une seule requête
+        ferm_rows = conn.execute(
+            'SELECT * FROM brew_fermentation_readings ORDER BY brew_id, recorded_at'
+        ).fetchall()
+    ferm_by_brew: dict = {}
+    for f in ferm_rows:
+        ferm_by_brew.setdefault(f['brew_id'], []).append(dict(f))
+    result = []
+    for b in brews:
+        brew = dict(b)
+        brew['fermentation'] = ferm_by_brew.get(b['id'], [])
+        result.append(brew)
     return jsonify(result)
 
 
@@ -1904,17 +2163,20 @@ def export_beers():
 @app.route('/api/export/spindles')
 def export_spindles():
     with get_db() as conn:
-        spindles = conn.execute(_SPINDLE_SELECT + ' ORDER BY COALESCE(s.sort_order, 9999) ASC, s.created_at DESC').fetchall()
-        result = []
-        for s in spindles:
-            sp = dict(s)
-            with get_readings_db() as rconn:
-                readings = rconn.execute(
-                    'SELECT * FROM spindle_readings WHERE spindle_id=? ORDER BY recorded_at',
-                    (s['id'],)
-                ).fetchall()
-            sp['readings'] = [dict(r) for r in readings]
-            result.append(sp)
+        spindles = conn.execute(_SPINDLE_SELECT_LIST + ' ORDER BY COALESCE(s.sort_order, 9999) ASC, s.created_at DESC').fetchall()
+    # Charger toutes les lectures en une seule requête hors de la connexion principale
+    with get_readings_db() as rconn:
+        all_readings = rconn.execute(
+            'SELECT * FROM spindle_readings ORDER BY spindle_id, recorded_at'
+        ).fetchall()
+    readings_by_spindle: dict = {}
+    for r in all_readings:
+        readings_by_spindle.setdefault(r['spindle_id'], []).append(dict(r))
+    result = []
+    for s in spindles:
+        sp = dict(s)
+        sp['readings'] = readings_by_spindle.get(s['id'], [])
+        result.append(sp)
     return jsonify(result)
 
 
@@ -1943,8 +2205,8 @@ def import_beers():
                      beer.get('brew_date'), beer.get('bottling_date'))
                 )
                 imported += 1
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.warning(f"import_beers: skipped beer {beer.get('name')!r}: {e}")
     return jsonify({'imported': imported})
 
 
@@ -1996,8 +2258,8 @@ def import_brews():
                          reading.get('temperature'), reading.get('battery'), reading.get('angle'))
                     )
                 imported += 1
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.warning(f"import_brews: skipped brew {brew.get('name')!r}: {e}")
     return jsonify({'imported': imported})
 
 
@@ -2029,8 +2291,8 @@ def import_spindles():
                              reading.get('recorded_at'))
                         )
                 imported += 1
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.warning(f"import_spindles: skipped spindle {spindle.get('name')!r}: {e}")
     return jsonify({'imported': imported})
 
 
@@ -2072,8 +2334,8 @@ def import_recipes():
                          ing.get('ebc'), ing.get('alpha'), ing.get('notes'))
                     )
                 imported += 1
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.warning(f"import_recipes: skipped recipe {recipe.get('name')!r}: {e}")
     return jsonify({'imported': imported})
 
 
@@ -2272,15 +2534,15 @@ def get_stats():
         def scalar(sql):
             return conn.execute(sql).fetchone()[0]
         return jsonify({
-            'inventory_count': scalar('SELECT COUNT(*) FROM inventory_items'),
-            'recipes_count':   scalar('SELECT COUNT(*) FROM recipes'),
-            'brews_count':     scalar('SELECT COUNT(*) FROM brews'),
-            'beers_count':     scalar('SELECT COUNT(*) FROM beers'),
-            'kegs_count':      scalar('SELECT COUNT(*) FROM soda_kegs'),
-            'total_33cl':      scalar('SELECT COALESCE(SUM(stock_33cl),0) FROM beers'),
-            'total_75cl':      scalar('SELECT COALESCE(SUM(stock_75cl),0) FROM beers'),
+            'inventory_count': scalar('SELECT COUNT(*) FROM inventory_items WHERE archived=0'),
+            'recipes_count':   scalar('SELECT COUNT(*) FROM recipes   WHERE archived=0'),
+            'brews_count':     scalar('SELECT COUNT(*) FROM brews      WHERE archived=0'),
+            'beers_count':     scalar('SELECT COUNT(*) FROM beers      WHERE archived=0'),
+            'kegs_count':      scalar('SELECT COUNT(*) FROM soda_kegs  WHERE archived=0'),
+            'total_33cl':      scalar('SELECT COALESCE(SUM(stock_33cl),0) FROM beers WHERE archived=0'),
+            'total_75cl':      scalar('SELECT COALESCE(SUM(stock_75cl),0) FROM beers WHERE archived=0'),
             'total_liters':    scalar(
-                'SELECT COALESCE(SUM(stock_33cl*0.33 + stock_75cl*0.75),0) FROM beers'
+                'SELECT COALESCE(SUM(stock_33cl*0.33 + stock_75cl*0.75),0) FROM beers WHERE archived=0'
             ),
         })
 
@@ -2295,14 +2557,15 @@ def _tg_get_settings():
                 "SELECT key, value FROM app_settings "
                 "WHERE key IN ('telegram_token','telegram_chat_id','telegram_notifs','telegram_tz')"
             ).fetchall()
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"_tg_get_settings: DB error: {e}")
         return None, None, {}, 'UTC'
     s = {r['key']: r['value'] for r in rows}
     notifs = {}
     try:
         notifs = json.loads(s.get('telegram_notifs') or '{}')
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning(f"_tg_get_settings: invalid telegram_notifs JSON: {e}")
     return s.get('telegram_token'), s.get('telegram_chat_id'), notifs, s.get('telegram_tz', 'UTC')
 
 
@@ -2373,8 +2636,8 @@ def _tg_build_brews():
                 else:
                     age = f"{mins // 1440} j"
                 age = f" <i>({age})</i>"
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.debug(f"_tg_brews_msg: could not compute reading age: {e}")
             line += f"\n  📡 Densité : <b>{grav_str}</b>  |  🌡 Temp : <b>{temp_str}</b>{age}"
         lines.append(line)
     return "\n".join(lines)
@@ -2578,7 +2841,8 @@ def _tg_brewing_events_fire():
         return
     try:
         cfg = json.loads(row['value'])
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"_tg_brewing_events_fire: invalid tg_brewing_events JSON: {e}")
         return
     if not cfg.get('enabled'):
         return
@@ -2613,7 +2877,8 @@ def _tg_brewing_events_fire():
     for ev in custom_evs:
         try:
             ev_date = date.fromisoformat(ev['event_date'])
-        except Exception:
+        except Exception as e:
+            app.logger.warning(f"_tg_brewing_events_fire: invalid event_date {ev.get('event_date')!r}: {e}")
             continue
         emoji = ev['emoji'] or '📅'
         label = ev['title']
@@ -2660,14 +2925,15 @@ def reschedule_telegram():
     for jid in ('tg_brews', 'tg_cave', 'tg_inventory', 'tg_brew_events'):
         try:
             _scheduler.remove_job(jid)
-        except Exception:
-            pass
+        except Exception as e:
+            pass  # job absent = pas encore planifié
     if not token or not chat_id:
         return
     try:
         from zoneinfo import ZoneInfo   # Python 3.9+
         tz = ZoneInfo(tz_str or 'UTC')
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"reschedule_telegram: invalid timezone {tz_str!r}, falling back to UTC: {e}")
         import datetime as _dt
         tz = _dt.timezone.utc
 
@@ -2692,7 +2958,8 @@ def reschedule_telegram():
         with get_db() as conn:
             row = conn.execute("SELECT value FROM app_settings WHERE key='tg_brewing_events'").fetchone()
         ev_cfg = json.loads(row['value']) if row else {}
-    except Exception:
+    except Exception as e:
+        app.logger.warning(f"reschedule_telegram: invalid tg_brewing_events JSON: {e}")
         ev_cfg = {}
     if ev_cfg.get('enabled') and (ev_cfg.get('remind') or ev_cfg.get('event_day')):
         h = int(ev_cfg.get('hour', 8))
@@ -2744,7 +3011,8 @@ def _read_version_from_file(path):
         import re
         m = re.search(r'v?(\d+\.\d+\.\d+)', head)
         return m.group(1) if m else None
-    except Exception:
+    except Exception as e:
+        app.logger.debug(f"_read_version_from_file({path}): {e}")
         return None
 
 def _npm_latest(package):
@@ -2787,7 +3055,8 @@ def static_check_updates():
             'current': datetime.fromtimestamp(st.st_mtime).strftime('%Y-%m-%d'),
             'size': st.st_size,
         }
-    except Exception:
+    except Exception as e:
+        app.logger.debug(f"check_static_updates: cannot stat google fonts: {e}")
         result['googlefonts'] = {'current': None, 'size': 0}
     return jsonify(result)
 
@@ -2819,8 +3088,8 @@ def update_fontawesome():
                    'fa-solid-900.woff2', 'fa-v4compatibility.woff2'):
             try:
                 _download(f'{base}/webfonts/{wf}', os.path.join(wf_dir, wf))
-            except Exception:
-                pass  # certains fichiers optionnels peuvent manquer selon la version
+            except Exception as e:
+                app.logger.debug(f"update_static_lib: optional webfont {wf} unavailable: {e}")
         return jsonify({'version': version})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2954,8 +3223,8 @@ def reschedule_github_backup():
     """Recharge la config depuis la DB et re-planifie le job de backup GitHub."""
     try:
         _scheduler.remove_job('gh_backup')
-    except Exception:
-        pass
+    except Exception as e:
+        pass  # job absent = pas encore planifié
     with get_db() as conn:
         rows = conn.execute("SELECT key, value FROM app_settings WHERE key LIKE 'gh_data_backup_%'").fetchall()
     cfg = {r['key']: r['value'] for r in rows}
@@ -2977,11 +3246,21 @@ def reschedule_github_backup():
 
 # ── APP SETTINGS (apparence) ─────────────────────────────────────────────────
 
+# Clés dont la valeur ne doit jamais être renvoyée au frontend
+_SECRET_KEYS = frozenset({'ai_api_key'})
+
 @app.route('/api/app-settings', methods=['GET'])
 def get_app_settings():
     with get_db() as conn:
         rows = conn.execute('SELECT key, value FROM app_settings').fetchall()
-    return jsonify({r['key']: r['value'] for r in rows})
+    result = {}
+    for r in rows:
+        if r['key'] in _SECRET_KEYS:
+            # Indique si la clé est définie sans révéler sa valeur
+            result[r['key']] = '***' if r['value'] else ''
+        else:
+            result[r['key']] = r['value']
+    return jsonify(result)
 
 
 @app.route('/api/app-settings', methods=['PUT'])
@@ -2989,7 +3268,10 @@ def save_app_settings():
     data = request.json or {}
     with get_db() as conn:
         for key, value in data.items():
-            if value is None:
+            # Ne jamais écraser une clé secrète avec le placeholder masqué
+            if key in _SECRET_KEYS and value == '***':
+                continue
+            if value is None or value == '':
                 conn.execute('DELETE FROM app_settings WHERE key=?', (key,))
             else:
                 conn.execute(
@@ -3026,8 +3308,8 @@ def create_custom_event():
         cur = conn.execute(
             '''INSERT INTO custom_calendar_events
                (title, emoji, event_date, color, notes, brew_reminder, telegram_notify,
-                style, recipe_id, draft_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                style, recipe_id, draft_id, recurrence, brew_reminder_days)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (
                 data.get('title', 'Événement'),
                 data.get('emoji', '📅'),
@@ -3039,6 +3321,8 @@ def create_custom_event():
                 data.get('style') or None,
                 data.get('recipe_id') or None,
                 data.get('draft_id') or None,
+                data.get('recurrence') or None,
+                int(data['brew_reminder_days']) if data.get('brew_reminder_days') is not None else None,
             )
         )
         row = conn.execute('SELECT * FROM custom_calendar_events WHERE id=?', (cur.lastrowid,)).fetchone()
@@ -3049,10 +3333,10 @@ def create_custom_event():
 def update_custom_event(event_id):
     data = request.json or {}
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             '''UPDATE custom_calendar_events
                SET title=?, emoji=?, event_date=?, color=?, notes=?, brew_reminder=?, telegram_notify=?,
-                   style=?, recipe_id=?, draft_id=?
+                   style=?, recipe_id=?, draft_id=?, recurrence=?, brew_reminder_days=?
                WHERE id=?''',
             (
                 data.get('title', 'Événement'),
@@ -3065,19 +3349,23 @@ def update_custom_event(event_id):
                 data.get('style') or None,
                 data.get('recipe_id') or None,
                 data.get('draft_id') or None,
+                data.get('recurrence') or None,
+                int(data['brew_reminder_days']) if data.get('brew_reminder_days') is not None else None,
                 event_id,
             )
         )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute('SELECT * FROM custom_calendar_events WHERE id=?', (event_id,)).fetchone()
-    if not row:
-        return jsonify({'error': 'Not found'}), 404
     return jsonify(dict(row))
 
 
 @app.route('/api/custom_events/<int:event_id>', methods=['DELETE'])
 def delete_custom_event(event_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM custom_calendar_events WHERE id=?', (event_id,))
+        cur = conn.execute('DELETE FROM custom_calendar_events WHERE id=?', (event_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
     return jsonify({'success': True})
 
 
@@ -3085,11 +3373,23 @@ def delete_custom_event(event_id):
 
 @app.route('/api/drafts', methods=['GET'])
 def get_drafts():
+    # Exclut 'image' (base64) pour que la liste reste légère ; charger via GET /api/drafts/<id>
     with get_db() as conn:
         rows = conn.execute(
-            'SELECT * FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC'
+            '''SELECT id, title, style, volume, ingredients, notes, color,
+                      target_date, event_label, sort_order, created_at, updated_at
+               FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC'''
         ).fetchall()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/drafts/<int:draft_id>', methods=['GET'])
+def get_draft(draft_id):
+    with get_db() as conn:
+        row = conn.execute('SELECT * FROM draft_recipes WHERE id=?', (draft_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify(dict(row))
 
 
 @app.route('/api/drafts/reorder', methods=['PUT'])
@@ -3097,6 +3397,8 @@ def reorder_drafts():
     items = request.json or []
     with get_db() as conn:
         for item in items:
+            if item.get('id') is None or item.get('sort_order') is None:
+                continue
             conn.execute('UPDATE draft_recipes SET sort_order=? WHERE id=?',
                          (item['sort_order'], item['id']))
     return jsonify({'success': True})
@@ -3105,6 +3407,9 @@ def reorder_drafts():
 @app.route('/api/drafts', methods=['POST'])
 def create_draft():
     data = request.json or {}
+    if _image_too_large(data.get('image')):
+        shrunk = _shrink_image_b64(data['image'])
+        data['image'] = shrunk if not _image_too_large(shrunk) else None
     with get_db() as conn:
         cur = conn.execute(
             '''INSERT INTO draft_recipes (title, style, volume, ingredients, notes, color, target_date, event_label, image)
@@ -3128,8 +3433,11 @@ def create_draft():
 @app.route('/api/drafts/<int:draft_id>', methods=['PUT'])
 def update_draft(draft_id):
     data = request.json or {}
+    if _image_too_large(data.get('image')):
+        shrunk = _shrink_image_b64(data['image'])
+        data['image'] = shrunk if not _image_too_large(shrunk) else None
     with get_db() as conn:
-        conn.execute(
+        cur = conn.execute(
             '''UPDATE draft_recipes
                SET title=?, style=?, volume=?, ingredients=?, notes=?, color=?,
                    target_date=?, event_label=?, image=?, updated_at=CURRENT_TIMESTAMP
@@ -3147,16 +3455,18 @@ def update_draft(draft_id):
                 draft_id,
             )
         )
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         row = conn.execute('SELECT * FROM draft_recipes WHERE id=?', (draft_id,)).fetchone()
-    if not row:
-        return jsonify({'error': 'Not found'}), 404
     return jsonify(dict(row))
 
 
 @app.route('/api/drafts/<int:draft_id>', methods=['DELETE'])
 def delete_draft(draft_id):
     with get_db() as conn:
-        conn.execute('DELETE FROM draft_recipes WHERE id=?', (draft_id,))
+        cur = conn.execute('DELETE FROM draft_recipes WHERE id=?', (draft_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
     return jsonify({'success': True})
 
 
@@ -3207,12 +3517,15 @@ Règles :
 - Adapte les quantités pour exactement {volume} litres
 - Inclus tous les malts, houblons (palier amertume + arôme), et la levure"""
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={api_key}"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"responseMimeType": "application/json"}
     }).encode('utf-8')
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(url, data=payload,
+                                 headers={"Content-Type": "application/json",
+                                          "x-goog-api-key": api_key},
+                                 method="POST")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode('utf-8'))
@@ -3230,7 +3543,7 @@ Règles :
         app.logger.warning(f"Gemini HTTPError {e.code}: {body[:400]}")
         try:
             err_msg = json.loads(body).get('error', {}).get('message', body)
-        except Exception:
+        except Exception as e:
             err_msg = body[:300]
         return jsonify({'error': f"Gemini {e.code} : {err_msg}"}), 502
     except urllib.error.URLError as e:
@@ -3269,11 +3582,12 @@ def import_drafts():
                     (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
                      d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
                      d.get('target_date'), d.get('event_label'),
-                     d.get('sort_order', 0), d.get('image'))
+                     d.get('sort_order', 0),
+                     _shrink_image_b64(d['image']) if _image_too_large(d.get('image')) else d.get('image'))
                 )
                 imported += 1
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.warning(f"import_drafts: skipped draft {d.get('title')!r}: {e}")
     return jsonify({'imported': imported})
 
 
@@ -3308,9 +3622,17 @@ def import_calendar():
                      ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'))
                 )
                 imported += 1
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.warning(f"import_calendar: skipped event {ev.get('title')!r}: {e}")
     return jsonify({'imported': imported})
+
+
+# ── GLOBAL ERROR HANDLER ─────────────────────────────────────────────────────
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    app.logger.exception(f"Unhandled exception: {e}")
+    return jsonify({'error': 'Internal server error'}), 500
 
 
 # ── MAIN ─────────────────────────────────────────────────────────────────────

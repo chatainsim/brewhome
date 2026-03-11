@@ -58,9 +58,12 @@ Hébergée localement (sur un Raspberry Pi, NAS, PC ou serveur Linux), accessibl
 Inventaire et suivi de vos **soda kegs** (Corny Keg / Cornelius keg) pour la fermentation sous pression et le service en pression :
 
 - Types pré-configurés : **Corny Keg / Soda Keg 19 L** et **Corny Keg 6 L** — type libre personnalisable
-- Caractéristiques par keg : volume total, volume de fermentation (suggestion automatique à 80%), poids à vide, couleur, photo
+- Caractéristiques par keg : volume total, volume de fermentation (suggestion automatique à 80%), poids à vide, fabricant, couleur, photo
 - **Suivi du statut** : Vide · En fermentation · En service · Nettoyage
 - Barre de progression du volume avec code couleur (vert → orange → rouge selon le niveau)
+- **Suivi des révisions** : saisissez la date de dernière révision et l'intervalle (6 mois / 1 an / 2 ans ou valeur libre) — la prochaine révision est calculée automatiquement et affichée sur la fiche avec alerte si dépassée ou imminente
+- **Fiche détail** : cliquez sur une carte keg pour ouvrir la fiche complète (photo ou icône colorée, badges statut/type/fabricant, barre de volume, specs, bière/brassin associé, révision, notes)
+- **Débit rapide** : modal de saisie du volume débité directement depuis la fiche détail ou la carte
 - **Association bidirectionnelle** :
   - Depuis la page **Kegs** : modal de statut pour lier un brassin (fermentation) ou une bière cave (service)
   - Depuis la page **Brassins** : bouton 🫙 sur chaque carte pour associer/dissocier un keg directement
@@ -82,9 +85,12 @@ Espace de notes rapides pour vos idées de recettes, séparé du flux de créati
 ### Calendrier
 Vue mensuelle de toutes les activités de brassage :
 - **Événements automatiques** : brassins (date de brassage), fermentations, embouteillages — affichés directement depuis les données
+- **Événements brassicoles mondiaux** : IPA Day, St. Patrick's Day, Oktoberfest, Learn to Homebrew Day, etc. — générés automatiquement chaque année (dates fixes ou Nième jour calculé dynamiquement)
 - **Événements personnalisés** : titre, emoji, date, couleur, notes, notification Telegram le jour J
+- **Récurrence** sur les événements personnalisés : *Aucune (ponctuel)*, *Annuelle — même date*, *Annuelle — Nième jour de la semaine* (ex : "1er samedi de novembre")
 - **Association** : un événement peut être lié à un style BJCP, une recette ou un brouillon
-- **Rappel J-45** : affiche un rappel dans le calendrier 45 jours avant l'événement (avec notification Telegram optionnelle)
+- **Rappel de brassage configurable** : affiche un rappel dans le calendrier X jours avant l'événement (configurable par événement — le délai par événement prend le dessus sur le délai global)
+- Notification Telegram optionnelle sur le rappel et le jour J
 - Brouillons associés à un événement : affichés dans le calendrier avec leur compte à rebours
 - Navigation mois par mois, bouton "Aujourd'hui"
 
@@ -147,13 +153,22 @@ Définissez les seuils d'alerte (affichage orange) par catégorie :
 ### Import / Export
 Export et import au format JSON pour chaque module :
 - Inventaire, recettes, cave, brassins, densimètres, **brouillons**, **calendrier**
-- **Paramètres avancés** (eau, énergie, seuils, apparence) — les tokens GitHub et les clés IA sont exclus de l'export (mais conservés en base de données)
+- **Paramètres avancés** (eau, énergie, seuils, apparence) — les tokens GitHub, le token Telegram et les clés IA sont exclus de l'export pour ne pas les diffuser accidentellement (conservés en base de données)
+
+### Langue
+Basculez entre **Français** et **English** depuis **Paramètres avancés → Langue** — l'intégralité de l'interface est traduite (navigation, modaux, labels, messages, graphiques).
 
 ### Apparence
 - Thème clair / sombre (bascule en nav)
 - **Nom de l'application** personnalisable (affiché dans la nav, les étiquettes, la vitrine)
 - **Logo** personnalisable (clic pour agrandissement)
 - **Couleur d'accent** (amber par défaut)
+
+### Calendrier — Paramètres avancés
+Depuis **Paramètres avancés → Calendrier** :
+- **Délai de rappel de brassage par défaut** : nombre de jours avant l'événement pour afficher le rappel (défaut : 45 j.). S'applique à tous les événements (automatiques et personnalisés) sauf si un délai spécifique est défini sur l'événement
+- **Événements brassicoles automatiques** : activez/désactivez individuellement chaque événement mondial ; personnalisez le nom, l'emoji, la couleur, la date et la description ; la récurrence calculée est affichée lors de l'édition
+- **Événements personnalisés** : liste et gestion des événements personnalisés
 
 ### Notifications Telegram
 Recevez des résumés automatiques directement dans Telegram — configurables depuis **Paramètres avancés → Notifications** :
@@ -168,7 +183,7 @@ Recevez des résumés automatiques directement dans Telegram — configurables d
 - Fuseau horaire configurable (chaîne IANA, ex : `Europe/Paris`)
 - Bouton **Envoyer maintenant** pour chaque notification
 - Bouton **Tester la connexion** pour valider le bot avant activation
-- Notifications Telegram sur les événements calendrier personnalisés (jour J et rappel J-45)
+- Notifications Telegram sur les événements calendrier personnalisés (jour J et rappel configurable)
 
 ### Intelligence artificielle (IA)
 Génération d'images et suggestion de recettes via IA externe — configurables depuis **Paramètres avancés → IA** :

@@ -12,8 +12,12 @@
   <div id="recipe-layout" class="recipe-list-only">
     <!-- Liste -->
     <div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div class="section-label" style="margin:0" data-i18n="rec.saved">Recettes sauvegardées</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+        <div class="section-label" style="margin:0;flex:1" data-i18n="rec.saved">Recettes sauvegardées</div>
+        <div style="position:relative;display:inline-flex;align-items:center">
+          <input type="text" id="rec-search" placeholder="🔍" style="width:140px;padding-right:22px" oninput="renderRecipeList();document.getElementById('rec-search-clear').style.display=this.value?'flex':'none'">
+          <button id="rec-search-clear" onclick="document.getElementById('rec-search').value='';renderRecipeList();this.style.display='none'" style="display:none;position:absolute;right:5px;background:none;border:none;cursor:pointer;color:var(--muted);font-size:.8rem;padding:0;line-height:1;align-items:center" title="Vider">✕</button>
+        </div>
         <select id="rec-sort-select" onchange="recSort=this.value;renderRecipeList()" style="font-size:.78rem;padding:3px 8px;border-radius:6px;background:var(--card);border:1px solid var(--border);color:var(--text);cursor:pointer">
           <option value="recent" data-i18n="rec.sort_recent">↕ Récent</option>
           <option value="name" data-i18n="rec.sort_name">↕ Nom A→Z</option>
