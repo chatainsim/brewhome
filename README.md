@@ -1,5 +1,7 @@
 # BrewHome
 
+## Attention, cette application a été faite entièrement avec Claude Code, support minimal. Il s'agit plus d'un projet fun qu'autre chose.
+
 Application web de gestion pour brasseurs amateurs.
 Hébergée localement (sur un Raspberry Pi, NAS, PC ou serveur Linux), accessible depuis n'importe quel appareil de votre réseau.
 
@@ -282,3 +284,4 @@ http://<IP-du-serveur>:5000
 ## Licence
 
 Usage personnel, pas de licence explicite définie.
+
