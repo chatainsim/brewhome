@@ -18,7 +18,7 @@ app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 DB_PATH          = os.path.join(os.path.dirname(__file__), 'brewhome.db')
 READINGS_DB_PATH = os.path.join(os.path.dirname(__file__), 'brewhome_readings.db')
-APP_VERSION      = "0.0.5"
+APP_VERSION      = "0.0.6"
 
 # ── Limite taille image base64 ───────────────────────────────────────────────
 # 2 Mo de données brutes ≈ 2,7 Mo en base64 ; on bloque à 3 Mo de chaîne base64
