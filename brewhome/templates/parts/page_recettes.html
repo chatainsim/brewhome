@@ -235,6 +235,121 @@
   </div>
 </div>
 
+<!-- MODAL VÉRIFICATION STOCK RECETTE -->
+<div class="modal-overlay" id="modal-stock-check" onclick="if(event.target===this)closeModal('modal-stock-check')">
+  <div class="modal" style="max-width:540px;width:94vw">
+    <div class="modal-head">
+      <h3><i class="fas fa-boxes-stacked" style="color:var(--info)"></i> <span id="stock-check-title"></span></h3>
+      <button class="modal-close" onclick="closeModal('modal-stock-check')">✕</button>
+    </div>
+    <div class="modal-body" id="stock-check-body" style="padding:16px 20px;max-height:70vh;overflow-y:auto"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('modal-stock-check')" data-i18n="common.close">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CALCULATEUR DE PRIMAGE -->
+<div class="modal-overlay" id="modal-priming" onclick="if(event.target===this)closeModal('modal-priming')">
+  <div class="modal" style="max-width:480px;width:96vw">
+    <div class="modal-head">
+      <h3><i class="fas fa-flask" style="color:var(--info)"></i> <span data-i18n="rec.priming_title">Calculateur de primage</span></h3>
+      <button class="modal-close" onclick="closeModal('modal-priming')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px">
+
+      <!-- Style preset -->
+      <div class="field" style="margin-bottom:10px">
+        <label data-i18n="rec.priming_style">Style de référence</label>
+        <select id="priming-style" onchange="primingStylePreset()" style="width:100%">
+          <option value="" data-i18n="rec.priming_style_none">— Choisir un style —</option>
+          <option value="1.7">Ales britanniques (1.5–2.0) → 1.7</option>
+          <option value="2.5">Ales américaines / IPA (2.2–2.8) → 2.5</option>
+          <option value="1.8">Stout / Porter (1.5–2.1) → 1.8</option>
+          <option value="3.5">Weizen / Hefeweizen (3.3–4.5) → 3.5</option>
+          <option value="3.2">Belges (Tripel, Saison) (2.8–3.8) → 3.2</option>
+          <option value="2.5">Lager / Pilsner (2.3–2.7) → 2.5</option>
+          <option value="3.0">Sour / Lambic (3.0–4.0) → 3.0</option>
+          <option value="3.0">Cider (2.5–4.0) → 3.0</option>
+        </select>
+      </div>
+
+      <!-- Inputs -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="field">
+          <label data-i18n="rec.priming_vol">Volume (L)</label>
+          <input type="number" id="priming-vol" value="20" min="1" max="200" step="0.5" oninput="calcPriming()">
+        </div>
+        <div class="field">
+          <label data-i18n="rec.priming_temp">Temp. (°C)</label>
+          <input type="number" id="priming-temp" value="20" min="0" max="35" step="0.5" oninput="calcPriming()">
+        </div>
+        <div class="field">
+          <label data-i18n="rec.priming_target">CO₂ cible</label>
+          <input type="number" id="priming-co2" value="2.5" min="0.5" max="5.0" step="0.1" oninput="calcPriming();document.getElementById('priming-style').value=''">
+        </div>
+      </div>
+
+      <!-- Sugar type -->
+      <div class="field" style="margin-bottom:16px">
+        <label data-i18n="rec.priming_sugar">Type de sucre</label>
+        <select id="priming-sugar" onchange="calcPriming()" style="width:100%">
+          <option value="3.97" data-i18n="rec.priming_sugar_sucrose">Sucrose (sucre de table)</option>
+          <option value="4.21" data-i18n="rec.priming_sugar_dextrose">Dextrose anhydre</option>
+          <option value="4.64" selected data-i18n="rec.priming_sugar_dextrose_h">Dextrose monohydraté (corn sugar)</option>
+          <option value="6.14" data-i18n="rec.priming_sugar_dme">Extrait de malt sec (DME)</option>
+          <option value="8.57" data-i18n="rec.priming_sugar_honey">Miel</option>
+        </select>
+      </div>
+
+      <!-- Result -->
+      <div id="priming-result-block"></div>
+
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('modal-priming')" data-i18n="common.close">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL GUIDE DE BRASSAGE INTERACTIF -->
+<div class="modal-overlay" id="modal-brew-guide" onclick="if(event.target===this)_bgClose()">
+  <div class="modal" style="max-width:700px;width:96vw;max-height:94vh;display:flex;flex-direction:column;padding:0">
+    <div class="modal-head" style="flex-shrink:0">
+      <h3 id="bg-title" style="font-size:1rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></h3>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="_bgFsOpen()" title="Plein écran" style="margin-right:4px"><i class="fas fa-expand"></i></button>
+      <button class="modal-close" onclick="_bgClose()">✕</button>
+    </div>
+    <!-- Step progress -->
+    <div id="bg-steps-bar" style="padding:14px 20px 10px;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0"></div>
+    <!-- Step content -->
+    <div id="bg-content" style="flex:1;overflow-y:auto;padding:20px"></div>
+    <!-- Footer nav -->
+    <div class="modal-foot" id="bg-footer" style="flex-shrink:0"></div>
+  </div>
+</div>
+
+<!-- ══ GUIDE BRASSAGE — MODE PLEIN ÉCRAN ════════════════════════════════════ -->
+<div id="brew-fs" style="display:none;position:fixed;inset:0;background:#0a0a12;z-index:10000;flex-direction:column;color:#fff;overflow:hidden;font-family:inherit">
+  <!-- Header compact -->
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:clamp(8px,1.5vh,18px) clamp(14px,3vw,32px);flex-shrink:0;border-bottom:1px solid #ffffff12">
+    <div style="min-width:0">
+      <div id="bfs-recipe" style="font-size:clamp(.85rem,2vw,1.3rem);font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      <div id="bfs-step"   style="font-size:clamp(.7rem,1.5vw,.95rem);color:#666;margin-top:2px"></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-shrink:0;margin-left:16px">
+      <div id="bfs-stepnum" style="font-size:clamp(.7rem,1.5vw,.9rem);color:#444;font-variant-numeric:tabular-nums"></div>
+      <button onclick="_bgFsClose()" style="background:#ffffff14;border:1px solid #ffffff22;border-radius:8px;color:#888;padding:8px 14px;cursor:pointer;font-size:clamp(.85rem,1.8vw,1.1rem);display:flex;align-items:center;gap:6px">
+        <i class="fas fa-compress"></i>
+      </button>
+    </div>
+  </div>
+  <!-- Main area -->
+  <div id="bfs-center" style="flex:1;overflow-y:auto;padding:clamp(12px,2.5vh,32px) clamp(14px,3vw,48px)"></div>
+  <!-- Footer nav -->
+  <div id="bfs-footer" style="flex-shrink:0;padding:clamp(10px,2vh,20px) clamp(14px,3vw,32px);border-top:1px solid #ffffff12;display:flex;gap:12px;align-items:center;justify-content:space-between"></div>
+</div>
+
 <!-- ══════════════════════════════════════════════════════════════════════════
      PAGE : BRASSINS
 ═══════════════════════════════════════════════════════════════════════════ -->

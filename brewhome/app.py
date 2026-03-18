@@ -8,8 +8,9 @@ import threading
 import urllib.request
 import urllib.parse
 import urllib.error
+import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
-from flask import Flask, jsonify, request, render_template, make_response
+from flask import Flask, jsonify, request, render_template, make_response, Response
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -88,10 +89,11 @@ def _sensor_rate_limit(token: str) -> bool:
 
 def get_db():
     """Connexion principale + base de mesures attachée en tant que 'rdb'."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("ATTACH DATABASE ? AS rdb", (READINGS_DB_PATH,))
     return conn
@@ -99,10 +101,11 @@ def get_db():
 
 def get_readings_db():
     """Connexion directe à la base de mesures densimètre."""
-    conn = sqlite3.connect(READINGS_DB_PATH)
+    conn = sqlite3.connect(READINGS_DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
@@ -342,8 +345,15 @@ def migrate_db():
             "ALTER TABLE beers ADD COLUMN taste_bitterness TEXT",
             "ALTER TABLE beers ADD COLUMN taste_mouthfeel TEXT",
             "ALTER TABLE beers ADD COLUMN taste_overall TEXT",
+            "ALTER TABLE beers ADD COLUMN taste_finish TEXT",
             "ALTER TABLE beers ADD COLUMN taste_rating INTEGER",
             "ALTER TABLE beers ADD COLUMN taste_date TEXT",
+            "ALTER TABLE beers ADD COLUMN taste_score_appearance INTEGER",
+            "ALTER TABLE beers ADD COLUMN taste_score_aroma INTEGER",
+            "ALTER TABLE beers ADD COLUMN taste_score_flavor INTEGER",
+            "ALTER TABLE beers ADD COLUMN taste_score_bitterness INTEGER",
+            "ALTER TABLE beers ADD COLUMN taste_score_mouthfeel INTEGER",
+            "ALTER TABLE beers ADD COLUMN taste_score_finish INTEGER",
             """CREATE TABLE IF NOT EXISTS draft_recipes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL DEFAULT 'Nouveau brouillon',
@@ -402,6 +412,42 @@ def migrate_db():
             "ALTER TABLE soda_kegs ADD COLUMN next_revision_date TEXT",
             "ALTER TABLE soda_kegs ADD COLUMN last_revision_date TEXT",
             "ALTER TABLE soda_kegs ADD COLUMN revision_interval_months INTEGER DEFAULT 12",
+            """CREATE TABLE IF NOT EXISTS activity_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts         DATETIME DEFAULT CURRENT_TIMESTAMP,
+                category   TEXT NOT NULL,
+                action     TEXT NOT NULL,
+                label      TEXT NOT NULL,
+                entity_id  INTEGER
+            )""",
+            """CREATE TABLE IF NOT EXISTS brew_photos (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                brew_id    INTEGER NOT NULL,
+                step       TEXT,
+                caption    TEXT,
+                photo      TEXT NOT NULL,
+                thumb      TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (brew_id) REFERENCES brews(id) ON DELETE CASCADE
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_bp_brew ON brew_photos(brew_id)",
+            """CREATE TABLE IF NOT EXISTS consumption_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                beer_id    INTEGER,
+                beer_name  TEXT NOT NULL,
+                ts         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
+                qty_33cl   INTEGER NOT NULL DEFAULT 0,
+                qty_75cl   INTEGER NOT NULL DEFAULT 0,
+                keg_liters REAL NOT NULL DEFAULT 0,
+                FOREIGN KEY (beer_id) REFERENCES beers(id) ON DELETE SET NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_clog_ts ON consumption_log(ts)",
+            "ALTER TABLE inventory_items ADD COLUMN min_stock REAL",
+            "ALTER TABLE inventory_items ADD COLUMN expiry_date TEXT",
+            "ALTER TABLE inventory_items ADD COLUMN yeast_type TEXT",
+            "ALTER TABLE inventory_items ADD COLUMN yeast_mfg_date TEXT",
+            "ALTER TABLE inventory_items ADD COLUMN yeast_open_date TEXT",
+            "ALTER TABLE inventory_items ADD COLUMN yeast_generation INTEGER DEFAULT 1",
         ]:
             try:
                 conn.execute(sql)
@@ -435,6 +481,20 @@ def migrate_db():
             conn.execute('DROP TABLE IF EXISTS main.spindle_readings')
         except Exception as e:
             pass  # table absente = déjà migrée ou installation neuve
+
+
+def _log(category, action, label, entity_id=None, conn=None):
+    """Insert an activity log entry. Fails silently — never blocks business logic."""
+    try:
+        sql  = 'INSERT INTO activity_log (category, action, label, entity_id) VALUES (?,?,?,?)'
+        args = (category, action, label, entity_id)
+        if conn is not None:
+            conn.execute(sql, args)
+        else:
+            with get_db() as c:
+                c.execute(sql, args)
+    except Exception as e:
+        app.logger.warning(f'activity_log error: {e}')
 
 
 def _seed_catalog(conn):
@@ -816,6 +876,22 @@ def index():
     return resp
 
 
+@app.route('/manifest.json')
+def pwa_manifest():
+    resp = make_response(app.send_static_file('manifest.json'))
+    resp.headers['Content-Type'] = 'application/manifest+json'
+    return resp
+
+
+@app.route('/sw.js')
+def pwa_sw():
+    resp = make_response(app.send_static_file('sw.js'))
+    resp.headers['Content-Type'] = 'application/javascript'
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    resp.headers['Service-Worker-Allowed'] = '/'
+    return resp
+
+
 # ── CATALOG ──────────────────────────────────────────────────────────────────
 
 @app.route('/api/catalog')
@@ -905,10 +981,12 @@ def create_inventory_item():
         return jsonify({'error': 'name and category are required'}), 400
     with get_db() as conn:
         cur = conn.execute(
-            'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes,price_per_unit) VALUES (?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes,price_per_unit,yeast_type,yeast_mfg_date,yeast_open_date,yeast_generation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (d.get('name'), d.get('category'), d.get('quantity', 0), d.get('unit', 'kg'),
              d.get('origin'), d.get('ebc'), d.get('alpha'), d.get('notes'),
-             d.get('price_per_unit'))
+             d.get('price_per_unit'),
+             d.get('yeast_type'), d.get('yeast_mfg_date') or None, d.get('yeast_open_date') or None,
+             d.get('yeast_generation') or 1)
         )
         row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (cur.lastrowid,)).fetchone()
         return jsonify(dict(row)), 201
@@ -921,11 +999,15 @@ def update_inventory_item(item_id):
         cur = conn.execute(
             '''UPDATE inventory_items
                SET name=?,category=?,quantity=?,unit=?,origin=?,ebc=?,alpha=?,notes=?,
-                   price_per_unit=?,updated_at=CURRENT_TIMESTAMP
+                   price_per_unit=?,min_stock=?,expiry_date=?,
+                   yeast_type=?,yeast_mfg_date=?,yeast_open_date=?,yeast_generation=?,
+                   updated_at=CURRENT_TIMESTAMP
                WHERE id=?''',
             (d.get('name'), d.get('category'), d.get('quantity'), d.get('unit', 'kg'),
              d.get('origin'), d.get('ebc'), d.get('alpha'), d.get('notes'),
-             d.get('price_per_unit'), item_id)
+             d.get('price_per_unit'), d.get('min_stock'), d.get('expiry_date') or None,
+             d.get('yeast_type'), d.get('yeast_mfg_date') or None, d.get('yeast_open_date') or None,
+             d.get('yeast_generation') or 1, item_id)
         )
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
@@ -957,15 +1039,29 @@ def delete_inventory_item(item_id):
 @app.route('/api/inventory/<int:item_id>/qty', methods=['PATCH'])
 def patch_inventory_qty(item_id):
     d = request.json or {}
+    new_qty = d.get('quantity')
     with get_db() as conn:
-        cur = conn.execute(
-            'UPDATE inventory_items SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
-            (d.get('quantity'), item_id)
-        )
-        if cur.rowcount == 0:
+        old_row = conn.execute(
+            'SELECT quantity, min_stock, name, unit FROM inventory_items WHERE id=?', (item_id,)
+        ).fetchone()
+        if not old_row:
             return jsonify({'error': 'Not found'}), 404
+        old_qty = old_row['quantity']
+        min_stock = old_row['min_stock']
+        conn.execute(
+            'UPDATE inventory_items SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+            (new_qty, item_id)
+        )
         row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (item_id,)).fetchone()
-        return jsonify(dict(row))
+        item = dict(row)
+    # Fire low-stock alert if threshold just crossed (old >= threshold > new)
+    if min_stock is not None and new_qty is not None:
+        if old_qty >= min_stock > new_qty:
+            try:
+                _tg_fire_low_stock(item['name'], new_qty, item['unit'], min_stock)
+            except Exception:
+                pass
+    return jsonify(item)
 
 
 @app.route('/api/inventory/<int:item_id>', methods=['PATCH'])
@@ -1054,6 +1150,7 @@ def create_recipe():
                  ing.get('other_type'), ing.get('other_time'),
                  ing.get('ebc'), ing.get('alpha'), ing.get('notes'))
             )
+        _log('recipe', 'created', f"Recette « {d.get('name')} » créée", recipe_id, conn)
         return jsonify(_recipe_with_ingredients(conn, recipe_id)), 201
 
 
@@ -1101,15 +1198,19 @@ def update_recipe(recipe_id):
         result = _recipe_with_ingredients(conn, recipe_id)
         if not result:
             return jsonify({'error': 'Not found'}), 404
+        _log('recipe', 'updated', f"Recette « {result['name']} » modifiée", recipe_id, conn)
         return jsonify(result)
 
 
 @app.route('/api/recipes/<int:recipe_id>', methods=['DELETE'])
 def delete_recipe(recipe_id):
     with get_db() as conn:
+        row = conn.execute('SELECT name FROM recipes WHERE id=?', (recipe_id,)).fetchone()
         cur = conn.execute('DELETE FROM recipes WHERE id=?', (recipe_id,))
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
+        if row:
+            _log('recipe', 'deleted', f"Recette « {row['name']} » supprimée", recipe_id, conn)
         return jsonify({'success': True})
 
 
@@ -1156,7 +1257,11 @@ def get_brews():
                       b.ferm_time as brew_ferm_time,
                       r.ferm_time as recipe_ferm_time,
                       (SELECT COUNT(*) FROM brew_fermentation_readings WHERE brew_id=b.id) as fermentation_count,
-                      (SELECT MIN(bottling_date) FROM beers WHERE brew_id=b.id AND bottling_date IS NOT NULL) as bottling_date
+                      (SELECT COUNT(*) FROM brew_photos WHERE brew_id=b.id) as photo_count,
+                      (SELECT MIN(bottling_date) FROM beers WHERE brew_id=b.id AND bottling_date IS NOT NULL) as bottling_date,
+                      (SELECT MIN(c.ts) FROM consumption_log c JOIN beers bx ON c.beer_id=bx.id WHERE bx.brew_id=b.id) as first_consumption,
+                      (SELECT MAX(c.ts) FROM consumption_log c JOIN beers bx ON c.beer_id=bx.id WHERE bx.brew_id=b.id) as last_consumption,
+                      (SELECT SUM(bx.stock_33cl*0.33 + bx.stock_75cl*0.75 + COALESCE(bx.keg_liters,0)) FROM beers bx WHERE bx.brew_id=b.id AND bx.archived=0) as cave_liters
                FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id
                ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC'''
         ).fetchall()
@@ -1244,6 +1349,7 @@ def _do_create_brew():
                LEFT JOIN recipes r ON b.recipe_id=r.id WHERE b.id=?''',
             (brew_id,)
         ).fetchone()
+        _log('brew', 'created', f"Brassin « {d.get('name')} » lancé", brew_id, conn)
         return jsonify(dict(row)), 201
 
 
@@ -1263,6 +1369,7 @@ def update_brew(brew_id):
             return jsonify({'error': 'Not found'}), 404
         # Quand un brassin passe en "terminé", archiver les mesures du densimètre puis le délier
         if d.get('status') == 'completed':
+            _log('brew', 'completed', f"Brassin « {d.get('name', '–')} » clôturé", brew_id, conn)
             sp = conn.execute('SELECT id FROM spindles WHERE brew_id=?', (brew_id,)).fetchone()
             if sp:
                 # Copier les mesures dans l'historique de fermentation du brassin
@@ -1298,9 +1405,12 @@ def update_brew(brew_id):
 @app.route('/api/brews/<int:brew_id>', methods=['DELETE'])
 def delete_brew(brew_id):
     with get_db() as conn:
+        row = conn.execute('SELECT name FROM brews WHERE id=?', (brew_id,)).fetchone()
         cur = conn.execute('DELETE FROM brews WHERE id=?', (brew_id,))
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
+        if row:
+            _log('brew', 'deleted', f"Brassin « {row['name']} » supprimé", brew_id, conn)
         return jsonify({'success': True})
 
 
@@ -1308,8 +1418,12 @@ def delete_brew(brew_id):
 def patch_brew(brew_id):
     d = request.json
     with get_db() as conn:
-        cur = conn.execute('UPDATE brews SET archived=? WHERE id=?',
-                           (1 if d.get('archived') else 0, brew_id))
+        if 'notes' in d:
+            cur = conn.execute('UPDATE brews SET notes=? WHERE id=?',
+                               (d.get('notes') or None, brew_id))
+        else:
+            cur = conn.execute('UPDATE brews SET archived=? WHERE id=?',
+                               (1 if d.get('archived') else 0, brew_id))
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
         row = conn.execute(
@@ -1326,6 +1440,65 @@ def get_brew_fermentation(brew_id):
             (brew_id,)
         ).fetchall()
         return jsonify([dict(r) for r in rows])
+
+
+# ── BREW PHOTOS ───────────────────────────────────────────────────────────────
+
+def _make_thumb(data_url: str, max_px: int = 200) -> str:
+    """Returns a small JPEG data URL (longest side ≤ max_px)."""
+    try:
+        from PIL import Image
+        import io as _io
+        header, b64data = data_url.split(',', 1) if ',' in data_url else ('data:image/jpeg;base64', data_url)
+        img = Image.open(_io.BytesIO(base64.b64decode(b64data))).convert('RGB')
+        img.thumbnail((max_px, max_px), Image.LANCZOS)
+        buf = _io.BytesIO()
+        img.save(buf, format='JPEG', quality=55, optimize=True)
+        return f'data:image/jpeg;base64,{base64.b64encode(buf.getvalue()).decode()}'
+    except Exception:
+        return data_url
+
+
+@app.route('/api/brews/<int:brew_id>/photos', methods=['GET', 'POST'])
+def brew_photos(brew_id):
+    if request.method == 'POST':
+        d = request.json or {}
+        raw = d.get('photo', '')
+        if not raw:
+            return jsonify({'error': 'photo required'}), 400
+        photo = _shrink_image_b64(raw) if _image_too_large(raw) else raw
+        thumb = _make_thumb(photo)
+        with get_db() as conn:
+            cur = conn.execute(
+                'INSERT INTO brew_photos (brew_id, step, caption, photo, thumb) VALUES (?,?,?,?,?)',
+                (brew_id, d.get('step'), d.get('caption'), photo, thumb)
+            )
+            row = conn.execute(
+                'SELECT id, brew_id, step, caption, thumb, created_at FROM brew_photos WHERE id=?',
+                (cur.lastrowid,)
+            ).fetchone()
+        return jsonify(dict(row)), 201
+    # GET — list without full photo data (use thumb for display)
+    with get_db() as conn:
+        rows = conn.execute(
+            'SELECT id, brew_id, step, caption, thumb, created_at FROM brew_photos WHERE brew_id=? ORDER BY created_at',
+            (brew_id,)
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/brews/<int:brew_id>/photos/<int:photo_id>', methods=['GET', 'DELETE'])
+def brew_photo_item(brew_id, photo_id):
+    if request.method == 'DELETE':
+        with get_db() as conn:
+            conn.execute('DELETE FROM brew_photos WHERE id=? AND brew_id=?', (photo_id, brew_id))
+        return jsonify({'success': True})
+    # GET — return full photo
+    with get_db() as conn:
+        row = conn.execute('SELECT * FROM brew_photos WHERE id=? AND brew_id=?', (photo_id, brew_id)).fetchone()
+    if not row:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify(dict(row))
 
 
 # ── BEERS ────────────────────────────────────────────────────────────────────
@@ -1374,8 +1547,13 @@ def create_beer():
              d.get('photo'), d.get('brew_id'), d.get('recipe_id'),
              d.get('brew_date'), d.get('bottling_date'))
         )
-        row = conn.execute('SELECT * FROM beers WHERE id=?', (cur.lastrowid,)).fetchone()
-        return jsonify(dict(row)), 201
+        beer_id = cur.lastrowid
+        row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
+        _log('beer', 'created', f"« {d.get('name')} » ajouté en cave", beer_id, conn)
+    # Telegram bottling notification (outside DB context to avoid locking)
+    if d.get('brew_id') and (s33 or s75 or keg):
+        _tg_fire_bottling(d.get('name'), s33, s75, keg, d.get('bottling_date'))
+    return jsonify(dict(row)), 201
 
 
 @app.route('/api/beers/<int:beer_id>', methods=['PUT'])
@@ -1411,11 +1589,16 @@ def update_beer_tasting(beer_id):
             '''UPDATE beers SET
                taste_appearance=?, taste_aroma=?, taste_flavor=?,
                taste_bitterness=?, taste_mouthfeel=?, taste_overall=?,
-               taste_rating=?, taste_date=?
+               taste_finish=?, taste_rating=?, taste_date=?,
+               taste_score_appearance=?, taste_score_aroma=?, taste_score_flavor=?,
+               taste_score_bitterness=?, taste_score_mouthfeel=?, taste_score_finish=?
                WHERE id=?''',
             (d.get('taste_appearance'), d.get('taste_aroma'), d.get('taste_flavor'),
              d.get('taste_bitterness'), d.get('taste_mouthfeel'), d.get('taste_overall'),
-             d.get('taste_rating'), d.get('taste_date'), beer_id)
+             d.get('taste_finish'), d.get('taste_rating'), d.get('taste_date'),
+             d.get('taste_score_appearance'), d.get('taste_score_aroma'), d.get('taste_score_flavor'),
+             d.get('taste_score_bitterness'), d.get('taste_score_mouthfeel'), d.get('taste_score_finish'),
+             beer_id)
         )
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
@@ -1436,16 +1619,100 @@ def delete_beer(beer_id):
 def patch_beer_stock(beer_id):
     d = request.json
     with get_db() as conn:
-        if 'stock_33cl' in d:
-            conn.execute('UPDATE beers SET stock_33cl=? WHERE id=?', (d['stock_33cl'], beer_id))
-        if 'stock_75cl' in d:
-            conn.execute('UPDATE beers SET stock_75cl=? WHERE id=?', (d['stock_75cl'], beer_id))
-        if 'keg_liters' in d:
-            conn.execute('UPDATE beers SET keg_liters=? WHERE id=?', (d['keg_liters'], beer_id))
-        row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
-        if not row:
+        cur = conn.execute('SELECT stock_33cl, stock_75cl, keg_liters, name FROM beers WHERE id=?', (beer_id,)).fetchone()
+        if not cur:
             return jsonify({'error': 'Not found'}), 404
+        old_33  = cur['stock_33cl']  or 0
+        old_75  = cur['stock_75cl']  or 0
+        old_keg = cur['keg_liters']  or 0.0
+        new_33  = d.get('stock_33cl',  old_33)
+        new_75  = d.get('stock_75cl',  old_75)
+        new_keg = d.get('keg_liters',  old_keg)
+        if 'stock_33cl' in d:
+            conn.execute('UPDATE beers SET stock_33cl=? WHERE id=?', (new_33, beer_id))
+        if 'stock_75cl' in d:
+            conn.execute('UPDATE beers SET stock_75cl=? WHERE id=?', (new_75, beer_id))
+        if 'keg_liters' in d:
+            conn.execute('UPDATE beers SET keg_liters=? WHERE id=?', (new_keg, beer_id))
+        # Log consumption (stock decreases only)
+        d33  = max(0, old_33  - new_33)
+        d75  = max(0, old_75  - new_75)
+        dkeg = max(0.0, round(old_keg - new_keg, 3))
+        if d33 > 0 or d75 > 0 or dkeg > 0:
+            conn.execute(
+                'INSERT INTO consumption_log (beer_id, beer_name, qty_33cl, qty_75cl, keg_liters) VALUES (?,?,?,?,?)',
+                (beer_id, cur['name'], d33, d75, dkeg)
+            )
+        row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
         return jsonify(dict(row))
+
+
+@app.route('/api/consumption/depletion')
+def get_consumption_depletion():
+    from datetime import date as _date, timedelta as _td
+    today = _date.today()
+    with get_db() as conn:
+        rows = conn.execute('''
+            SELECT
+                c.beer_id,
+                b.name  AS beer_name,
+                ROUND(SUM(c.qty_33cl)*0.33 + SUM(c.qty_75cl)*0.75 + SUM(c.keg_liters), 3) AS consumed_liters,
+                MIN(c.ts) AS first_log,
+                CAST(julianday(MAX(c.ts)) - julianday(MIN(c.ts)) + 1 AS INTEGER) AS span_days,
+                b.stock_33cl, b.stock_75cl, b.keg_liters AS keg_stock
+            FROM consumption_log c
+            JOIN beers b ON c.beer_id = b.id
+            WHERE c.beer_id IS NOT NULL AND b.archived = 0
+            GROUP BY c.beer_id
+            HAVING consumed_liters > 0
+        ''').fetchall()
+    results = []
+    for row in rows:
+        current = (row['stock_33cl'] or 0)*0.33 + (row['stock_75cl'] or 0)*0.75 + (row['keg_stock'] or 0)
+        if current <= 0:
+            continue
+        span = max(row['span_days'] or 1, 1)
+        daily = row['consumed_liters'] / span
+        if daily <= 0:
+            continue
+        days_rem = current / daily
+        results.append({
+            'beer_id':        row['beer_id'],
+            'beer_name':      row['beer_name'],
+            'current_liters': round(current, 2),
+            'daily_rate':     round(daily, 3),
+            'days_remaining': int(round(days_rem)),
+            'depletion_date': (today + _td(days=int(days_rem))).isoformat(),
+            'span_days':      span,
+        })
+    results.sort(key=lambda x: x['days_remaining'])
+    return jsonify(results)
+
+
+@app.route('/api/consumption')
+def get_consumption():
+    with get_db() as conn:
+        by_month = conn.execute('''
+            SELECT strftime('%Y-%m', ts) as period,
+                   SUM(qty_33cl)              as total_33cl,
+                   SUM(qty_75cl)              as total_75cl,
+                   ROUND(SUM(keg_liters), 2)  as total_keg
+            FROM consumption_log
+            GROUP BY period ORDER BY period
+        ''').fetchall()
+        by_beer = conn.execute('''
+            SELECT beer_id, beer_name,
+                   SUM(qty_33cl)                                                   as total_33cl,
+                   SUM(qty_75cl)                                                   as total_75cl,
+                   ROUND(SUM(keg_liters), 2)                                       as total_keg,
+                   ROUND(SUM(qty_33cl)*0.33 + SUM(qty_75cl)*0.75 + SUM(keg_liters), 2) as total_liters
+            FROM consumption_log
+            GROUP BY beer_id
+            ORDER BY total_liters DESC
+            LIMIT 10
+        ''').fetchall()
+    return jsonify({'by_month': [dict(r) for r in by_month],
+                    'by_beer':  [dict(r) for r in by_beer]})
 
 
 @app.route('/api/beers/<int:beer_id>', methods=['PATCH'])
@@ -1592,7 +1859,15 @@ _SPINDLE_SELECT_LIST = '''
            lr.temperature    AS last_temperature,
            lr.battery        AS last_battery,
            lr.recorded_at    AS last_reading_at,
-           COALESCE(rc.reading_count, 0) AS reading_count
+           COALESCE(rc.reading_count, 0) AS reading_count,
+           (SELECT CASE WHEN COUNT(*) >= 3 AND (MAX(g2.gravity)-MIN(g2.gravity)) <= 0.003 THEN 1 ELSE 0 END
+            FROM rdb.spindle_readings g2
+            WHERE g2.spindle_id=s.id AND g2.recorded_at >= datetime('now','-3 days') AND g2.gravity IS NOT NULL
+           ) AS gravity_stable,
+           (SELECT AVG(g2.gravity)
+            FROM rdb.spindle_readings g2
+            WHERE g2.spindle_id=s.id AND g2.recorded_at >= datetime('now','-3 days') AND g2.gravity IS NOT NULL
+           ) AS stable_gravity_avg
     FROM spindles s
     LEFT JOIN brews b ON s.brew_id = b.id
     LEFT JOIN lr ON lr.spindle_id = s.id AND lr.rn = 1
@@ -2056,9 +2331,15 @@ def export_catalog():
 
 @app.route('/api/import/catalog', methods=['POST'])
 def import_catalog():
-    items = request.json or []
+    body = request.json or {}
+    if isinstance(body, list):
+        items, mode = body, 'merge'
+    else:
+        items, mode = body.get('items', []), body.get('mode', 'merge')
     imported = 0
     with get_db() as conn:
+        if mode == 'replace':
+            conn.execute('DELETE FROM ingredient_catalog')
         for d in items:
             if not d.get('name') or not d.get('category'):
                 continue
@@ -2104,18 +2385,36 @@ def export_inventory():
 
 @app.route('/api/import/inventory', methods=['POST'])
 def import_inventory():
-    items = request.json or []
+    body = request.json or {}
+    if isinstance(body, list):
+        items, mode = body, 'merge'
+    else:
+        items, mode = body.get('items', []), body.get('mode', 'merge')
     imported = 0
     with get_db() as conn:
+        if mode == 'replace':
+            conn.execute('DELETE FROM inventory_items')
         for item in items:
             if not item.get('name') or not item.get('category'):
                 continue
             try:
-                conn.execute(
-                    'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes) VALUES (?,?,?,?,?,?,?,?)',
-                    (item['name'], item['category'], item.get('quantity', 0), item.get('unit', 'g'),
-                     item.get('origin'), item.get('ebc'), item.get('alpha'), item.get('notes'))
-                )
+                existing = conn.execute(
+                    'SELECT id FROM inventory_items WHERE name=? AND category=?',
+                    (item['name'], item['category'])
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        '''UPDATE inventory_items SET quantity=?,unit=?,origin=?,ebc=?,alpha=?,notes=?
+                           WHERE id=?''',
+                        (item.get('quantity', 0), item.get('unit', 'g'), item.get('origin'),
+                         item.get('ebc'), item.get('alpha'), item.get('notes'), existing['id'])
+                    )
+                else:
+                    conn.execute(
+                        'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes) VALUES (?,?,?,?,?,?,?,?)',
+                        (item['name'], item['category'], item.get('quantity', 0), item.get('unit', 'g'),
+                         item.get('origin'), item.get('ebc'), item.get('alpha'), item.get('notes'))
+                    )
                 imported += 1
             except Exception as e:
                 app.logger.warning(f"import_inventory: skipped item {item.get('name')!r}: {e}")
@@ -2138,6 +2437,410 @@ def export_recipes():
         recipe['ingredients'] = ings_by_recipe.get(r['id'], [])
         result.append(recipe)
     return jsonify(result)
+
+
+def _beerxml_to_recipe(rx):
+    """Convert a BeerXML <RECIPE> Element to a recipe dict + ingredients list."""
+    def _f(tag, default=None):
+        el = rx.find(tag)
+        return el.text.strip() if el is not None and el.text else default
+    def _float(tag, default=0.0):
+        try: return float(_f(tag, default))
+        except (ValueError, TypeError): return float(default)
+    def _int(tag, default=0):
+        try: return int(float(_f(tag, default)))
+        except (ValueError, TypeError): return int(default)
+
+    name = _f('NAME', 'BeerXML Recipe')
+    style_el = rx.find('STYLE/NAME')
+    style = style_el.text.strip() if style_el is not None and style_el.text else None
+    volume = _float('BATCH_SIZE', 20)
+    boil_time = _int('BOIL_TIME', 60)
+    efficiency = _float('EFFICIENCY', 72)
+    mash_temp = 66.0
+    mash_time = 60
+    mash_step = rx.find('MASH/MASH_STEPS/MASH_STEP')
+    if mash_step is not None:
+        st = mash_step.find('STEP_TEMP')
+        sm = mash_step.find('STEP_TIME')
+        if st is not None and st.text:
+            mash_temp = float(st.text)
+        if sm is not None and sm.text:
+            mash_time = int(float(sm.text))
+    ferm_temp = None
+    ferm_time = None
+    pt = rx.find('PRIMARY_TEMP')
+    pa = rx.find('PRIMARY_AGE')
+    if pt is not None and pt.text:
+        ferm_temp = float(pt.text)
+    if pa is not None and pa.text:
+        ferm_time = int(float(pa.text))
+    notes_el = rx.find('NOTES')
+    notes = notes_el.text.strip() if notes_el is not None and notes_el.text else None
+
+    ingredients = []
+    for fe in rx.findall('FERMENTABLES/FERMENTABLE'):
+        def _fe(t, d=None, _fe=fe): el = _fe.find(t); return el.text.strip() if el is not None and el.text else d
+        kg = float(_fe('AMOUNT') or 0)
+        srm = float(_fe('COLOR') or 0)
+        ebc = round(srm * 1.97, 1) if srm else None
+        ingredients.append({
+            'name': _fe('NAME', '?'), 'category': 'malt',
+            'quantity': round(kg * 1000, 1), 'unit': 'g', 'ebc': ebc
+        })
+    for ho in rx.findall('HOPS/HOP'):
+        def _ho(t, d=None, _ho=ho): el = _ho.find(t); return el.text.strip() if el is not None and el.text else d
+        kg = float(_ho('AMOUNT') or 0)
+        use = (_ho('USE') or '').lower()
+        time_val = float(_ho('TIME') or 0)
+        alpha_val = float(_ho('ALPHA') or 0)
+        hop_type = 'boil'
+        hop_time = int(time_val)
+        hop_days = None
+        if 'dry' in use:
+            hop_type = 'dry_hop'
+            hop_days = max(1, int(round(time_val / 1440))) if time_val > 60 else int(time_val)
+            hop_time = None
+        elif 'whirlpool' in use or 'aroma' in use:
+            hop_type = 'whirlpool'
+        elif 'first' in use:
+            hop_type = 'first_wort'
+        ingredients.append({
+            'name': _ho('NAME', '?'), 'category': 'houblon',
+            'quantity': round(kg * 1000, 1), 'unit': 'g',
+            'hop_type': hop_type, 'hop_time': hop_time, 'hop_days': hop_days,
+            'alpha': alpha_val if alpha_val else None
+        })
+    for ye in rx.findall('YEASTS/YEAST'):
+        def _ye(t, d=None, _ye=ye): el = _ye.find(t); return el.text.strip() if el is not None and el.text else d
+        form = (_ye('FORM') or '').lower()
+        kg = float(_ye('AMOUNT') or 0)
+        unit = 'sachet' if 'dry' in form else 'ml'
+        qty = 1.0 if 'dry' in form else round(kg * 1000, 1)
+        ingredients.append({'name': _ye('NAME', '?'), 'category': 'levure', 'quantity': qty, 'unit': unit})
+    for mi in rx.findall('MISCS/MISC'):
+        def _mi(t, d=None, _mi=mi): el = _mi.find(t); return el.text.strip() if el is not None and el.text else d
+        kg = float(_mi('AMOUNT') or 0)
+        ingredients.append({
+            'name': _mi('NAME', '?'), 'category': 'autre',
+            'quantity': round(kg * 1000, 1), 'unit': 'g', 'other_type': _mi('USE', '')
+        })
+
+    return {
+        'name': name, 'style': style, 'volume': volume, 'boil_time': boil_time,
+        'brewhouse_efficiency': efficiency, 'mash_temp': mash_temp, 'mash_time': mash_time,
+        'ferm_temp': ferm_temp, 'ferm_time': ferm_time, 'notes': notes, 'ingredients': ingredients
+    }
+
+
+def _brewfather_to_recipe(bf):
+    """Convert a Brewfather recipe dict to our internal format."""
+    name = bf.get('name', 'Brewfather Recipe')
+    style = (bf.get('style') or {}).get('name')
+    volume = float(bf.get('batchSize') or 20)
+    boil_time = int(bf.get('boilTime') or 60)
+    efficiency = float(bf.get('efficiency') or 72)
+
+    mash_temp = 66.0
+    mash_time = 60
+    for step in ((bf.get('mash') or {}).get('steps') or []):
+        if step.get('stepTemp'):
+            mash_temp = float(step['stepTemp'])
+        if step.get('stepTime'):
+            mash_time = int(step['stepTime'])
+        break
+
+    ferm_temp = None
+    ferm_time = None
+    for step in ((bf.get('fermentation') or {}).get('steps') or []):
+        if (step.get('type') or '').lower() in ('primary', ''):
+            if step.get('stepTemp'):
+                ferm_temp = float(step['stepTemp'])
+            if step.get('stepTime'):
+                ferm_time = int(step['stepTime'])
+            break
+
+    notes = bf.get('notes') or bf.get('description')
+    ings = bf.get('ingredients') or {}
+    ingredients = []
+
+    # Fermentables — color is already EBC in Brewfather
+    for fe in (ings.get('fermentables') or []):
+        kg = float(fe.get('amount') or 0)
+        ebc = float(fe.get('color') or 0) or None
+        ingredients.append({
+            'name': fe.get('name', '?'), 'category': 'malt',
+            'quantity': round(kg * 1000, 1), 'unit': 'g', 'ebc': ebc
+        })
+
+    # Hops — amount in grams; dry hop time is days, others are minutes
+    for ho in (ings.get('hops') or []):
+        amt_g = float(ho.get('amount') or 0)
+        use = (ho.get('use') or '').lower()
+        time_val = float(ho.get('time') or 0)
+        alpha = float(ho.get('alpha') or 0)
+        hop_type = 'boil'
+        hop_time = int(time_val)
+        hop_days = None
+        if 'dry' in use:
+            hop_type = 'dry_hop'
+            hop_days = int(time_val) if time_val else 3
+            hop_time = None
+        elif 'whirlpool' in use or 'aroma' in use:
+            hop_type = 'whirlpool'
+        elif 'first' in use:
+            hop_type = 'first_wort'
+        ingredients.append({
+            'name': ho.get('name', '?'), 'category': 'houblon',
+            'quantity': round(amt_g, 1), 'unit': 'g',
+            'hop_type': hop_type, 'hop_time': hop_time, 'hop_days': hop_days,
+            'alpha': alpha if alpha else None
+        })
+
+    # Yeasts
+    for ye in (ings.get('yeasts') or []):
+        ye_type = (ye.get('type') or '').lower()
+        unit_raw = (ye.get('unit') or 'pkg').lower()
+        amt = float(ye.get('amount') or 1)
+        if 'ml' in unit_raw:
+            unit, qty = 'ml', amt
+        elif 'dry' in ye_type or 'pkg' in unit_raw:
+            unit, qty = 'sachet', amt
+        else:
+            unit, qty = 'sachet', amt
+        ingredients.append({'name': ye.get('name', '?'), 'category': 'levure', 'quantity': qty, 'unit': unit})
+
+    # Miscs
+    for mi in (ings.get('miscs') or []):
+        amt = float(mi.get('amount') or 0)
+        unit_raw = (mi.get('unit') or 'g').lower()
+        if 'oz' in unit_raw:
+            amt_g = round(amt * 28.35, 1)
+        elif 'tbsp' in unit_raw:
+            amt_g = round(amt * 12.6, 1)
+        elif 'tsp' in unit_raw:
+            amt_g = round(amt * 4.2, 1)
+        else:
+            amt_g = amt
+        ingredients.append({
+            'name': mi.get('name', '?'), 'category': 'autre',
+            'quantity': round(amt_g, 1), 'unit': 'g',
+            'other_type': mi.get('use', '')
+        })
+
+    return {
+        'name': name, 'style': style, 'volume': volume, 'boil_time': boil_time,
+        'brewhouse_efficiency': efficiency, 'mash_temp': mash_temp, 'mash_time': mash_time,
+        'ferm_temp': ferm_temp, 'ferm_time': ferm_time, 'notes': notes, 'ingredients': ingredients
+    }
+
+
+def _recipe_to_beerxml(recipe, ingredients):
+    """Generate a BeerXML <RECIPE> Element for a recipe dict."""
+    def _sub(parent, tag, text):
+        el = ET.SubElement(parent, tag)
+        el.text = str(text) if text is not None else ''
+        return el
+
+    rx = ET.Element('RECIPE')
+    _sub(rx, 'NAME', recipe.get('name') or '')
+    _sub(rx, 'VERSION', '1')
+    _sub(rx, 'TYPE', 'All Grain')
+    _sub(rx, 'BREWER', 'BrewHome')
+    _sub(rx, 'BATCH_SIZE', recipe.get('volume') or 20)
+    _sub(rx, 'BOIL_SIZE', round((recipe.get('volume') or 20) * 1.15, 2))
+    _sub(rx, 'BOIL_TIME', recipe.get('boil_time') or 60)
+    _sub(rx, 'EFFICIENCY', recipe.get('brewhouse_efficiency') or 72)
+    if recipe.get('notes'):
+        _sub(rx, 'NOTES', recipe['notes'])
+    if recipe.get('style'):
+        st = ET.SubElement(rx, 'STYLE')
+        _sub(st, 'NAME', recipe['style'])
+        _sub(st, 'VERSION', '1')
+        _sub(st, 'CATEGORY', recipe['style'])
+        _sub(st, 'CATEGORY_NUMBER', '0')
+        _sub(st, 'STYLE_LETTER', 'A')
+        _sub(st, 'STYLE_GUIDE', 'BJCP')
+        _sub(st, 'TYPE', 'Ale')
+    malts = [i for i in ingredients if i.get('category') == 'malt']
+    if malts:
+        fs = ET.SubElement(rx, 'FERMENTABLES')
+        for ing in malts:
+            fe = ET.SubElement(fs, 'FERMENTABLE')
+            _sub(fe, 'NAME', ing['name'])
+            _sub(fe, 'VERSION', '1')
+            _sub(fe, 'TYPE', 'Grain')
+            _sub(fe, 'AMOUNT', round(float(ing.get('quantity') or 0) / 1000, 4))
+            ebc = ing.get('ebc')
+            _sub(fe, 'COLOR', round(ebc / 1.97, 1) if ebc else 0)
+            _sub(fe, 'YIELD', '75')
+    hops = [i for i in ingredients if i.get('category') == 'houblon']
+    if hops:
+        hs = ET.SubElement(rx, 'HOPS')
+        for ing in hops:
+            ho = ET.SubElement(hs, 'HOP')
+            _sub(ho, 'NAME', ing['name'])
+            _sub(ho, 'VERSION', '1')
+            _sub(ho, 'AMOUNT', round(float(ing.get('quantity') or 0) / 1000, 4))
+            _sub(ho, 'ALPHA', ing.get('alpha') or 5.0)
+            ht = (ing.get('hop_type') or 'boil').lower()
+            use_map = {'boil': 'Boil', 'dry_hop': 'Dry Hop', 'whirlpool': 'Aroma', 'first_wort': 'First Wort'}
+            _sub(ho, 'USE', use_map.get(ht, 'Boil'))
+            if ht == 'dry_hop':
+                _sub(ho, 'TIME', int(ing.get('hop_days') or 3) * 1440)
+            else:
+                _sub(ho, 'TIME', ing.get('hop_time') or 0)
+    yeasts = [i for i in ingredients if i.get('category') == 'levure']
+    if yeasts:
+        ys_el = ET.SubElement(rx, 'YEASTS')
+        for ing in yeasts:
+            ye = ET.SubElement(ys_el, 'YEAST')
+            _sub(ye, 'NAME', ing['name'])
+            _sub(ye, 'VERSION', '1')
+            _sub(ye, 'TYPE', 'Ale')
+            unit = (ing.get('unit') or '').lower()
+            _sub(ye, 'FORM', 'Dry' if 'sachet' in unit else 'Liquid')
+            _sub(ye, 'LABORATORY', '')
+            _sub(ye, 'PRODUCT_ID', '')
+            qty = float(ing.get('quantity') or 1)
+            _sub(ye, 'AMOUNT', round(qty / 1000, 4) if 'ml' in unit else 0.011)
+            _sub(ye, 'ATTENUATION', '75')
+    miscs = [i for i in ingredients if i.get('category') == 'autre']
+    if miscs:
+        ms_el = ET.SubElement(rx, 'MISCS')
+        for ing in miscs:
+            mi = ET.SubElement(ms_el, 'MISC')
+            _sub(mi, 'NAME', ing['name'])
+            _sub(mi, 'VERSION', '1')
+            _sub(mi, 'TYPE', 'Other')
+            _sub(mi, 'USE', ing.get('other_type') or 'Boil')
+            _sub(mi, 'AMOUNT', round(float(ing.get('quantity') or 0) / 1000, 4))
+            _sub(mi, 'TIME', 0)
+    mash = ET.SubElement(rx, 'MASH')
+    _sub(mash, 'NAME', 'Mash')
+    _sub(mash, 'VERSION', '1')
+    _sub(mash, 'GRAIN_TEMP', 18)
+    steps = ET.SubElement(mash, 'MASH_STEPS')
+    step = ET.SubElement(steps, 'MASH_STEP')
+    _sub(step, 'NAME', 'Saccharification')
+    _sub(step, 'VERSION', '1')
+    _sub(step, 'TYPE', 'Infusion')
+    _sub(step, 'STEP_TEMP', recipe.get('mash_temp') or 66)
+    _sub(step, 'STEP_TIME', recipe.get('mash_time') or 60)
+    if recipe.get('ferm_temp'):
+        _sub(rx, 'PRIMARY_TEMP', recipe['ferm_temp'])
+    if recipe.get('ferm_time'):
+        _sub(rx, 'PRIMARY_AGE', recipe['ferm_time'])
+    return rx
+
+
+@app.route('/api/export/beerxml')
+def export_beerxml():
+    with get_db() as conn:
+        recipes = conn.execute(
+            'SELECT * FROM recipes WHERE archived IS NOT 1 ORDER BY id'
+        ).fetchall()
+        ings_rows = conn.execute(
+            'SELECT * FROM recipe_ingredients ORDER BY recipe_id, id'
+        ).fetchall()
+    ings_by_recipe: dict = {}
+    for i in ings_rows:
+        ings_by_recipe.setdefault(i['recipe_id'], []).append(dict(i))
+    root = ET.Element('RECIPES')
+    for r in recipes:
+        root.append(_recipe_to_beerxml(dict(r), ings_by_recipe.get(r['id'], [])))
+    try:
+        ET.indent(root, space='  ')
+    except AttributeError:
+        pass  # Python < 3.9
+    xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding='unicode')
+    filename = f'recettes_{datetime.now().strftime("%Y-%m-%d")}.xml'
+    return Response(xml_str, mimetype='application/xml',
+                    headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+
+
+@app.route('/api/import/beerxml', methods=['POST'])
+def import_beerxml():
+    xml_bytes = request.data
+    if not xml_bytes:
+        return jsonify({'error': 'no_data'}), 400
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError as e:
+        return jsonify({'error': f'xml_parse: {e}'}), 400
+    recipe_els = [root] if root.tag == 'RECIPE' else root.findall('RECIPE')
+    imported = 0
+    with get_db() as conn:
+        for rx_el in recipe_els:
+            try:
+                recipe = _beerxml_to_recipe(rx_el)
+                if not recipe.get('name'):
+                    continue
+                _upsert_recipe(conn, recipe)
+                imported += 1
+            except Exception as e:
+                app.logger.warning(f'import_beerxml: skipped recipe: {e}')
+    return jsonify({'imported': imported})
+
+
+def _upsert_recipe(conn, recipe):
+    """Insert or update a recipe + its ingredients. Returns the recipe id."""
+    existing = conn.execute('SELECT id FROM recipes WHERE name=?', (recipe['name'],)).fetchone()
+    if existing:
+        rid = existing['id']
+        conn.execute(
+            '''UPDATE recipes SET style=?,volume=?,mash_temp=?,mash_time=?,boil_time=?,
+               brewhouse_efficiency=?,ferm_temp=?,ferm_time=?,notes=? WHERE id=?''',
+            (recipe.get('style'), recipe.get('volume', 20),
+             recipe.get('mash_temp', 66), recipe.get('mash_time', 60),
+             recipe.get('boil_time', 60), recipe.get('brewhouse_efficiency', 72),
+             recipe.get('ferm_temp'), recipe.get('ferm_time'),
+             recipe.get('notes'), rid)
+        )
+        conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id=?', (rid,))
+    else:
+        cur = conn.execute(
+            '''INSERT INTO recipes (name,style,volume,mash_temp,mash_time,boil_time,
+               brewhouse_efficiency,ferm_temp,ferm_time,notes)
+               VALUES (?,?,?,?,?,?,?,?,?,?)''',
+            (recipe['name'], recipe.get('style'), recipe.get('volume', 20),
+             recipe.get('mash_temp', 66), recipe.get('mash_time', 60),
+             recipe.get('boil_time', 60), recipe.get('brewhouse_efficiency', 72),
+             recipe.get('ferm_temp'), recipe.get('ferm_time'), recipe.get('notes'))
+        )
+        rid = cur.lastrowid
+    for ing in recipe.get('ingredients', []):
+        conn.execute(
+            '''INSERT INTO recipe_ingredients
+               (recipe_id,name,category,quantity,unit,hop_time,hop_type,
+                hop_days,other_type,ebc,alpha)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+            (rid, ing.get('name', '?'), ing.get('category', 'autre'),
+             ing.get('quantity', 0), ing.get('unit', 'g'),
+             ing.get('hop_time'), ing.get('hop_type'), ing.get('hop_days'),
+             ing.get('other_type'), ing.get('ebc'), ing.get('alpha'))
+        )
+    return rid
+
+
+@app.route('/api/import/brewfather', methods=['POST'])
+def import_brewfather():
+    body = request.json
+    if body is None:
+        return jsonify({'error': 'no_data'}), 400
+    recipes_data = body if isinstance(body, list) else [body]
+    imported = 0
+    with get_db() as conn:
+        for bf in recipes_data:
+            try:
+                recipe = _brewfather_to_recipe(bf)
+                if not recipe.get('name'):
+                    continue
+                _upsert_recipe(conn, recipe)
+                imported += 1
+            except Exception as e:
+                app.logger.warning(f"import_brewfather: skipped {bf.get('name')!r}: {e}")
+    return jsonify({'imported': imported})
 
 
 @app.route('/api/export/brews')
@@ -2192,28 +2895,48 @@ def export_spindles():
 
 @app.route('/api/import/beers', methods=['POST'])
 def import_beers():
-    data = request.json or []
+    body = request.json or {}
+    if isinstance(body, list):
+        data, mode = body, 'merge'
+    else:
+        data, mode = body.get('items', []), body.get('mode', 'merge')
     if isinstance(data, dict):
         data = [data]
     imported = 0
     with get_db() as conn:
+        if mode == 'replace':
+            conn.execute('DELETE FROM beers')
         for beer in data:
             if not beer.get('name'):
                 continue
             try:
-                conn.execute(
-                    '''INSERT INTO beers
-                       (name, type, abv, stock_33cl, stock_75cl, origin, description, photo,
-                        archived, initial_33cl, initial_75cl, brew_date, bottling_date)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                    (beer['name'], beer.get('type'), beer.get('abv'),
-                     beer.get('stock_33cl', 0), beer.get('stock_75cl', 0),
-                     beer.get('origin'), beer.get('description'), beer.get('photo'),
-                     beer.get('archived', 0),
-                     beer.get('initial_33cl') or beer.get('stock_33cl', 0),
-                     beer.get('initial_75cl') or beer.get('stock_75cl', 0),
-                     beer.get('brew_date'), beer.get('bottling_date'))
-                )
+                existing = conn.execute('SELECT id FROM beers WHERE name=?', (beer['name'],)).fetchone()
+                if existing:
+                    conn.execute(
+                        '''UPDATE beers SET type=?,abv=?,stock_33cl=?,stock_75cl=?,origin=?,description=?,
+                           archived=?,initial_33cl=?,initial_75cl=?,brew_date=?,bottling_date=? WHERE id=?''',
+                        (beer.get('type'), beer.get('abv'),
+                         beer.get('stock_33cl', 0), beer.get('stock_75cl', 0),
+                         beer.get('origin'), beer.get('description'),
+                         beer.get('archived', 0),
+                         beer.get('initial_33cl') or beer.get('stock_33cl', 0),
+                         beer.get('initial_75cl') or beer.get('stock_75cl', 0),
+                         beer.get('brew_date'), beer.get('bottling_date'), existing['id'])
+                    )
+                else:
+                    conn.execute(
+                        '''INSERT INTO beers
+                           (name, type, abv, stock_33cl, stock_75cl, origin, description, photo,
+                            archived, initial_33cl, initial_75cl, brew_date, bottling_date)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                        (beer['name'], beer.get('type'), beer.get('abv'),
+                         beer.get('stock_33cl', 0), beer.get('stock_75cl', 0),
+                         beer.get('origin'), beer.get('description'), beer.get('photo'),
+                         beer.get('archived', 0),
+                         beer.get('initial_33cl') or beer.get('stock_33cl', 0),
+                         beer.get('initial_75cl') or beer.get('stock_75cl', 0),
+                         beer.get('brew_date'), beer.get('bottling_date'))
+                    )
                 imported += 1
             except Exception as e:
                 app.logger.warning(f"import_beers: skipped beer {beer.get('name')!r}: {e}")
@@ -2222,16 +2945,23 @@ def import_beers():
 
 @app.route('/api/import/brews', methods=['POST'])
 def import_brews():
-    data = request.json or []
+    body = request.json or {}
+    if isinstance(body, list):
+        data, mode = body, 'merge'
+    else:
+        data, mode = body.get('items', []), body.get('mode', 'merge')
     if isinstance(data, dict):
         data = [data]
     imported = 0
     with get_db() as conn:
+        if mode == 'replace':
+            conn.execute('DELETE FROM brew_fermentation_readings')
+            conn.execute('DELETE FROM brew_photos')
+            conn.execute('DELETE FROM brews')
         for brew in data:
             if not brew.get('name'):
                 continue
             try:
-                # Résoudre la recette liée : d'abord par nom, puis par id
                 recipe_id = None
                 if brew.get('recipe_name'):
                     row = conn.execute('SELECT id FROM recipes WHERE name=?', (brew['recipe_name'],)).fetchone()
@@ -2241,32 +2971,41 @@ def import_brews():
                     row = conn.execute('SELECT id FROM recipes WHERE id=?', (brew['recipe_id'],)).fetchone()
                     if row:
                         recipe_id = row['id']
-                if not recipe_id:
-                    # Créer une recette fantôme pour satisfaire la FK
-                    cur = conn.execute(
-                        'INSERT INTO recipes (name, volume, brewhouse_efficiency) VALUES (?,?,?)',
-                        (brew.get('recipe_name') or brew['name'], brew.get('volume_brewed') or 20, 72)
-                    )
-                    recipe_id = cur.lastrowid
-
-                cur = conn.execute(
-                    '''INSERT INTO brews
-                       (recipe_id, name, brew_date, volume_brewed, og, fg, abv, notes, status, archived)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)''',
-                    (recipe_id, brew['name'], brew.get('brew_date'),
-                     brew.get('volume_brewed'), brew.get('og'), brew.get('fg'), brew.get('abv'),
-                     brew.get('notes'), brew.get('status', 'completed'), brew.get('archived', 0))
-                )
-                new_brew_id = cur.lastrowid
-
-                for reading in brew.get('fermentation', []):
+                existing = conn.execute('SELECT id FROM brews WHERE name=?', (brew['name'],)).fetchone()
+                if existing:
+                    brew_id = existing['id']
                     conn.execute(
-                        '''INSERT INTO brew_fermentation_readings
-                           (brew_id, recorded_at, gravity, temperature, battery, angle)
-                           VALUES (?,?,?,?,?,?)''',
-                        (new_brew_id, reading.get('recorded_at'), reading.get('gravity'),
-                         reading.get('temperature'), reading.get('battery'), reading.get('angle'))
+                        '''UPDATE brews SET brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,
+                           notes=?,status=?,archived=? WHERE id=?''',
+                        (brew.get('brew_date'), brew.get('volume_brewed'),
+                         brew.get('og'), brew.get('fg'), brew.get('abv'),
+                         brew.get('notes'), brew.get('status', 'completed'),
+                         brew.get('archived', 0), brew_id)
                     )
+                else:
+                    if not recipe_id:
+                        cur = conn.execute(
+                            'INSERT INTO recipes (name, volume, brewhouse_efficiency) VALUES (?,?,?)',
+                            (brew.get('recipe_name') or brew['name'], brew.get('volume_brewed') or 20, 72)
+                        )
+                        recipe_id = cur.lastrowid
+                    cur = conn.execute(
+                        '''INSERT INTO brews
+                           (recipe_id, name, brew_date, volume_brewed, og, fg, abv, notes, status, archived)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                        (recipe_id, brew['name'], brew.get('brew_date'),
+                         brew.get('volume_brewed'), brew.get('og'), brew.get('fg'), brew.get('abv'),
+                         brew.get('notes'), brew.get('status', 'completed'), brew.get('archived', 0))
+                    )
+                    brew_id = cur.lastrowid
+                    for reading in brew.get('fermentation', []):
+                        conn.execute(
+                            '''INSERT INTO brew_fermentation_readings
+                               (brew_id, recorded_at, gravity, temperature, battery, angle)
+                               VALUES (?,?,?,?,?,?)''',
+                            (brew_id, reading.get('recorded_at'), reading.get('gravity'),
+                             reading.get('temperature'), reading.get('battery'), reading.get('angle'))
+                        )
                 imported += 1
             except Exception as e:
                 app.logger.warning(f"import_brews: skipped brew {brew.get('name')!r}: {e}")
@@ -2275,31 +3014,47 @@ def import_brews():
 
 @app.route('/api/import/spindles', methods=['POST'])
 def import_spindles():
-    data = request.json or []
+    body = request.json or {}
+    if isinstance(body, list):
+        data, mode = body, 'merge'
+    else:
+        data, mode = body.get('items', []), body.get('mode', 'merge')
     if isinstance(data, dict):
         data = [data]
     imported = 0
     with get_db() as conn:
+        if mode == 'replace':
+            spindle_ids = [r['id'] for r in conn.execute('SELECT id FROM spindles').fetchall()]
+            with get_readings_db() as rconn:
+                for sid in spindle_ids:
+                    rconn.execute('DELETE FROM spindle_readings WHERE spindle_id=?', (sid,))
+            conn.execute('DELETE FROM spindles')
         for spindle in data:
             if not spindle.get('name'):
                 continue
             try:
-                token = secrets.token_urlsafe(16)
-                cur = conn.execute(
-                    'INSERT INTO spindles (name, token, notes) VALUES (?,?,?)',
-                    (spindle['name'], token, spindle.get('notes'))
-                )
-                new_spindle_id = cur.lastrowid
-                with get_readings_db() as rconn:
-                    for reading in spindle.get('readings', []):
-                        rconn.execute(
-                            '''INSERT INTO spindle_readings
-                               (spindle_id, gravity, temperature, battery, angle, rssi, recorded_at)
-                               VALUES (?,?,?,?,?,?,?)''',
-                            (new_spindle_id, reading.get('gravity'), reading.get('temperature'),
-                             reading.get('battery'), reading.get('angle'), reading.get('rssi'),
-                             reading.get('recorded_at'))
-                        )
+                existing = conn.execute('SELECT id FROM spindles WHERE name=?', (spindle['name'],)).fetchone()
+                if existing:
+                    spindle_id = existing['id']
+                    conn.execute('UPDATE spindles SET notes=? WHERE id=?', (spindle.get('notes'), spindle_id))
+                    # In merge mode, add only new readings (none for existing spindles to avoid duplicates)
+                else:
+                    token = secrets.token_urlsafe(16)
+                    cur = conn.execute(
+                        'INSERT INTO spindles (name, token, notes) VALUES (?,?,?)',
+                        (spindle['name'], token, spindle.get('notes'))
+                    )
+                    spindle_id = cur.lastrowid
+                    with get_readings_db() as rconn:
+                        for reading in spindle.get('readings', []):
+                            rconn.execute(
+                                '''INSERT INTO spindle_readings
+                                   (spindle_id, gravity, temperature, battery, angle, rssi, recorded_at)
+                                   VALUES (?,?,?,?,?,?,?)''',
+                                (spindle_id, reading.get('gravity'), reading.get('temperature'),
+                                 reading.get('battery'), reading.get('angle'), reading.get('rssi'),
+                                 reading.get('recorded_at'))
+                            )
                 imported += 1
             except Exception as e:
                 app.logger.warning(f"import_spindles: skipped spindle {spindle.get('name')!r}: {e}")
@@ -2308,29 +3063,52 @@ def import_spindles():
 
 @app.route('/api/import/recipes', methods=['POST'])
 def import_recipes():
-    data = request.json or []
+    body = request.json or {}
+    if isinstance(body, list):
+        data, mode = body, 'merge'
+    else:
+        data, mode = body.get('items', []), body.get('mode', 'merge')
     if isinstance(data, dict):
         data = [data]
     imported = 0
     with get_db() as conn:
+        if mode == 'replace':
+            conn.execute('DELETE FROM recipe_ingredients')
+            conn.execute('DELETE FROM recipes')
         for recipe in data:
             if not recipe.get('name'):
                 continue
             try:
-                cur = conn.execute(
-                    '''INSERT INTO recipes
-                       (name,style,volume,brew_date,mash_temp,mash_time,boil_time,
-                        mash_ratio,evap_rate,grain_absorption,brewhouse_efficiency,
-                        ferm_temp,ferm_time,notes)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                    (recipe['name'], recipe.get('style'), recipe.get('volume', 20),
-                     recipe.get('brew_date'), recipe.get('mash_temp', 66), recipe.get('mash_time', 60),
-                     recipe.get('boil_time', 60), recipe.get('mash_ratio', 3.0),
-                     recipe.get('evap_rate', 3.0), recipe.get('grain_absorption', 0.8),
-                     recipe.get('brewhouse_efficiency', 72), recipe.get('ferm_temp'),
-                     recipe.get('ferm_time'), recipe.get('notes'))
-                )
-                rid = cur.lastrowid
+                existing = conn.execute('SELECT id FROM recipes WHERE name=?', (recipe['name'],)).fetchone()
+                if existing:
+                    rid = existing['id']
+                    conn.execute(
+                        '''UPDATE recipes SET style=?,volume=?,brew_date=?,mash_temp=?,mash_time=?,boil_time=?,
+                           mash_ratio=?,evap_rate=?,grain_absorption=?,brewhouse_efficiency=?,
+                           ferm_temp=?,ferm_time=?,notes=? WHERE id=?''',
+                        (recipe.get('style'), recipe.get('volume', 20),
+                         recipe.get('brew_date'), recipe.get('mash_temp', 66), recipe.get('mash_time', 60),
+                         recipe.get('boil_time', 60), recipe.get('mash_ratio', 3.0),
+                         recipe.get('evap_rate', 3.0), recipe.get('grain_absorption', 0.8),
+                         recipe.get('brewhouse_efficiency', 72), recipe.get('ferm_temp'),
+                         recipe.get('ferm_time'), recipe.get('notes'), rid)
+                    )
+                    conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id=?', (rid,))
+                else:
+                    cur = conn.execute(
+                        '''INSERT INTO recipes
+                           (name,style,volume,brew_date,mash_temp,mash_time,boil_time,
+                            mash_ratio,evap_rate,grain_absorption,brewhouse_efficiency,
+                            ferm_temp,ferm_time,notes)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                        (recipe['name'], recipe.get('style'), recipe.get('volume', 20),
+                         recipe.get('brew_date'), recipe.get('mash_temp', 66), recipe.get('mash_time', 60),
+                         recipe.get('boil_time', 60), recipe.get('mash_ratio', 3.0),
+                         recipe.get('evap_rate', 3.0), recipe.get('grain_absorption', 0.8),
+                         recipe.get('brewhouse_efficiency', 72), recipe.get('ferm_temp'),
+                         recipe.get('ferm_time'), recipe.get('notes'))
+                    )
+                    rid = cur.lastrowid
                 for ing in recipe.get('ingredients', []):
                     conn.execute(
                         '''INSERT INTO recipe_ingredients
@@ -2731,6 +3509,19 @@ def _tg_build_cave():
     return "\n".join(lines)
 
 
+def _tg_fire_low_stock(item_name, qty, unit, threshold):
+    """Envoie une alerte Telegram quand un ingrédient passe sous son seuil."""
+    token, chat_id, _, _ = _tg_get_settings()
+    if not token or not chat_id:
+        return
+    text = (
+        f"⚠️ <b>Stock bas</b>\n\n"
+        f"• {item_name} : <b>{qty} {unit}</b>\n"
+        f"Seuil d'alerte : {threshold} {unit}"
+    )
+    _tg_send(token, chat_id, text)
+
+
 def _tg_build_inventory():
     """Retourne une liste de messages, un par catégorie présente."""
     with get_db() as conn:
@@ -2773,10 +3564,87 @@ def _tg_build_inventory():
     return messages
 
 
+def _tg_build_ferm_reminders():
+    """Rappels fermentation : J-2, J-1, J0, J+1 pour brassins actifs."""
+    from datetime import date as _date, timedelta as _td
+    today = _date.today()
+    with get_db() as conn:
+        brews = conn.execute(
+            "SELECT id, name, brew_date, ferm_time, volume_brewed "
+            "FROM brews WHERE archived=0 AND status NOT IN ('completed') "
+            "AND brew_date IS NOT NULL AND ferm_time IS NOT NULL"
+        ).fetchall()
+    messages = []
+    for b in brews:
+        try:
+            start    = _date.fromisoformat(b['brew_date'])
+            end_date = start + _td(days=int(b['ferm_time']))
+            delta    = (end_date - today).days
+            name     = b['name']
+            if delta == 2:
+                messages.append(f"🍺 <b>{name}</b>\n⏳ Fin de fermentation estimée dans <b>2 jours</b> ({end_date.strftime('%d/%m')})")
+            elif delta == 1:
+                messages.append(f"🍺 <b>{name}</b>\n⏳ Fin de fermentation estimée <b>demain</b> ({end_date.strftime('%d/%m')})")
+            elif delta == 0:
+                vol = b['volume_brewed']
+                bottle_hint = ""
+                if vol:
+                    net = float(vol) * 0.9
+                    s33 = int(net * 1000 / 330)
+                    s75 = int(net * 1000 / 750)
+                    bottle_hint = f"\n🍾 Volume : <b>{vol} L</b> → ~<b>{s33} bouteilles 33cl</b> ou ~<b>{s75} × 75cl</b>"
+                messages.append(f"🍺 <b>{name}</b>\n🫙 Fermentation terminée aujourd'hui — <b>C'est le moment d'embouteiller !</b>{bottle_hint}")
+            elif delta < 0 and delta >= -2:
+                messages.append(f"🍺 <b>{name}</b>\n⚠️ Fermentation dépassée de <b>{abs(delta)} jour(s)</b> — pensez à embouteiller !")
+        except Exception:
+            continue
+    if not messages:
+        return []  # rien à signaler
+    return messages
+
+
+def _tg_fire_bottling(beer_name, s33, s75, keg_liters, bottling_date):
+    """Notification immédiate lors de l'ajout d'une bière en cave depuis un brassin."""
+    import threading
+    token, chat_id, notifs, _ = _tg_get_settings()
+    if not token or not chat_id:
+        return
+    if not notifs.get('bottling', {}).get('enabled', True):
+        return
+    lines = [f"🍾 <b>{beer_name}</b> mis(e) en cave !"]
+    if bottling_date:
+        try:
+            from datetime import date as _date
+            d = _date.fromisoformat(bottling_date)
+            lines.append(f"📅 Date d'embouteillage : <b>{d.strftime('%d/%m/%Y')}</b>")
+        except Exception:
+            pass
+    stocks = []
+    if s33 and int(s33) > 0:
+        stocks.append(f"<b>{s33}</b> × 33cl")
+    if s75 and int(s75) > 0:
+        stocks.append(f"<b>{s75}</b> × 75cl")
+    if keg_liters:
+        try:
+            stocks.append(f"<b>{float(keg_liters):.1f} L</b> en fût")
+        except Exception:
+            pass
+    if stocks:
+        lines.append(f"📦 Stock : {' + '.join(stocks)}")
+    msg = "\n".join(lines)
+    def _send():
+        try:
+            _tg_send(token, chat_id, msg)
+        except Exception as e:
+            app.logger.error(f"Telegram bottling notif error: {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
+
 _TG_BUILDERS = {
-    'brews':     _tg_build_brews,
-    'cave':      _tg_build_cave,
-    'inventory': _tg_build_inventory,
+    'brews':           _tg_build_brews,
+    'cave':            _tg_build_cave,
+    'inventory':       _tg_build_inventory,
+    'ferm_reminders':  _tg_build_ferm_reminders,
 }
 
 
@@ -2880,12 +3748,13 @@ def _calc_brewing_events(year):
 
 
 def _tg_brewing_events_fire():
-    """Job quotidien : vérifie si aujourd'hui est un event ou un rappel J-45."""
+    """Job quotidien : vérifie si aujourd'hui est un event ou un rappel J-N."""
     token, chat_id, _, _ = _tg_get_settings()
     if not token or not chat_id:
         return
     with get_db() as conn:
-        row = conn.execute("SELECT value FROM app_settings WHERE key='tg_brewing_events'").fetchone()
+        row      = conn.execute("SELECT value FROM app_settings WHERE key='tg_brewing_events'").fetchone()
+        days_row = conn.execute("SELECT value FROM app_settings WHERE key='default_brew_reminder_days'").fetchone()
     if not row:
         return
     try:
@@ -2897,22 +3766,32 @@ def _tg_brewing_events_fire():
         return
 
     today = date.today()
-    remind_days = 45
+    # Lire le délai de rappel depuis les paramètres (défaut 45 jours)
+    try:
+        remind_days = int(days_row['value']) if days_row and days_row['value'] else 45
+    except (ValueError, TypeError):
+        remind_days = 45
 
     for year in (today.year, today.year + 1):
         for ev_date, label, emoji in _calc_brewing_events(year):
             if cfg.get('event_day') and ev_date == today:
-                _tg_send(token, chat_id,
-                    f'{emoji} <b>{label}</b>\n\n'
-                    f'C\'est aujourd\'hui ! 🎉\nSanté et bonne dégustation ! 🍺')
+                try:
+                    _tg_send(token, chat_id,
+                        f'{emoji} <b>{label}</b>\n\n'
+                        f'C\'est aujourd\'hui ! 🎉\nSanté et bonne dégustation ! 🍺')
+                except Exception as e:
+                    app.logger.warning(f"_tg_brewing_events_fire: send error (event_day {label!r}): {e}")
             if cfg.get('remind'):
                 remind_date = ev_date - timedelta(days=remind_days)
                 if remind_date == today:
-                    _tg_send(token, chat_id,
-                        f'⏰ <b>Rappel brassage — {label}</b>\n\n'
-                        f'{emoji} <b>{label}</b> est dans <b>{remind_days} jours</b> '
-                        f'({ev_date.strftime("%d/%m/%Y")}).\n\n'
-                        f'C\'est le moment idéal pour brasser une bière spéciale ! 🍺')
+                    try:
+                        _tg_send(token, chat_id,
+                            f'⏰ <b>Rappel brassage — {label}</b>\n\n'
+                            f'{emoji} <b>{label}</b> est dans <b>{remind_days} jours</b> '
+                            f'({ev_date.strftime("%d/%m/%Y")}).\n\n'
+                            f'C\'est le moment idéal pour brasser une bière spéciale ! 🍺')
+                    except Exception as e:
+                        app.logger.warning(f"_tg_brewing_events_fire: send error (remind {label!r}): {e}")
 
     # Événements personnalisés
     with get_db() as conn:
@@ -2952,26 +3831,37 @@ def _tg_brewing_events_fire():
 
         if ev_date == today:
             notes_line = f'\n\n{ev["notes"]}' if ev['notes'] else ''
-            _tg_send(token, chat_id,
-                f'{emoji} <b>{label}</b>\n\n'
-                f'C\'est aujourd\'hui ! 🎉'
-                f'{assoc_block}'
-                f'{notes_line}')
-        if ev['brew_reminder']:
-            remind_date = ev_date - timedelta(days=remind_days)
-            if remind_date == today:
+            try:
                 _tg_send(token, chat_id,
-                    f'⏰ <b>Rappel brassage — {label}</b>\n\n'
-                    f'{emoji} <b>{label}</b> est dans <b>{remind_days} jours</b> '
-                    f'({ev_date.strftime("%d/%m/%Y")}).'
-                    f'{assoc_block}\n\n'
-                    f'C\'est le moment idéal pour brasser une bière spéciale ! 🍺')
+                    f'{emoji} <b>{label}</b>\n\n'
+                    f'C\'est aujourd\'hui ! 🎉'
+                    f'{assoc_block}'
+                    f'{notes_line}')
+            except Exception as e:
+                app.logger.warning(f"_tg_brewing_events_fire: send error (custom event_day {label!r}): {e}")
+        if ev['brew_reminder']:
+            # Utiliser le délai par événement s'il est défini, sinon le délai par défaut
+            try:
+                ev_remind_days = int(ev['brew_reminder_days']) if ev['brew_reminder_days'] else remind_days
+            except (ValueError, TypeError):
+                ev_remind_days = remind_days
+            remind_date = ev_date - timedelta(days=ev_remind_days)
+            if remind_date == today:
+                try:
+                    _tg_send(token, chat_id,
+                        f'⏰ <b>Rappel brassage — {label}</b>\n\n'
+                        f'{emoji} <b>{label}</b> est dans <b>{ev_remind_days} jours</b> '
+                        f'({ev_date.strftime("%d/%m/%Y")}).'
+                        f'{assoc_block}\n\n'
+                        f'C\'est le moment idéal pour brasser une bière spéciale ! 🍺')
+                except Exception as e:
+                    app.logger.warning(f"_tg_brewing_events_fire: send error (custom remind {label!r}): {e}")
 
 
 def reschedule_telegram():
     """Recharge la config depuis la DB et re-planifie les jobs Telegram."""
     token, chat_id, notifs, tz_str = _tg_get_settings()
-    for jid in ('tg_brews', 'tg_cave', 'tg_inventory', 'tg_brew_events'):
+    for jid in ('tg_brews', 'tg_cave', 'tg_inventory', 'tg_brew_events', 'tg_ferm'):
         try:
             _scheduler.remove_job(jid)
         except Exception as e:
@@ -2998,9 +3888,10 @@ def reschedule_telegram():
             trigger = CronTrigger(hour=h, minute=m, timezone=tz)
         _scheduler.add_job(_tg_fire, trigger, args=[ntype], id=jid, replace_existing=True)
 
-    _add('tg_brews',     'brews',     notifs.get('brews', {}),     monthly=False)
-    _add('tg_cave',      'cave',      notifs.get('cave', {}),      monthly=True)
-    _add('tg_inventory', 'inventory', notifs.get('inventory', {}), monthly=True)
+    _add('tg_brews',     'brews',          notifs.get('brews', {}),          monthly=False)
+    _add('tg_cave',      'cave',           notifs.get('cave', {}),           monthly=True)
+    _add('tg_inventory', 'inventory',      notifs.get('inventory', {}),      monthly=True)
+    _add('tg_ferm',      'ferm_reminders', notifs.get('ferm_reminders', {}), monthly=False)
 
     # Événements brassicoles
     try:
@@ -3122,76 +4013,198 @@ def update_chartjs():
         return jsonify({'error': str(e)}), 500
 
 
+def _fix_fa_css_paths(css_path):
+    """Réécrit les chemins relatifs des webfonts dans le CSS Font Awesome
+    pour pointer vers l'emplacement absolu Flask /static/fonts/fa/webfonts/."""
+    import re
+    with open(css_path, 'r', encoding='utf-8') as f:
+        css = f.read()
+    # Remplace url(../webfonts/...), url(./webfonts/...), url(webfonts/...) avec ou sans quotes
+    css = re.sub(r'url\(["\']?\.\.?/?webfonts/', 'url(/static/fonts/fa/webfonts/', css)
+    css = re.sub(r'url\(["\']?webfonts/', 'url(/static/fonts/fa/webfonts/', css)
+    with open(css_path, 'w', encoding='utf-8') as f:
+        f.write(css)
+
+
 @app.route('/api/static/update/fontawesome', methods=['POST'])
 def update_fontawesome():
     try:
+        import re as _re
         version = _npm_latest('@fortawesome/fontawesome-free')
         base = f'https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@{version}'
         fa_dir = os.path.join(STATIC_DIR, 'fonts', 'fa')
         wf_dir = os.path.join(fa_dir, 'webfonts')
         os.makedirs(wf_dir, exist_ok=True)
-        # CSS
-        _download(f'{base}/css/all.min.css', os.path.join(fa_dir, 'all.min.css'))
-        # Webfonts
-        for wf in ('fa-brands-400.woff2', 'fa-regular-400.woff2',
-                   'fa-solid-900.woff2', 'fa-v4compatibility.woff2'):
+        # CSS + réécriture des chemins relatifs → absolus Flask
+        css_path = os.path.join(fa_dir, 'all.min.css')
+        _download(f'{base}/css/all.min.css', css_path)
+        _fix_fa_css_paths(css_path)
+        # Détecter dynamiquement les fichiers woff2 référencés dans le CSS
+        # (gère les renommages entre FA 6 et FA 7+)
+        with open(css_path, 'r', encoding='utf-8') as f:
+            css_content = f.read()
+        wf_names = set(_re.findall(r'(fa-[^/\s"\'()]+\.woff2)', css_content))
+        if not wf_names:  # fallback
+            wf_names = {'fa-brands-400.woff2', 'fa-regular-400.woff2',
+                        'fa-solid-900.woff2', 'fa-v4compatibility.woff2'}
+        for wf in wf_names:
             try:
                 _download(f'{base}/webfonts/{wf}', os.path.join(wf_dir, wf))
             except Exception as e:
-                app.logger.debug(f"update_static_lib: optional webfont {wf} unavailable: {e}")
+                app.logger.debug(f"update_fontawesome: webfont {wf} unavailable: {e}")
         return jsonify({'version': version})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── PROXY GIT (évite les restrictions CORS du navigateur) ────────────────────
+
+@app.route('/api/git-proxy', methods=['POST'])
+def git_proxy():
+    """Proxifie les requêtes vers un provider Git custom (Gitea/Forgejo) côté serveur."""
+    data = request.json or {}
+    target_url = data.get('url', '').strip()
+    method     = data.get('method', 'GET').upper()
+    pat        = data.get('pat', '')
+    body_data  = data.get('body')   # objet déjà désérialisé ou None
+
+    if not target_url:
+        return jsonify({'error': 'Missing url'}), 400
+
+    headers = {
+        'Authorization': f'Bearer {pat}',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'BrewHome',
+    }
+    try:
+        req_body = json.dumps(body_data).encode('utf-8') if body_data is not None else None
+        req = urllib.request.Request(target_url, data=req_body, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp_body = resp.read()
+            return app.response_class(response=resp_body, status=resp.status, mimetype='application/json')
+    except urllib.error.HTTPError as e:
+        err_body = e.read()
+        try:
+            json.loads(err_body)
+            return app.response_class(response=err_body, status=e.code, mimetype='application/json')
+        except Exception:
+            return jsonify({'message': err_body.decode('utf-8', errors='replace') or str(e)}), e.code
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 # ── GITHUB BACKUP AUTOMATIQUE ────────────────────────────────────────────────
 
-def _gh_push_file(repo, pat, branch, file_path, content_str, message):
-    """Pousse un fichier texte vers GitHub via l'API. Retourne True si modifié, False si inchangé."""
+def _gh_push_file(repo, pat, branch, file_path, content_str, message, api_base='https://api.github.com'):
+    """Pousse un fichier texte vers un dépôt Git via l'API (GitHub/Gitea/Forgejo). Retourne True si modifié."""
     encoded = base64.b64encode(content_str.encode('utf-8')).decode('ascii')
-    base_url = f'https://api.github.com/repos/{repo}/contents/{file_path}'
+    api_base = (api_base or 'https://api.github.com').rstrip('/')
+    base_url = f'{api_base}/repos/{repo}/contents/{file_path}'
+    is_github = api_base == 'https://api.github.com'
     headers = {
         'Authorization': f'Bearer {pat}',
-        'Accept': 'application/vnd.github+json',
+        'Accept': 'application/vnd.github+json' if is_github else 'application/json',
         'Content-Type': 'application/json',
         'User-Agent': 'BrewHome',
     }
-    # Récupérer le SHA existant
-    sha = None
-    try:
-        req = urllib.request.Request(f'{base_url}?ref={urllib.parse.quote(branch)}', headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            existing = json.loads(resp.read().decode())
+
+    def _fetch_sha():
+        """Retourne (sha, unchanged) — unchanged=True si le contenu est identique."""
+        try:
+            req = urllib.request.Request(
+                f'{base_url}?ref={urllib.parse.quote(branch)}', headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                existing = json.loads(resp.read().decode())
             sha = existing.get('sha')
             existing_b64 = (existing.get('content') or '').replace('\n', '')
-            if existing_b64 == encoded:
-                return False  # inchangé
-    except urllib.error.HTTPError as e:
-        if e.code != 404:
+            unchanged = bool(sha and existing_b64 and existing_b64 == encoded)
+            return sha, unchanged
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None, False   # fichier absent → création
+            body_hint = ''
+            try: body_hint = e.read().decode()[:200]
+            except Exception: pass
+            app.logger.warning(f'_gh_push_file GET {file_path} HTTP {e.code}: {body_hint}')
             raise
-    body = {'message': message, 'content': encoded, 'branch': branch}
-    if sha:
-        body['sha'] = sha
-    req = urllib.request.Request(
-        base_url, data=json.dumps(body).encode('utf-8'),
-        headers=headers, method='PUT'
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        resp.read()
+
+    sha, unchanged = _fetch_sha()
+    if unchanged:
+        return False  # inchangé
+
+    def _do_put(sha_val):
+        body = {'message': message, 'content': encoded, 'branch': branch}
+        if sha_val:
+            body['sha'] = sha_val
+        req = urllib.request.Request(
+            base_url, data=json.dumps(body).encode('utf-8'),
+            headers=headers, method='PUT')
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            resp.read()
+
+    try:
+        _do_put(sha)
+    except urllib.error.HTTPError as e:
+        if e.code != 422:
+            body_hint = ''
+            try: body_hint = e.read().decode()[:300]
+            except Exception: pass
+            app.logger.warning(f'_gh_push_file PUT {file_path} HTTP {e.code}: {body_hint}')
+            raise
+        # 422 : SHA périmé ou manquant — re-fetch et retry une fois
+        body_hint = ''
+        try: body_hint = e.read().decode()[:300]
+        except Exception: pass
+        app.logger.warning(f'_gh_push_file 422 on {file_path} (sha={sha!r}), retrying. Detail: {body_hint}')
+        fresh_sha, unchanged2 = _fetch_sha()
+        if unchanged2:
+            return False
+        _do_put(fresh_sha)   # laisse lever si ça échoue encore
+
     return True
 
 
+def _gh_get_file(repo, pat, branch, file_path, api_base='https://api.github.com'):
+    """Fetch raw content of a file from a Git repository via API. Returns decoded string."""
+    api_base = (api_base or 'https://api.github.com').rstrip('/')
+    url = f'{api_base}/repos/{repo}/contents/{urllib.parse.quote(file_path)}?ref={urllib.parse.quote(branch)}'
+    is_github = api_base == 'https://api.github.com'
+    headers = {
+        'Authorization': f'Bearer {pat}',
+        'Accept': 'application/vnd.github+json' if is_github else 'application/json',
+        'User-Agent': 'BrewHome',
+    }
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        result = json.loads(resp.read())
+    content_b64 = (result.get('content') or '').replace('\n', '')
+    return base64.b64decode(content_b64).decode('utf-8')
+
+
 def _github_data_backup():
-    """Sauvegarde complète des données vers GitHub (appellée par le scheduler)."""
+    """Sauvegarde complète des données vers tous les dépôts configurés (appellée par le scheduler)."""
     with get_db() as conn:
         rows = conn.execute("SELECT key, value FROM app_settings WHERE key IN "
-                            "('gh_data_repo','gh_data_branch','gh_data_pat')").fetchall()
+                            "('gh_data_repo','gh_data_branch','gh_data_pat','gh_data_api_url','gh_data_targets')").fetchall()
     cfg = {r['key']: r['value'] for r in rows}
-    repo = cfg.get('gh_data_repo', '').strip()
-    pat  = cfg.get('gh_data_pat',  '').strip()
-    branch = cfg.get('gh_data_branch', 'main').strip() or 'main'
-    if not repo or not pat:
-        app.logger.warning('GitHub backup: dépôt ou PAT manquant, sauvegarde ignorée')
+    # Nouveau format : liste de targets JSON
+    targets = []
+    if cfg.get('gh_data_targets'):
+        try:
+            targets = [t for t in json.loads(cfg['gh_data_targets']) if t.get('repo') and t.get('pat')]
+        except Exception:
+            pass
+    # Migration depuis les anciens champs individuels
+    if not targets:
+        repo = cfg.get('gh_data_repo', '').strip()
+        pat  = cfg.get('gh_data_pat',  '').strip()
+        if repo and pat:
+            targets = [{'repo': repo, 'pat': pat,
+                        'branch':  cfg.get('gh_data_branch', 'main').strip() or 'main',
+                        'apiUrl':  (cfg.get('gh_data_api_url') or 'https://api.github.com').rstrip('/')}]
+    if not targets:
+        app.logger.warning('GitHub backup: aucune destination configurée, sauvegarde ignorée')
         return
 
     date_str = datetime.now().strftime('%Y-%m-%d')
@@ -3235,33 +4248,60 @@ def _github_data_backup():
             ('catalogue.json',   catalog),
             ('parametres.json',  settings_out),
         ]
-        pushed = skipped = 0
-        for name, data in files:
-            changed = _gh_push_file(repo, pat, branch, f'backup_auto/{name}',
-                                    json.dumps(data, ensure_ascii=False, indent=2),
-                                    f'backup auto: {name.replace(".json","")} {date_str}')
-            if changed:
-                pushed += 1
-            else:
-                skipped += 1
+        total_pushed = total_skipped = total_errors = 0
+        push_errors = []
+        for target in targets:
+            t_repo    = target.get('repo', '').strip()
+            t_pat     = target.get('pat',  '').strip()
+            t_branch  = target.get('branch', 'main').strip() or 'main'
+            t_api     = (target.get('apiUrl') or 'https://api.github.com').rstrip('/')
+            if not t_repo or not t_pat:
+                continue
+            for name, data in files:
+                try:
+                    changed = _gh_push_file(t_repo, t_pat, t_branch, f'backup_auto/{name}',
+                                            json.dumps(data, ensure_ascii=False, indent=2),
+                                            f'backup auto: {name.replace(".json","")} {date_str}',
+                                            api_base=t_api)
+                    if changed:
+                        total_pushed += 1
+                    else:
+                        total_skipped += 1
+                except Exception as push_err:
+                    total_errors += 1
+                    push_errors.append(f'{name}: {push_err}')
+                    app.logger.warning(f'GitHub backup push error ({name}): {push_err}')
 
         # Enregistrer la date de dernière sauvegarde
         ts = datetime.now().strftime('%Y-%m-%d %H:%M')
+        repo_list = ', '.join(tgt.get('repo', '') for tgt in targets if tgt.get('repo'))
         with get_db() as conn:
             conn.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES ('gh_data_last_backup',?)", (ts,))
             notify = conn.execute("SELECT value FROM app_settings WHERE key='gh_data_backup_notify'").fetchone()
-        app.logger.info(f'GitHub backup: {pushed} fichier(s) mis à jour, {skipped} inchangé(s)')
+        app.logger.info(f'GitHub backup: {total_pushed} fichier(s) mis à jour, {total_skipped} inchangé(s), {total_errors} erreur(s)')
+        _log('backup', 'auto', f"Backup auto : {total_pushed} fichier(s) mis à jour vers {repo_list}" + (f" ({total_errors} erreur(s))" if total_errors else ""))
         # Notification Telegram si activée
         if notify and notify['value'] == 'true':
             try:
                 tg_token, tg_chat, _, _ = _tg_get_settings()
                 if tg_token and tg_chat:
-                    skip_txt = f', {skipped} inchangé(s)' if skipped else ''
-                    _tg_send(tg_token, tg_chat,
-                             f'☁️ <b>Backup GitHub automatique</b>\n\n'
-                             f'✅ {pushed} fichier(s) mis à jour{skip_txt}\n'
-                             f'🕐 {ts}\n'
-                             f'📁 Dépôt : <code>{repo}</code>')
+                    if total_errors and not total_pushed and not total_skipped:
+                        # Backup entièrement échoué
+                        err_preview = push_errors[0] if push_errors else 'erreur inconnue'
+                        _tg_send(tg_token, tg_chat,
+                                 f'⚠️ <b>Backup automatique échoué</b>\n\n'
+                                 f'❌ {total_errors} erreur(s)\n'
+                                 f'🕐 {ts}\n'
+                                 f'📁 {repo_list}\n'
+                                 f'<code>{err_preview}</code>')
+                    else:
+                        skip_txt = f', {total_skipped} inchangé(s)' if total_skipped else ''
+                        err_txt  = f', ⚠️ {total_errors} erreur(s)' if total_errors else ''
+                        _tg_send(tg_token, tg_chat,
+                                 f'☁️ <b>Backup automatique</b>\n\n'
+                                 f'✅ {total_pushed} fichier(s) mis à jour{skip_txt}{err_txt}\n'
+                                 f'🕐 {ts}\n'
+                                 f'📁 {repo_list}')
             except Exception as te:
                 app.logger.warning(f'GitHub backup Telegram notify error: {te}')
     except Exception as e:
@@ -3296,7 +4336,7 @@ def reschedule_github_backup():
 # ── APP SETTINGS (apparence) ─────────────────────────────────────────────────
 
 # Clés dont la valeur ne doit jamais être renvoyée au frontend
-_SECRET_KEYS = frozenset({'ai_api_key'})
+_SECRET_KEYS = frozenset()
 
 @app.route('/api/app-settings', methods=['GET'])
 def get_app_settings():
@@ -3339,6 +4379,31 @@ def save_app_settings():
         except Exception as e:
             app.logger.warning(f"GitHub backup reschedule error: {e}")
     return jsonify({'success': True})
+
+
+# ── ACTIVITY LOG ─────────────────────────────────────────────────────────────
+
+@app.route('/api/activity', methods=['GET', 'POST', 'DELETE'])
+def activity_log_api():
+    if request.method == 'POST':
+        d = request.json or {}
+        _log(d.get('category', 'system'), d.get('action', 'event'),
+             d.get('label', ''), d.get('entity_id'))
+        return jsonify({'success': True})
+    if request.method == 'DELETE':
+        with get_db() as conn:
+            conn.execute('DELETE FROM activity_log')
+        return jsonify({'success': True})
+    # GET
+    limit  = min(int(request.args.get('limit', 50)), 200)
+    offset = int(request.args.get('offset', 0))
+    with get_db() as conn:
+        rows  = conn.execute(
+            'SELECT * FROM activity_log ORDER BY ts DESC LIMIT ? OFFSET ?',
+            (limit, offset)
+        ).fetchall()
+        total = conn.execute('SELECT COUNT(*) FROM activity_log').fetchone()[0]
+    return jsonify({'items': [dict(r) for r in rows], 'total': total})
 
 
 # ── CUSTOM CALENDAR EVENTS ───────────────────────────────────────────────────
@@ -3614,26 +4679,42 @@ def export_drafts():
 
 @app.route('/api/import/drafts', methods=['POST'])
 def import_drafts():
-    data = request.json or []
+    body = request.json or {}
+    if isinstance(body, list):
+        data, mode = body, 'merge'
+    else:
+        data, mode = body.get('items', []), body.get('mode', 'merge')
     if isinstance(data, dict):
         data = [data]
     imported = 0
     with get_db() as conn:
+        if mode == 'replace':
+            conn.execute('DELETE FROM draft_recipes')
         for d in data:
             if not d.get('title'):
                 continue
             try:
-                conn.execute(
-                    '''INSERT INTO draft_recipes
-                       (title, style, volume, ingredients, notes, color,
-                        target_date, event_label, sort_order, image)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)''',
-                    (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
-                     d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
-                     d.get('target_date'), d.get('event_label'),
-                     d.get('sort_order', 0),
-                     _shrink_image_b64(d['image']) if _image_too_large(d.get('image')) else d.get('image'))
-                )
+                existing = conn.execute('SELECT id FROM draft_recipes WHERE title=?', (d['title'],)).fetchone()
+                img = _shrink_image_b64(d['image']) if _image_too_large(d.get('image')) else d.get('image')
+                if existing:
+                    conn.execute(
+                        '''UPDATE draft_recipes SET style=?,volume=?,ingredients=?,notes=?,color=?,
+                           target_date=?,event_label=?,image=? WHERE id=?''',
+                        (d.get('style'), d.get('volume'), d.get('ingredients'), d.get('notes'),
+                         d.get('color', '#ff9500'), d.get('target_date'), d.get('event_label'),
+                         img, existing['id'])
+                    )
+                else:
+                    conn.execute(
+                        '''INSERT INTO draft_recipes
+                           (title, style, volume, ingredients, notes, color,
+                            target_date, event_label, sort_order, image)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                        (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
+                         d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
+                         d.get('target_date'), d.get('event_label'),
+                         d.get('sort_order', 0), img)
+                    )
                 imported += 1
             except Exception as e:
                 app.logger.warning(f"import_drafts: skipped draft {d.get('title')!r}: {e}")
@@ -3641,6 +4722,179 @@ def import_drafts():
 
 
 # ── EXPORT / IMPORT : CALENDRIER (événements personnalisés) ──────────────────
+
+def _ics_escape(text):
+    if not text:
+        return ''
+    return str(text).replace('\\', '\\\\').replace(';', '\\;').replace(',', '\\,').replace('\n', '\\n').replace('\r', '')
+
+
+def _ics_fold(line):
+    """Fold iCal property line to max 75 octets per segment (RFC 5545)."""
+    encoded = line.encode('utf-8')
+    if len(encoded) <= 75:
+        return line + '\r\n'
+    parts = []
+    while encoded:
+        budget = 75 if not parts else 74
+        chunk = encoded[:budget]
+        while chunk and (chunk[-1] & 0xC0) == 0x80:
+            chunk = chunk[:-1]
+        if not chunk:
+            break
+        parts.append(chunk.decode('utf-8'))
+        encoded = encoded[len(chunk):]
+    return ('\r\n ').join(parts) + '\r\n'
+
+
+def _make_ical():
+    now_utc = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+
+    def _vevent(uid, dtstart, dtend, summary, description=None, rrule=None, alarm_days=None):
+        ev = [
+            'BEGIN:VEVENT',
+            f'UID:{uid}',
+            f'DTSTAMP:{now_utc}',
+            f'DTSTART;VALUE=DATE:{dtstart}',
+            f'DTEND;VALUE=DATE:{dtend}',
+            f'SUMMARY:{_ics_escape(summary)}',
+        ]
+        if description:
+            ev.append(f'DESCRIPTION:{_ics_escape(description)}')
+        if rrule:
+            ev.append(f'RRULE:{rrule}')
+        if alarm_days:
+            ev += [
+                'BEGIN:VALARM',
+                'ACTION:DISPLAY',
+                f'DESCRIPTION:{_ics_escape(summary)}',
+                f'TRIGGER:-P{alarm_days}D',
+                'END:VALARM',
+            ]
+        ev.append('END:VEVENT')
+        return ev
+
+    lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//BrewHome//BrewHome Calendar//FR',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'X-WR-CALNAME:BrewHome',
+        'X-WR-CALDESC:Calendrier de brassage BrewHome',
+    ]
+
+    _ical_dow = {0: 'SU', 1: 'MO', 2: 'TU', 3: 'WE', 4: 'TH', 5: 'FR', 6: 'SA'}
+
+    def _rrule_from_rec(rec_str, event_date):
+        if not rec_str:
+            return None
+        try:
+            r = json.loads(rec_str) if isinstance(rec_str, str) else rec_str
+            t = r.get('type', '')
+            if t == 'yearly':
+                return 'FREQ=YEARLY'
+            if t == 'yearly_nth_dow':
+                dow = _ical_dow.get(r.get('dow', 1), 'MO')
+                nth = r.get('nth', 1)
+                month = int(event_date[5:7])
+                return f'FREQ=YEARLY;BYMONTH={month};BYDAY={nth}{dow}'
+            if t == 'monthly':
+                return 'FREQ=MONTHLY'
+            if t == 'monthly_nth_dow':
+                dow = _ical_dow.get(r.get('dow', 1), 'MO')
+                nth = r.get('nth', 1)
+                return f'FREQ=MONTHLY;BYDAY={nth}{dow}'
+            if t == 'weekly':
+                interval = int(r.get('interval') or 1)
+                return f'FREQ=WEEKLY;INTERVAL={interval}' if interval > 1 else 'FREQ=WEEKLY'
+        except Exception:
+            pass
+        return None
+
+    with get_db() as conn:
+        remind_row = conn.execute(
+            "SELECT value FROM app_settings WHERE key='default_brew_reminder_days'"
+        ).fetchone()
+        default_remind = int(remind_row['value']) if remind_row and remind_row['value'] else 45
+
+        for ev in conn.execute(
+            'SELECT * FROM custom_calendar_events ORDER BY event_date'
+        ).fetchall():
+            try:
+                dt = datetime.strptime(ev['event_date'][:10], '%Y-%m-%d')
+                dtstart = dt.strftime('%Y%m%d')
+                dtend = (dt + timedelta(days=1)).strftime('%Y%m%d')
+                title = ((ev['emoji'] or '') + ' ' + (ev['title'] or '')).strip()
+                rrule = _rrule_from_rec(ev.get('recurrence'), ev['event_date'])
+                alarm_days = None
+                if ev['brew_reminder']:
+                    try:
+                        alarm_days = int(ev['brew_reminder_days']) if ev['brew_reminder_days'] else default_remind
+                    except (ValueError, TypeError):
+                        alarm_days = default_remind
+                lines.extend(_vevent(
+                    uid=f'brewhome-event-{ev["id"]}@brewhome',
+                    dtstart=dtstart, dtend=dtend, summary=title,
+                    description=ev.get('notes'), rrule=rrule, alarm_days=alarm_days,
+                ))
+            except Exception:
+                continue
+
+        for brew in conn.execute(
+            '''SELECT b.*, r.ferm_time AS r_ferm_time
+               FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id
+               WHERE b.brew_date IS NOT NULL ORDER BY b.brew_date'''
+        ).fetchall():
+            try:
+                brew_dt = datetime.strptime(brew['brew_date'][:10], '%Y-%m-%d')
+                dtstart = brew_dt.strftime('%Y%m%d')
+                dtend = (brew_dt + timedelta(days=1)).strftime('%Y%m%d')
+                parts = []
+                if brew.get('volume_brewed'):
+                    parts.append(f'Volume : {brew["volume_brewed"]} L')
+                if brew.get('og'):
+                    parts.append(f'OG : {brew["og"]}')
+                if brew.get('abv'):
+                    parts.append(f'ABV : {brew["abv"]} %')
+                status_lbl = {'in_progress': 'En cours', 'completed': 'Terminé', 'archived': 'Archivé'}
+                if brew.get('status'):
+                    parts.append(f'Statut : {status_lbl.get(brew["status"], brew["status"])}')
+                if brew.get('notes'):
+                    parts.append(brew['notes'])
+                lines.extend(_vevent(
+                    uid=f'brewhome-brew-{brew["id"]}@brewhome',
+                    dtstart=dtstart, dtend=dtend,
+                    summary=f'\U0001f37a {brew["name"]}',
+                    description='\n'.join(parts) if parts else None,
+                ))
+                ferm_days = brew.get('ferm_time') or brew.get('r_ferm_time')
+                if ferm_days:
+                    end_dt = brew_dt + timedelta(days=int(ferm_days))
+                    lines.extend(_vevent(
+                        uid=f'brewhome-brew-{brew["id"]}-bottling@brewhome',
+                        dtstart=end_dt.strftime('%Y%m%d'),
+                        dtend=(end_dt + timedelta(days=1)).strftime('%Y%m%d'),
+                        summary=f'\U0001f37e Mise en bouteille \u2014 {brew["name"]}',
+                    ))
+            except Exception:
+                continue
+
+    lines.append('END:VCALENDAR')
+    return ''.join(_ics_fold(line) for line in lines)
+
+
+@app.route('/api/calendar/ics')
+def calendar_ics():
+    return Response(
+        _make_ical(),
+        mimetype='text/calendar; charset=utf-8',
+        headers={
+            'Content-Disposition': 'inline; filename="brewhome.ics"',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+    )
+
 
 @app.route('/api/export/calendar')
 def export_calendar():
@@ -3651,29 +4905,502 @@ def export_calendar():
 
 @app.route('/api/import/calendar', methods=['POST'])
 def import_calendar():
-    data = request.json or []
+    body = request.json or {}
+    if isinstance(body, list):
+        data, mode = body, 'merge'
+    else:
+        data, mode = body.get('items', []), body.get('mode', 'merge')
     if isinstance(data, dict):
         data = [data]
     imported = 0
     with get_db() as conn:
+        if mode == 'replace':
+            conn.execute('DELETE FROM custom_calendar_events')
         for ev in data:
             if not ev.get('title') or not ev.get('event_date'):
                 continue
             try:
-                conn.execute(
-                    '''INSERT INTO custom_calendar_events
-                       (title, emoji, event_date, color, notes,
-                        brew_reminder, telegram_notify, style, recipe_id, draft_id)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)''',
-                    (ev.get('title'), ev.get('emoji', '📅'), ev['event_date'],
-                     ev.get('color', '#f59e0b'), ev.get('notes'),
-                     ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
-                     ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'))
-                )
+                existing = conn.execute(
+                    'SELECT id FROM custom_calendar_events WHERE title=? AND event_date=?',
+                    (ev['title'], ev['event_date'])
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        '''UPDATE custom_calendar_events SET emoji=?,color=?,notes=?,
+                           brew_reminder=?,telegram_notify=?,style=?,recipe_id=?,draft_id=?
+                           WHERE id=?''',
+                        (ev.get('emoji', '📅'), ev.get('color', '#f59e0b'), ev.get('notes'),
+                         ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
+                         ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'), existing['id'])
+                    )
+                else:
+                    conn.execute(
+                        '''INSERT INTO custom_calendar_events
+                           (title, emoji, event_date, color, notes,
+                            brew_reminder, telegram_notify, style, recipe_id, draft_id)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                        (ev.get('title'), ev.get('emoji', '📅'), ev['event_date'],
+                         ev.get('color', '#f59e0b'), ev.get('notes'),
+                         ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
+                         ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'))
+                    )
                 imported += 1
             except Exception as e:
                 app.logger.warning(f"import_calendar: skipped event {ev.get('title')!r}: {e}")
     return jsonify({'imported': imported})
+
+
+# ── RESTAURER DEPUIS GIT ──────────────────────────────────────────────────────
+
+@app.route('/api/restore/git', methods=['POST'])
+def restore_from_git():
+    """Restaure des données depuis la sauvegarde Git automatique."""
+    req_data = request.json or {}
+    sections = req_data.get('sections', [])
+    mode     = req_data.get('mode', 'merge')
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM app_settings WHERE key IN "
+            "('gh_data_targets','gh_data_repo','gh_data_branch','gh_data_pat','gh_data_api_url')"
+        ).fetchall()
+    cfg = {r['key']: r['value'] for r in rows}
+    targets = []
+    if cfg.get('gh_data_targets'):
+        try:
+            targets = [t for t in json.loads(cfg['gh_data_targets']) if t.get('repo') and t.get('pat')]
+        except Exception:
+            pass
+    if not targets and cfg.get('gh_data_repo') and cfg.get('gh_data_pat'):
+        targets = [{'repo': cfg['gh_data_repo'], 'pat': cfg['gh_data_pat'],
+                    'branch': cfg.get('gh_data_branch', 'main') or 'main',
+                    'apiUrl': cfg.get('gh_data_api_url', 'https://api.github.com')}]
+    if not targets:
+        return jsonify({'error': 'no_target'}), 400
+
+    target   = targets[0]
+    t_repo   = target.get('repo', '').strip()
+    t_pat    = target.get('pat', '').strip()
+    t_branch = target.get('branch', 'main').strip() or 'main'
+    t_api    = (target.get('apiUrl') or 'https://api.github.com').rstrip('/')
+
+    file_map = {
+        'inventaire':  'backup_auto/inventaire.json',
+        'recettes':    'backup_auto/recettes.json',
+        'brassins':    'backup_auto/brassins.json',
+        'cave':        'backup_auto/cave.json',
+        'catalogue':   'backup_auto/catalogue.json',
+        'densimetres': 'backup_auto/densimetres.json',
+        'brouillons':  'backup_auto/brouillons.json',
+        'calendrier':  'backup_auto/calendrier.json',
+    }
+
+    results = {}
+    for section in sections:
+        file_path = file_map.get(section)
+        if not file_path:
+            results[section] = {'error': 'unknown_section'}
+            continue
+        try:
+            content = _gh_get_file(t_repo, t_pat, t_branch, file_path, api_base=t_api)
+            items   = json.loads(content)
+            if not isinstance(items, list):
+                items = [items]
+            n = _import_section_direct(section, items, mode)
+            results[section] = {'count': n}
+        except urllib.error.HTTPError as e:
+            results[section] = {'error': 'not_found' if e.code == 404 else f'HTTP {e.code}'}
+        except Exception as e:
+            app.logger.warning(f'restore_from_git: section {section!r} error: {e}')
+            results[section] = {'error': str(e)}
+
+    return jsonify({'results': results})
+
+
+def _import_section_direct(section, items, mode='merge'):
+    """Import items for a given section using direct DB calls (no HTTP). Returns count imported."""
+    if section == 'inventaire':
+        imported = 0
+        with get_db() as conn:
+            if mode == 'replace':
+                conn.execute('DELETE FROM inventory_items')
+            for item in items:
+                if not item.get('name') or not item.get('category'):
+                    continue
+                try:
+                    existing = conn.execute(
+                        'SELECT id FROM inventory_items WHERE name=? AND category=?',
+                        (item['name'], item['category'])
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            'UPDATE inventory_items SET quantity=?,unit=?,origin=?,ebc=?,alpha=?,notes=? WHERE id=?',
+                            (item.get('quantity', 0), item.get('unit', 'g'), item.get('origin'),
+                             item.get('ebc'), item.get('alpha'), item.get('notes'), existing['id'])
+                        )
+                    else:
+                        conn.execute(
+                            'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes) VALUES (?,?,?,?,?,?,?,?)',
+                            (item['name'], item['category'], item.get('quantity', 0), item.get('unit', 'g'),
+                             item.get('origin'), item.get('ebc'), item.get('alpha'), item.get('notes'))
+                        )
+                    imported += 1
+                except Exception as e:
+                    app.logger.warning(f"restore inventaire: skipped {item.get('name')!r}: {e}")
+        return imported
+
+    elif section == 'catalogue':
+        imported = 0
+        with get_db() as conn:
+            if mode == 'replace':
+                conn.execute('DELETE FROM ingredient_catalog')
+            for d in items:
+                if not d.get('name') or not d.get('category'):
+                    continue
+                existing = conn.execute(
+                    'SELECT id FROM ingredient_catalog WHERE name=? AND category=?',
+                    (d['name'], d['category'])
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        '''UPDATE ingredient_catalog SET subcategory=?,ebc=?,gu=?,alpha=?,yeast_type=?,
+                           default_unit=?,temp_min=?,temp_max=?,dosage_per_liter=?,
+                           attenuation_min=?,attenuation_max=?,alcohol_tolerance=?,max_usage_pct=? WHERE id=?''',
+                        (d.get('subcategory'), d.get('ebc'), d.get('gu'), d.get('alpha'),
+                         d.get('yeast_type'), d.get('default_unit', 'g'),
+                         d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
+                         d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
+                         d.get('max_usage_pct'), existing['id'])
+                    )
+                else:
+                    conn.execute(
+                        '''INSERT INTO ingredient_catalog
+                           (name,category,subcategory,ebc,gu,alpha,yeast_type,default_unit,
+                            temp_min,temp_max,dosage_per_liter,attenuation_min,attenuation_max,alcohol_tolerance,max_usage_pct)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                        (d['name'], d['category'], d.get('subcategory'), d.get('ebc'), d.get('gu'),
+                         d.get('alpha'), d.get('yeast_type'), d.get('default_unit', 'g'),
+                         d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
+                         d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
+                         d.get('max_usage_pct'))
+                    )
+                imported += 1
+        return imported
+
+    elif section == 'recettes':
+        imported = 0
+        with get_db() as conn:
+            if mode == 'replace':
+                conn.execute('DELETE FROM recipe_ingredients')
+                conn.execute('DELETE FROM recipes')
+            for recipe in items:
+                if not recipe.get('name'):
+                    continue
+                try:
+                    existing = conn.execute('SELECT id FROM recipes WHERE name=?', (recipe['name'],)).fetchone()
+                    if existing:
+                        rid = existing['id']
+                        conn.execute(
+                            '''UPDATE recipes SET style=?,volume=?,brew_date=?,mash_temp=?,mash_time=?,boil_time=?,
+                               mash_ratio=?,evap_rate=?,grain_absorption=?,brewhouse_efficiency=?,
+                               ferm_temp=?,ferm_time=?,notes=? WHERE id=?''',
+                            (recipe.get('style'), recipe.get('volume', 20),
+                             recipe.get('brew_date'), recipe.get('mash_temp', 66), recipe.get('mash_time', 60),
+                             recipe.get('boil_time', 60), recipe.get('mash_ratio', 3.0),
+                             recipe.get('evap_rate', 3.0), recipe.get('grain_absorption', 0.8),
+                             recipe.get('brewhouse_efficiency', 72), recipe.get('ferm_temp'),
+                             recipe.get('ferm_time'), recipe.get('notes'), rid)
+                        )
+                        conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id=?', (rid,))
+                    else:
+                        cur = conn.execute(
+                            '''INSERT INTO recipes
+                               (name,style,volume,brew_date,mash_temp,mash_time,boil_time,
+                                mash_ratio,evap_rate,grain_absorption,brewhouse_efficiency,
+                                ferm_temp,ferm_time,notes)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                            (recipe['name'], recipe.get('style'), recipe.get('volume', 20),
+                             recipe.get('brew_date'), recipe.get('mash_temp', 66), recipe.get('mash_time', 60),
+                             recipe.get('boil_time', 60), recipe.get('mash_ratio', 3.0),
+                             recipe.get('evap_rate', 3.0), recipe.get('grain_absorption', 0.8),
+                             recipe.get('brewhouse_efficiency', 72), recipe.get('ferm_temp'),
+                             recipe.get('ferm_time'), recipe.get('notes'))
+                        )
+                        rid = cur.lastrowid
+                    for ing in recipe.get('ingredients', []):
+                        conn.execute(
+                            '''INSERT INTO recipe_ingredients
+                               (recipe_id,name,category,quantity,unit,hop_time,hop_type,
+                                hop_days,other_type,other_time,ebc,alpha,notes)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                            (rid, ing.get('name','?'), ing.get('category','autre'),
+                             ing.get('quantity', 0), ing.get('unit', 'g'),
+                             ing.get('hop_time'), ing.get('hop_type'), ing.get('hop_days'),
+                             ing.get('other_type'), ing.get('other_time'),
+                             ing.get('ebc'), ing.get('alpha'), ing.get('notes'))
+                        )
+                    imported += 1
+                except Exception as e:
+                    app.logger.warning(f"restore recettes: skipped {recipe.get('name')!r}: {e}")
+        return imported
+
+    elif section == 'cave':
+        imported = 0
+        with get_db() as conn:
+            if mode == 'replace':
+                conn.execute('DELETE FROM beers')
+            for beer in items:
+                if not beer.get('name'):
+                    continue
+                try:
+                    existing = conn.execute('SELECT id FROM beers WHERE name=?', (beer['name'],)).fetchone()
+                    if existing:
+                        conn.execute(
+                            '''UPDATE beers SET type=?,abv=?,stock_33cl=?,stock_75cl=?,origin=?,description=?,
+                               archived=?,initial_33cl=?,initial_75cl=?,brew_date=?,bottling_date=? WHERE id=?''',
+                            (beer.get('type'), beer.get('abv'),
+                             beer.get('stock_33cl', 0), beer.get('stock_75cl', 0),
+                             beer.get('origin'), beer.get('description'), beer.get('archived', 0),
+                             beer.get('initial_33cl') or beer.get('stock_33cl', 0),
+                             beer.get('initial_75cl') or beer.get('stock_75cl', 0),
+                             beer.get('brew_date'), beer.get('bottling_date'), existing['id'])
+                        )
+                    else:
+                        conn.execute(
+                            '''INSERT INTO beers
+                               (name,type,abv,stock_33cl,stock_75cl,origin,description,photo,
+                                archived,initial_33cl,initial_75cl,brew_date,bottling_date)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                            (beer['name'], beer.get('type'), beer.get('abv'),
+                             beer.get('stock_33cl', 0), beer.get('stock_75cl', 0),
+                             beer.get('origin'), beer.get('description'), beer.get('photo'),
+                             beer.get('archived', 0),
+                             beer.get('initial_33cl') or beer.get('stock_33cl', 0),
+                             beer.get('initial_75cl') or beer.get('stock_75cl', 0),
+                             beer.get('brew_date'), beer.get('bottling_date'))
+                        )
+                    imported += 1
+                except Exception as e:
+                    app.logger.warning(f"restore cave: skipped {beer.get('name')!r}: {e}")
+        return imported
+
+    elif section == 'brassins':
+        imported = 0
+        with get_db() as conn:
+            if mode == 'replace':
+                conn.execute('DELETE FROM brew_fermentation_readings')
+                conn.execute('DELETE FROM brew_photos')
+                conn.execute('DELETE FROM brews')
+            for brew in items:
+                if not brew.get('name'):
+                    continue
+                try:
+                    recipe_id = None
+                    if brew.get('recipe_name'):
+                        row = conn.execute('SELECT id FROM recipes WHERE name=?', (brew['recipe_name'],)).fetchone()
+                        if row: recipe_id = row['id']
+                    if not recipe_id and brew.get('recipe_id'):
+                        row = conn.execute('SELECT id FROM recipes WHERE id=?', (brew['recipe_id'],)).fetchone()
+                        if row: recipe_id = row['id']
+                    existing = conn.execute('SELECT id FROM brews WHERE name=?', (brew['name'],)).fetchone()
+                    if existing:
+                        conn.execute(
+                            '''UPDATE brews SET brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,
+                               notes=?,status=?,archived=? WHERE id=?''',
+                            (brew.get('brew_date'), brew.get('volume_brewed'),
+                             brew.get('og'), brew.get('fg'), brew.get('abv'),
+                             brew.get('notes'), brew.get('status', 'completed'),
+                             brew.get('archived', 0), existing['id'])
+                        )
+                    else:
+                        if not recipe_id:
+                            cur = conn.execute(
+                                'INSERT INTO recipes (name, volume, brewhouse_efficiency) VALUES (?,?,?)',
+                                (brew.get('recipe_name') or brew['name'], brew.get('volume_brewed') or 20, 72)
+                            )
+                            recipe_id = cur.lastrowid
+                        cur = conn.execute(
+                            '''INSERT INTO brews
+                               (recipe_id, name, brew_date, volume_brewed, og, fg, abv, notes, status, archived)
+                               VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                            (recipe_id, brew['name'], brew.get('brew_date'),
+                             brew.get('volume_brewed'), brew.get('og'), brew.get('fg'), brew.get('abv'),
+                             brew.get('notes'), brew.get('status', 'completed'), brew.get('archived', 0))
+                        )
+                        brew_id = cur.lastrowid
+                        for reading in brew.get('fermentation', []):
+                            conn.execute(
+                                '''INSERT INTO brew_fermentation_readings
+                                   (brew_id, recorded_at, gravity, temperature, battery, angle)
+                                   VALUES (?,?,?,?,?,?)''',
+                                (brew_id, reading.get('recorded_at'), reading.get('gravity'),
+                                 reading.get('temperature'), reading.get('battery'), reading.get('angle'))
+                            )
+                    imported += 1
+                except Exception as e:
+                    app.logger.warning(f"restore brassins: skipped {brew.get('name')!r}: {e}")
+        return imported
+
+    elif section == 'densimetres':
+        imported = 0
+        with get_db() as conn:
+            if mode == 'replace':
+                sids = [r['id'] for r in conn.execute('SELECT id FROM spindles').fetchall()]
+                with get_readings_db() as rconn:
+                    for sid in sids:
+                        rconn.execute('DELETE FROM spindle_readings WHERE spindle_id=?', (sid,))
+                conn.execute('DELETE FROM spindles')
+            for spindle in items:
+                if not spindle.get('name'):
+                    continue
+                try:
+                    existing = conn.execute('SELECT id FROM spindles WHERE name=?', (spindle['name'],)).fetchone()
+                    if existing:
+                        conn.execute('UPDATE spindles SET notes=? WHERE id=?', (spindle.get('notes'), existing['id']))
+                    else:
+                        token = secrets.token_urlsafe(16)
+                        cur = conn.execute(
+                            'INSERT INTO spindles (name, token, notes) VALUES (?,?,?)',
+                            (spindle['name'], token, spindle.get('notes'))
+                        )
+                        with get_readings_db() as rconn:
+                            for reading in spindle.get('readings', []):
+                                rconn.execute(
+                                    '''INSERT INTO spindle_readings
+                                       (spindle_id, gravity, temperature, battery, angle, rssi, recorded_at)
+                                       VALUES (?,?,?,?,?,?,?)''',
+                                    (cur.lastrowid, reading.get('gravity'), reading.get('temperature'),
+                                     reading.get('battery'), reading.get('angle'), reading.get('rssi'),
+                                     reading.get('recorded_at'))
+                                )
+                    imported += 1
+                except Exception as e:
+                    app.logger.warning(f"restore densimetres: skipped {spindle.get('name')!r}: {e}")
+        return imported
+
+    elif section == 'brouillons':
+        imported = 0
+        with get_db() as conn:
+            if mode == 'replace':
+                conn.execute('DELETE FROM draft_recipes')
+            for d in items:
+                if not d.get('title'):
+                    continue
+                try:
+                    img = _shrink_image_b64(d['image']) if _image_too_large(d.get('image')) else d.get('image')
+                    existing = conn.execute('SELECT id FROM draft_recipes WHERE title=?', (d['title'],)).fetchone()
+                    if existing:
+                        conn.execute(
+                            '''UPDATE draft_recipes SET style=?,volume=?,ingredients=?,notes=?,color=?,
+                               target_date=?,event_label=?,image=? WHERE id=?''',
+                            (d.get('style'), d.get('volume'), d.get('ingredients'), d.get('notes'),
+                             d.get('color', '#ff9500'), d.get('target_date'), d.get('event_label'),
+                             img, existing['id'])
+                        )
+                    else:
+                        conn.execute(
+                            '''INSERT INTO draft_recipes
+                               (title, style, volume, ingredients, notes, color,
+                                target_date, event_label, sort_order, image)
+                               VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                            (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
+                             d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
+                             d.get('target_date'), d.get('event_label'), d.get('sort_order', 0), img)
+                        )
+                    imported += 1
+                except Exception as e:
+                    app.logger.warning(f"restore brouillons: skipped {d.get('title')!r}: {e}")
+        return imported
+
+    elif section == 'calendrier':
+        imported = 0
+        with get_db() as conn:
+            if mode == 'replace':
+                conn.execute('DELETE FROM custom_calendar_events')
+            for ev in items:
+                if not ev.get('title') or not ev.get('event_date'):
+                    continue
+                try:
+                    existing = conn.execute(
+                        'SELECT id FROM custom_calendar_events WHERE title=? AND event_date=?',
+                        (ev['title'], ev['event_date'])
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            '''UPDATE custom_calendar_events SET emoji=?,color=?,notes=?,
+                               brew_reminder=?,telegram_notify=?,style=?,recipe_id=?,draft_id=? WHERE id=?''',
+                            (ev.get('emoji', '📅'), ev.get('color', '#f59e0b'), ev.get('notes'),
+                             ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
+                             ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'), existing['id'])
+                        )
+                    else:
+                        conn.execute(
+                            '''INSERT INTO custom_calendar_events
+                               (title, emoji, event_date, color, notes,
+                                brew_reminder, telegram_notify, style, recipe_id, draft_id)
+                               VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                            (ev.get('title'), ev.get('emoji', '📅'), ev['event_date'],
+                             ev.get('color', '#f59e0b'), ev.get('notes'),
+                             ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
+                             ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'))
+                        )
+                    imported += 1
+                except Exception as e:
+                    app.logger.warning(f"restore calendrier: skipped {ev.get('title')!r}: {e}")
+        return imported
+
+    return 0
+
+
+# ── DB ADMIN ─────────────────────────────────────────────────────────────────
+
+@app.route('/api/admin/db-stats')
+def admin_db_stats():
+    main_size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+    readings_size = os.path.getsize(READINGS_DB_PATH) if os.path.exists(READINGS_DB_PATH) else 0
+    main_tables = {}
+    with get_db() as conn:
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall():
+            name = row['name']
+            main_tables[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+    readings_tables = {}
+    with get_readings_db() as conn:
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall():
+            name = row['name']
+            readings_tables[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+    return jsonify({
+        'main':     {'size': main_size,     'tables': main_tables},
+        'readings': {'size': readings_size, 'tables': readings_tables},
+    })
+
+
+@app.route('/api/admin/vacuum', methods=['POST'])
+def admin_vacuum():
+    try:
+        for path in (DB_PATH, READINGS_DB_PATH):
+            conn = sqlite3.connect(path)
+            conn.execute('VACUUM')
+            conn.close()
+        return jsonify({
+            'ok': True,
+            'main_size':     os.path.getsize(DB_PATH)          if os.path.exists(DB_PATH)          else 0,
+            'readings_size': os.path.getsize(READINGS_DB_PATH) if os.path.exists(READINGS_DB_PATH) else 0,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/export-sql')
+def admin_export_sql():
+    lines = []
+    conn = sqlite3.connect(DB_PATH)
+    for line in conn.iterdump():
+        lines.append(line)
+    conn.close()
+    sql_str = '\n'.join(lines)
+    filename = f'brewhome_{datetime.now().strftime("%Y-%m-%d")}.sql'
+    return Response(sql_str, mimetype='text/plain',
+                    headers={'Content-Disposition': f'attachment; filename="{filename}"'})
 
 
 # ── GLOBAL ERROR HANDLER ─────────────────────────────────────────────────────
@@ -3700,4 +5427,3 @@ if __name__ == '__main__':
     except Exception as e:
         app.logger.warning(f"GitHub backup scheduler init error: {e}")
     app.run(host='0.0.0.0', port=5000, debug=False)
-

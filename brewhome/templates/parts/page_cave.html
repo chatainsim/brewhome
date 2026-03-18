@@ -7,6 +7,7 @@
         <input type="text" id="cave-search" placeholder="🔍 Rechercher..." style="width:220px;padding-right:24px" oninput="renderCave();document.getElementById('cave-search-clear').style.display=this.value?'flex':'none'">
         <button id="cave-search-clear" onclick="document.getElementById('cave-search').value='';renderCave();this.style.display='none'" style="display:none;position:absolute;right:5px;background:none;border:none;cursor:pointer;color:var(--muted);font-size:.8rem;padding:0;line-height:1;align-items:center" title="Vider">✕</button>
       </div>
+      <button class="btn btn-ghost btn-sm" onclick="printAllCaveLabels()" title="Imprimer toutes les étiquettes"><i class="fas fa-tags"></i></button>
       <button class="btn btn-primary" onclick="openBeerModal()"><i class="fas fa-plus"></i> <span data-i18n="common.add">Ajouter</span></button>
     </div>
   </div>

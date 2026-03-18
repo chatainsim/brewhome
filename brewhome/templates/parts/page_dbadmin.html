@@ -1,0 +1,47 @@
+<div class="page" id="page-dbadmin">
+  <div class="section-head">
+    <h2 data-i18n="dbadmin.page_title">Base de données</h2>
+    <div class="actions">
+      <button class="btn btn-ghost btn-sm" onclick="loadDbStats()" id="dbadmin-refresh-btn">
+        <i class="fas fa-rotate-right"></i> <span data-i18n="dbadmin.btn_refresh">Actualiser</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="dbadmin-loading" class="empty"><i class="fas fa-spinner fa-spin"></i></div>
+
+  <div id="dbadmin-content" style="display:none">
+
+    <!-- Chiffres clés -->
+    <div class="grid-4" id="dbadmin-summary" style="margin-bottom:24px"></div>
+
+    <!-- Détail tables -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+      <div class="card">
+        <div class="section-label" style="margin-bottom:12px" data-i18n="dbadmin.main_db">Base principale (brewhome.db)</div>
+        <div id="dbadmin-main-tables"></div>
+      </div>
+      <div class="card">
+        <div class="section-label" style="margin-bottom:12px" data-i18n="dbadmin.readings_db">Lectures capteurs (brewhome_readings.db)</div>
+        <div id="dbadmin-readings-tables"></div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card">
+      <div class="section-label" style="margin-bottom:16px" data-i18n="dbadmin.actions_title">Actions</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <button class="btn btn-ghost" onclick="runVacuum()" id="dbadmin-vacuum-btn">
+          <i class="fas fa-broom"></i> <span data-i18n="dbadmin.btn_vacuum">VACUUM SQLite</span>
+        </button>
+        <button class="btn btn-ghost" onclick="exportSql()">
+          <i class="fas fa-file-export"></i> <span data-i18n="dbadmin.btn_export_sql">Exporter SQL complet</span>
+        </button>
+      </div>
+      <p style="font-size:.72rem;color:var(--muted);margin-top:10px" data-i18n="dbadmin.vacuum_hint">
+        VACUUM libère l'espace disque inutilisé, défragmente et optimise la base de données.
+      </p>
+    </div>
+
+  </div>
+</div>

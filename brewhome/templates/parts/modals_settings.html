@@ -239,6 +239,17 @@
           </div>
 
           <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+            <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-calculator"></i> <span data-i18n="settings.water.section_recipe">Calculs recette</span></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <label style="font-size:.88rem;color:var(--muted);white-space:nowrap;width:160px" data-i18n="settings.water.ibu_formula_label">Formule IBU</label>
+              <select id="ibu-formula" style="width:180px">
+                <option value="tinseth" data-i18n="settings.water.ibu_tinseth">Tinseth (défaut)</option>
+                <option value="rager" data-i18n="settings.water.ibu_rager">Rager</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
             <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-satellite-dish"></i> <span data-i18n="settings.water.section_hubeau">Récupération automatique (HubEau)</span></div>
             <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px" data-i18n="settings.water.hubeau_hint">Récupère les dernières valeurs connues de votre eau du robinet via l'API HubEau d'Eau France.</p>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
@@ -360,15 +371,8 @@
                 <i class="fas fa-globe" style="color:var(--amber)"></i> <span data-i18n="settings.github.vitrine_title">Vitrine (GitHub Pages)</span>
               </h4>
               <div style="display:flex;flex-direction:column;gap:10px">
-                <div class="field"><label><span data-i18n="settings.github.repo_label">Dépôt</span> <span style="font-size:.78rem;color:var(--muted)">(owner/repo)</span></label><input type="text" id="gh-vit-repo" placeholder="ex : monpseudo/ma-vitrine"></div>
-                <div class="field"><label data-i18n="settings.github.vitrine_branch">Branche</label><input type="text" id="gh-vit-branch" placeholder="main" value="main"></div>
-                <div class="field">
-                  <label data-i18n="settings.github.vitrine_pat">Personal Access Token</label>
-                  <div style="display:flex;gap:6px">
-                    <input type="password" id="gh-vit-pat" placeholder="ghp_…" style="flex:1">
-                    <button class="btn btn-ghost btn-sm btn-icon" onclick="togglePat('gh-vit-pat')" title="Afficher/masquer"><i class="fas fa-eye"></i></button>
-                  </div>
-                </div>
+                <div id="gh-vit-targets"></div>
+                <button class="btn btn-ghost btn-sm" onclick="_ghAddTarget('vit')" style="align-self:flex-start"><i class="fas fa-plus"></i> <span data-i18n="settings.github.btn_add_dest">+ Ajouter une destination</span></button>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                   <button id="btn-push-vitrine" class="btn btn-primary btn-sm" onclick="pushVitrine()"><i class="fa-brands fa-github"></i> <span data-i18n="settings.github.btn_push_vitrine">Pousser la vitrine</span></button>
                   <button id="btn-push-vitrine-force" class="btn btn-ghost btn-sm" onclick="pushVitrine(true)" title="Forcer l'envoi même si les fichiers sont identiques"><i class="fas fa-rotate"></i> <span data-i18n="settings.github.btn_force">Forcer</span></button>
@@ -382,15 +386,8 @@
                 <i class="fas fa-database" style="color:var(--info)"></i> <span data-i18n="settings.github.data_title">Données (backup)</span>
               </h4>
               <div style="display:flex;flex-direction:column;gap:10px">
-                <div class="field"><label><span data-i18n="settings.github.repo_label">Dépôt</span> <span style="font-size:.78rem;color:var(--muted)">(owner/repo)</span></label><input type="text" id="gh-dat-repo" placeholder="ex : monpseudo/mes-donnees"></div>
-                <div class="field"><label data-i18n="settings.github.vitrine_branch">Branche</label><input type="text" id="gh-dat-branch" placeholder="main" value="main"></div>
-                <div class="field">
-                  <label data-i18n="settings.github.vitrine_pat">Personal Access Token</label>
-                  <div style="display:flex;gap:6px">
-                    <input type="password" id="gh-dat-pat" placeholder="ghp_…" style="flex:1">
-                    <button class="btn btn-ghost btn-sm btn-icon" onclick="togglePat('gh-dat-pat')" title="Afficher/masquer"><i class="fas fa-eye"></i></button>
-                  </div>
-                </div>
+                <div id="gh-dat-targets"></div>
+                <button class="btn btn-ghost btn-sm" onclick="_ghAddTarget('dat')" style="align-self:flex-start"><i class="fas fa-plus"></i> <span data-i18n="settings.github.btn_add_dest">+ Ajouter une destination</span></button>
                 <button id="btn-push-data" class="btn btn-primary btn-sm" onclick="pushGithubData()"><i class="fa-brands fa-github"></i> <span data-i18n="settings.github.btn_export_data">Exporter les données vers GitHub</span></button>
                 <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
                   <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px"><i class="fas fa-clock"></i> <span data-i18n="settings.github.auto_backup_title">Sauvegarde automatique</span></div>
@@ -623,6 +620,33 @@
             </div>
           </div>
 
+          <div style="background:var(--card2);border-radius:10px;padding:14px 16px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <input type="checkbox" id="tg-ferm-enabled" style="width:auto">
+              <label for="tg-ferm-enabled" style="font-weight:700;font-size:.92rem;text-transform:none;color:var(--text)">
+                <span data-i18n="settings.notif.ferm_label">Rappels de fermentation</span> — <span style="color:var(--muted);font-weight:400" data-i18n="settings.notif.brews_freq">quotidien</span>
+              </label>
+            </div>
+            <div style="font-size:.78rem;color:var(--muted);margin-bottom:8px" data-i18n="settings.notif.ferm_hint">Alerte J-2, J-1, J0 et J+1 basée sur brew_date + durée de fermentation.</div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="font-size:.83rem;color:var(--muted)" data-i18n="settings.notif.send_hour">Heure d'envoi :</span>
+              <input type="number" id="tg-ferm-hour" min="0" max="23" value="8" style="width:62px" placeholder="HH">
+              <span style="color:var(--muted)">h</span>
+              <input type="number" id="tg-ferm-min" min="0" max="59" value="0" style="width:62px" placeholder="MM">
+              <button class="btn btn-ghost btn-sm" onclick="triggerTelegram('ferm_reminders')"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
+            </div>
+          </div>
+
+          <div style="background:var(--card2);border-radius:10px;padding:14px 16px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+              <input type="checkbox" id="tg-bottling-enabled" style="width:auto">
+              <label for="tg-bottling-enabled" style="font-weight:700;font-size:.92rem;text-transform:none;color:var(--text)">
+                <span data-i18n="settings.notif.bottling_label">Alerte embouteillage</span> — <span style="color:var(--muted);font-weight:400" data-i18n="settings.notif.bottling_freq">immédiat</span>
+              </label>
+            </div>
+            <div style="font-size:.78rem;color:var(--muted)" data-i18n="settings.notif.bottling_hint">Notification lors de l'ajout d'une bière en cave (depuis un brassin), avec le nombre de bouteilles estimé.</div>
+          </div>
+
           <div style="background:var(--card2);border-radius:10px;padding:14px 16px;margin-top:12px">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
               <input type="checkbox" id="tg-events-enabled" style="width:auto" onchange="document.getElementById('tg-events-config').style.display=this.checked?'flex':'none'">
@@ -634,7 +658,7 @@
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                 <input type="checkbox" id="tg-events-remind" style="width:auto">
                 <label for="tg-events-remind" style="font-size:.83rem;color:var(--muted);text-transform:none">
-                  <span data-i18n="settings.notif.remind_45">Rappel <strong>45 jours avant</strong> — "Il est temps de brasser !"</span>
+                  <span data-i18n="settings.notif.remind_45">🔔 Rappel J avant — "Il est temps de brasser !"</span>
                 </label>
               </div>
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -733,6 +757,11 @@
                 <button class="btn btn-ghost btn-sm" onclick="exportRecipes()"><i class="fas fa-file-export"></i> <span data-i18n="settings.import.btn_export">Exporter (JSON)</span></button>
                 <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-rec-file')"><i class="fas fa-file-import"></i> <span data-i18n="settings.import.btn_import">Importer (JSON)</span></button>
                 <input type="file" id="import-rec-file" accept=".json" style="display:none" onchange="importRecipes(this)">
+                <button class="btn btn-ghost btn-sm" onclick="exportBeerXML()" style="border-color:rgba(16,185,129,.4)"><i class="fas fa-file-code"></i> <span data-i18n="settings.import.btn_export_beerxml">Exporter (BeerXML)</span></button>
+                <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-beerxml-file')" style="border-color:rgba(16,185,129,.4)"><i class="fas fa-file-code"></i> <span data-i18n="settings.import.btn_import_beerxml">Importer (BeerXML)</span></button>
+                <input type="file" id="import-beerxml-file" accept=".xml,.beerxml" style="display:none" onchange="importBeerXML(this)">
+                <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-brewfather-file')" style="border-color:rgba(99,102,241,.5)"><i class="fas fa-beer-mug-empty"></i> <span data-i18n="settings.import.btn_import_brewfather">Importer depuis Brewfather</span></button>
+                <input type="file" id="import-brewfather-file" accept=".json" style="display:none" onchange="importBrewfather(this)">
                 <p style="font-size:.72rem;color:var(--muted);margin:0" data-i18n="settings.import.rec_hint">Recettes avec name, ingredients[]…</p>
               </div>
             </div>
@@ -783,7 +812,23 @@
                 <button class="btn btn-ghost btn-sm" onclick="exportCalendar()"><i class="fas fa-file-export"></i> <span data-i18n="settings.import.btn_export">Exporter (JSON)</span></button>
                 <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-calendar-file')"><i class="fas fa-file-import"></i> <span data-i18n="settings.import.btn_import">Importer (JSON)</span></button>
                 <input type="file" id="import-calendar-file" accept=".json" style="display:none" onchange="importCalendar(this)">
+                <button class="btn btn-ghost btn-sm" onclick="downloadIcal()" style="border-color:rgba(139,92,246,.4)"><i class="fas fa-calendar-arrow-down"></i> <span data-i18n="settings.import.btn_export_ical">Exporter iCal (.ics)</span></button>
                 <p style="font-size:.72rem;color:var(--muted);margin:0" data-i18n="settings.import.cal_hint">Événements personnalisés avec titre, date, couleur, rappels.</p>
+                <!-- Abonnement iCal -->
+                <div style="background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:8px;padding:10px;margin-top:4px">
+                  <div style="font-size:.78rem;font-weight:600;color:#a78bfa;margin-bottom:6px"><i class="fas fa-rss"></i> <span data-i18n="settings.import.ical_sub_title">Abonnement (Google / Apple Calendar)</span></div>
+                  <div style="display:flex;gap:6px;align-items:center">
+                    <input id="ical-url-input" type="text" readonly onclick="this.select()"
+                      style="flex:1;font-size:.72rem;font-family:monospace;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);min-width:0">
+                    <button class="btn btn-ghost btn-sm btn-icon" onclick="copyIcalUrl()" title="Copier l'URL">
+                      <i class="fas fa-copy" id="ical-copy-icon"></i>
+                    </button>
+                    <button class="btn btn-ghost btn-sm btn-icon" onclick="openWebcal()" title="Ouvrir webcal://">
+                      <i class="fas fa-arrow-up-right-from-square"></i>
+                    </button>
+                  </div>
+                  <p style="font-size:.68rem;color:var(--muted);margin:6px 0 0" data-i18n="settings.import.ical_sub_hint">Collez cette URL dans votre calendrier. Utilisez webcal:// pour Apple Calendar.</p>
+                </div>
               </div>
             </div>
 
@@ -798,10 +843,57 @@
             </div>
 
           </div>
+
+          <!-- RESTAURER DEPUIS GIT -->
+          <div style="margin-top:24px;background:rgba(6,182,212,.06);border:1px solid rgba(6,182,212,.2);border-radius:12px;padding:18px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+              <i class="fas fa-cloud-arrow-down" style="color:#22d3ee;font-size:1.1rem"></i>
+              <h4 style="font-size:.88rem;font-weight:700;color:#22d3ee;text-transform:uppercase;letter-spacing:.05em;margin:0" data-i18n="settings.restore.title">Restaurer depuis la sauvegarde Git</h4>
+            </div>
+            <p style="font-size:.78rem;color:var(--muted);margin-bottom:14px" id="restore-git-info" data-i18n="settings.restore.info">Récupère et importe les fichiers JSON depuis le dépôt de sauvegarde configuré (backup_auto/).</p>
+
+            <!-- Mode selector -->
+            <div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;cursor:pointer">
+                <input type="radio" name="restore-mode" value="merge" checked id="restore-mode-merge">
+                <span><b data-i18n="settings.restore.mode_merge">Fusionner</b> — <span style="color:var(--muted)" data-i18n="settings.restore.mode_merge_hint">ajoute et met à jour, conserve les données existantes</span></span>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;cursor:pointer">
+                <input type="radio" name="restore-mode" value="replace" id="restore-mode-replace">
+                <span style="color:var(--danger)"><b data-i18n="settings.restore.mode_replace">Remplacer</b> — <span data-i18n="settings.restore.mode_replace_hint">efface et réimporte intégralement chaque section sélectionnée</span></span>
+              </label>
+            </div>
+
+            <!-- Section checkboxes -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px" id="restore-git-sections">
+              <label class="restore-chk"><input type="checkbox" value="inventaire" checked> <span data-i18n="settings.import.inv_title">Inventaire</span></label>
+              <label class="restore-chk"><input type="checkbox" value="recettes" checked> <span data-i18n="settings.import.rec_title">Recettes</span></label>
+              <label class="restore-chk"><input type="checkbox" value="cave" checked> <span data-i18n="settings.import.cave_title">Cave</span></label>
+              <label class="restore-chk"><input type="checkbox" value="brassins" checked> <span data-i18n="settings.import.brews_title">Brassins</span></label>
+              <label class="restore-chk"><input type="checkbox" value="catalogue"> <span data-i18n="settings.import.catalog_title">Catalogue</span></label>
+              <label class="restore-chk"><input type="checkbox" value="brouillons"> <span data-i18n="settings.import.drafts_title">Brouillons</span></label>
+              <label class="restore-chk"><input type="checkbox" value="calendrier"> <span data-i18n="settings.import.cal_title">Calendrier</span></label>
+              <label class="restore-chk"><input type="checkbox" value="densimetres"> <span data-i18n="settings.import.spindles_title">Densimètres</span></label>
+            </div>
+
+            <!-- Results area -->
+            <div id="restore-git-results" style="display:none;margin-bottom:12px;font-size:.8rem;display:flex;flex-wrap:wrap;gap:6px"></div>
+
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-ghost btn-sm" onclick="restoreFromGit()" id="btn-restore-git" style="border-color:rgba(6,182,212,.4);color:#22d3ee">
+                <i class="fas fa-cloud-arrow-down"></i> <span data-i18n="settings.restore.btn_restore">Restaurer depuis Git</span>
+              </button>
+              <button class="btn btn-ghost btn-sm" onclick="toggleRestoreAll(true)" style="font-size:.75rem;padding:4px 10px" data-i18n="settings.restore.btn_all">Tout sélectionner</button>
+              <button class="btn btn-ghost btn-sm" onclick="toggleRestoreAll(false)" style="font-size:.75rem;padding:4px 10px" data-i18n="settings.restore.btn_none">Tout désélectionner</button>
+            </div>
+          </div>
+
         </div><!-- /stab-import -->
 
         <!-- TAB MISES À JOUR -->
         <div id="stab-updates" style="display:none">
+          <!-- Version application -->
+          <div id="app-version-row" style="margin-bottom:18px"></div>
           <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px" data-i18n="settings.updates.hint">Vérifiez et mettez à jour les librairies statiques embarquées (Chart.js, Font Awesome, Google Fonts).</p>
           <div id="updates-list" style="display:flex;flex-direction:column;gap:12px">
             <div style="color:var(--muted);font-size:.85rem"><i class="fas fa-spinner fa-spin"></i> <span data-i18n="settings.updates.checking">Vérification en cours…</span></div>

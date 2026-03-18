@@ -1,0 +1,92 @@
+<div class="page" id="page-stats">
+  <div class="section-head">
+    <h2 data-i18n="stat.page_title">Statistiques annuelles</h2>
+    <div class="actions">
+      <select id="stats-year-sel" onchange="renderStatsPage()" style="width:160px"></select>
+    </div>
+  </div>
+
+  <!-- Chiffres clés -->
+  <div class="grid-4" id="stats-big-stats" style="margin-bottom:16px"></div>
+  <div class="grid-4" id="stats-extra-stats" style="margin-bottom:24px"></div>
+
+  <!-- Graphes : 2 colonnes -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+    <div class="card" id="stats-vol-card">
+      <div class="section-label" id="stats-vol-label" style="margin-bottom:12px"></div>
+      <div style="height:220px;position:relative"><canvas id="stats-vol-chart"></canvas></div>
+    </div>
+    <div class="card" id="stats-styles-card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_styles">Styles les plus fréquents</div>
+      <div style="height:220px;position:relative"><canvas id="stats-styles-chart"></canvas></div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_abv_trend">Évolution ABV moyen</div>
+      <div style="height:200px;position:relative"><canvas id="stats-abv-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_cost_trend">Dépenses estimées par année (€)</div>
+      <div style="height:200px;position:relative"><canvas id="stats-cost-chart"></canvas></div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:6px" data-i18n="stat.cost_hint">Estimé d'après les prix de l'inventaire</div>
+    </div>
+  </div>
+
+  <!-- Saisonnalité + Fermentation -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_season">Saisonnalité des brassins</div>
+      <div style="height:200px;position:relative"><canvas id="stats-season-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_ferm_avg">Fermentation moyenne (jours)</div>
+      <div style="height:200px;position:relative"><canvas id="stats-ferm-chart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- KPIs de performance -->
+  <div class="grid-4" id="stats-perf-stats" style="margin-bottom:24px"></div>
+
+  <!-- Top malts + Top houblons -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_top_malts">Top malts brassés</div>
+      <div style="height:220px;position:relative"><canvas id="stats-malts-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_top_hops">Top houblons brassés</div>
+      <div style="height:220px;position:relative"><canvas id="stats-hops-chart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Efficacité + Coût/litre -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_eff">Efficacité de brassage (%)</div>
+      <div style="height:200px;position:relative"><canvas id="stats-eff-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_cpl">Coût moyen / litre (€)</div>
+      <div style="height:200px;position:relative"><canvas id="stats-cpl-chart"></canvas></div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:6px" data-i18n="stat.cost_hint">Estimé d'après les prix de l'inventaire</div>
+    </div>
+  </div>
+
+  <div id="stats-empty" class="empty" style="display:none"><i class="fas fa-chart-bar"></i><p data-i18n="stat.no_brews">Aucun brassin terminé</p></div>
+
+  <!-- Consommation dans le temps -->
+  <div class="card" id="stats-conso-section" style="margin-bottom:24px"></div>
+
+  <!-- Classement des bières -->
+  <div class="card" id="stats-beer-ranking" style="margin-bottom:24px"></div>
+
+  <!-- Consommation des batchs -->
+  <div class="card" id="stats-batch-conso" style="margin-bottom:24px"></div>
+
+  <!-- Récapitulatif des brassins -->
+  <div class="card" id="stats-brew-table" style="margin-bottom:24px"></div>
+
+  <!-- État de l'inventaire -->
+  <div class="card" id="stats-inv-health" style="margin-bottom:24px"></div>
+</div>

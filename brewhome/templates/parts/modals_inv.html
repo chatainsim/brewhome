@@ -26,6 +26,10 @@
             <option value="sachet">sachet</option><option value="pièce">pièce</option>
           </select></div>
       </div>
+      <div class="form-row cols-2">
+        <div class="field"><label data-i18n="inv.field_min_stock">Seuil alerte</label><input type="number" id="inv-f-min-stock" min="0" step="0.001" placeholder="—"></div>
+        <div class="field"><label data-i18n="inv.field_expiry">Date de péremption</label><input type="date" id="inv-f-expiry"></div>
+      </div>
       <div class="form-row cols-3">
         <div class="field" id="inv-f-ebc-wrap"><label data-i18n="inv.field_ebc">EBC (couleur)</label><input type="number" id="inv-f-ebc" step="0.5" placeholder="Ex : 5"></div>
         <div class="field" id="inv-f-alpha-wrap" style="display:none"><label data-i18n="inv.field_alpha">Alpha acides (%)</label><input type="number" id="inv-f-alpha" step="0.1" placeholder="Ex : 10.5"></div>
@@ -33,6 +37,37 @@
         <div class="field"><label id="inv-f-price-lbl" data-i18n="inv.field_price">Prix (€/kg)</label><input type="number" id="inv-f-price" step="0.01" min="0" placeholder="Ex : 2.50"></div>
       </div>
       <div class="field" id="inv-f-aroma-wrap" style="display:none"><label data-i18n="inv.field_aroma">Profil aromatique</label><input type="text" id="inv-f-aroma" placeholder="Ex : citrus, tropical, floral…"></div>
+
+      <!-- ── Section Levure ──────────────────────────────────────────── -->
+      <div id="inv-yeast-section" style="display:none;border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px;background:var(--card2)">
+        <div class="section-label" style="margin-bottom:12px;font-size:.78rem"><i class="fas fa-flask" style="color:var(--amber)"></i> <span data-i18n="inv.yeast_section">Informations levure</span></div>
+        <div class="form-row cols-2">
+          <div class="field">
+            <label data-i18n="inv.yeast_type_field">Souche / Type</label>
+            <input type="text" id="inv-f-ytype" placeholder="Ex : Ale, Lager, Belgian, WLP001…">
+          </div>
+          <div class="field">
+            <label data-i18n="inv.yeast_generation">Génération</label>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="number" id="inv-f-ygen" value="1" min="1" max="20" step="1" style="width:70px" oninput="invCalcViability()">
+              <span style="font-size:.75rem;color:var(--muted)" data-i18n="inv.yeast_gen_hint">G1 = sachet neuf · G2+ = récoltée</span>
+            </div>
+          </div>
+        </div>
+        <div class="form-row cols-2">
+          <div class="field">
+            <label data-i18n="inv.yeast_mfg_date">Date de fabrication</label>
+            <input type="date" id="inv-f-ymfg" oninput="invCalcViability()">
+          </div>
+          <div class="field">
+            <label data-i18n="inv.yeast_open_date">Date d'ouverture</label>
+            <input type="date" id="inv-f-yopen" oninput="invCalcViability()">
+          </div>
+        </div>
+        <!-- Viability result -->
+        <div id="inv-yeast-via" style="margin-top:4px"></div>
+      </div>
+
       <div class="field"><label data-i18n="common.notes">Notes</label><textarea id="inv-f-notes" placeholder="Variété, profil aromatique..."></textarea></div>
       <input type="hidden" id="inv-f-id">
     </div>

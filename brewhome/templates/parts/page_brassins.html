@@ -3,6 +3,8 @@
     <h2 data-i18n="brew.page_title">Sessions de brassage</h2>
     <div class="actions">
       <button class="btn btn-ghost btn-sm" id="brew-arch-btn" onclick="toggleShowArchived('brew')"></button>
+      <button class="btn btn-ghost btn-sm" onclick="openBrewCompareModal()" title=""><i class="fas fa-code-compare"></i> <span data-i18n="brew.compare_btn">Comparer</span></button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleBrewTimerPanel()"><i class="fas fa-stopwatch"></i> <span data-i18n="brew.timer_btn">Timers</span></button>
       <div style="position:relative;display:inline-flex;align-items:center">
         <input type="text" id="brew-search" placeholder="🔍" style="width:160px;padding-right:22px" oninput="renderBrassins();document.getElementById('brew-search-clear').style.display=this.value?'flex':'none'">
         <button id="brew-search-clear" onclick="document.getElementById('brew-search').value='';renderBrassins();this.style.display='none'" style="display:none;position:absolute;right:5px;background:none;border:none;cursor:pointer;color:var(--muted);font-size:.8rem;padding:0;line-height:1;align-items:center" title="Vider">✕</button>

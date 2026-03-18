@@ -104,54 +104,98 @@
       <button class="modal-close" onclick="closeModal('tasting-modal')">✕</button>
     </div>
     <div class="modal-body">
-      <div class="field" style="margin-bottom:16px">
-        <label data-i18n="tasting.date">Date de dégustation</label>
-        <input type="date" id="tasting-f-date" style="max-width:200px">
+      <!-- Date + Note -->
+      <div style="display:flex;align-items:flex-end;gap:20px;margin-bottom:16px;flex-wrap:wrap">
+        <div class="field" style="margin-bottom:0">
+          <label data-i18n="tasting.date">Date de dégustation</label>
+          <input type="date" id="tasting-f-date" style="max-width:200px">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label data-i18n="tasting.rating">Note globale</label>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="star-input" id="tasting-star-input">
+              <span class="star" onclick="setTastingRating(1)">★</span>
+              <span class="star" onclick="setTastingRating(2)">★</span>
+              <span class="star" onclick="setTastingRating(3)">★</span>
+              <span class="star" onclick="setTastingRating(4)">★</span>
+              <span class="star" onclick="setTastingRating(5)">★</span>
+            </div>
+            <span id="tasting-rating-label" style="font-size:.82rem;color:var(--muted)"></span>
+          </div>
+        </div>
       </div>
-      <div class="form-row cols-2" style="margin-bottom:0">
+      <!-- Scores radar (1-10) -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:8px" data-i18n="tasting.scores_title">Scores (1–10)</div>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--info);font-weight:600;white-space:nowrap"><i class="fas fa-eye"></i></label>
+            <input type="number" id="tasting-s-appearance" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.appearance">Apparence</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--hop);font-weight:600;white-space:nowrap"><i class="fas fa-wind"></i></label>
+            <input type="number" id="tasting-s-aroma" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.aroma">Arôme</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--malt);font-weight:600;white-space:nowrap"><i class="fas fa-droplet"></i></label>
+            <input type="number" id="tasting-s-flavor" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.flavor">Goût</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--amber);font-weight:600;white-space:nowrap"><i class="fas fa-fire"></i></label>
+            <input type="number" id="tasting-s-bitterness" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.bitterness">Amertume</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--info);font-weight:600;white-space:nowrap"><i class="fas fa-circle-half-stroke"></i></label>
+            <input type="number" id="tasting-s-mouthfeel" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.mouthfeel">Bouche</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--amber);font-weight:600;white-space:nowrap"><i class="fas fa-hourglass-end"></i></label>
+            <input type="number" id="tasting-s-finish" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.finish">Finale</span>
+          </div>
+        </div>
+      </div>
+      <!-- Nez / Bouche / Finale — 3 colonnes principales -->
+      <div class="form-row" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:0">
         <div class="field">
-          <label><i class="fas fa-eye" style="color:var(--info)"></i> <span data-i18n="tasting.appearance">Apparence</span></label>
-          <textarea id="tasting-f-appearance" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_appearance"></textarea>
+          <label><i class="fas fa-wind" style="color:var(--hop)"></i> <span data-i18n="tasting.aroma">Nez / Arôme</span></label>
+          <textarea id="tasting-f-aroma" style="height:90px;resize:vertical" data-i18n-placeholder="tasting.ph_aroma"></textarea>
         </div>
         <div class="field">
-          <label><i class="fas fa-wind" style="color:var(--hop)"></i> <span data-i18n="tasting.aroma">Arôme</span></label>
-          <textarea id="tasting-f-aroma" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_aroma"></textarea>
+          <label><i class="fas fa-circle-half-stroke" style="color:var(--info)"></i> <span data-i18n="tasting.mouthfeel">Bouche</span></label>
+          <textarea id="tasting-f-mouthfeel" style="height:90px;resize:vertical" data-i18n-placeholder="tasting.ph_mouthfeel"></textarea>
+        </div>
+        <div class="field">
+          <label><i class="fas fa-hourglass-end" style="color:var(--amber)"></i> <span data-i18n="tasting.finish">Finale</span></label>
+          <textarea id="tasting-f-finish" style="height:90px;resize:vertical" data-i18n-placeholder="tasting.ph_finish"></textarea>
         </div>
       </div>
-      <div class="form-row cols-2" style="margin-bottom:0">
+      <!-- Secondaires : Goût / Amertume / Apparence -->
+      <div class="form-row" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:0">
         <div class="field">
           <label><i class="fas fa-droplet" style="color:var(--malt)"></i> <span data-i18n="tasting.flavor">Goût</span></label>
-          <textarea id="tasting-f-flavor" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_flavor"></textarea>
+          <textarea id="tasting-f-flavor" style="height:72px;resize:vertical" data-i18n-placeholder="tasting.ph_flavor"></textarea>
         </div>
         <div class="field">
           <label><i class="fas fa-fire" style="color:var(--amber)"></i> <span data-i18n="tasting.bitterness">Amertume</span></label>
-          <textarea id="tasting-f-bitterness" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_bitterness"></textarea>
-        </div>
-      </div>
-      <div class="form-row cols-2" style="margin-bottom:0">
-        <div class="field">
-          <label><i class="fas fa-circle-half-stroke" style="color:var(--info)"></i> <span data-i18n="tasting.mouthfeel">Bouche</span></label>
-          <textarea id="tasting-f-mouthfeel" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_mouthfeel"></textarea>
+          <textarea id="tasting-f-bitterness" style="height:72px;resize:vertical" data-i18n-placeholder="tasting.ph_bitterness"></textarea>
         </div>
         <div class="field">
-          <label><i class="fas fa-comment" style="color:var(--muted)"></i> <span data-i18n="tasting.overall_notes">Commentaire global</span></label>
-          <textarea id="tasting-f-overall" style="height:80px;resize:vertical" data-i18n-placeholder="tasting.ph_overall"></textarea>
+          <label><i class="fas fa-eye" style="color:var(--info)"></i> <span data-i18n="tasting.appearance">Apparence</span></label>
+          <textarea id="tasting-f-appearance" style="height:72px;resize:vertical" data-i18n-placeholder="tasting.ph_appearance"></textarea>
         </div>
       </div>
-      <div class="field" style="margin-top:4px">
-        <label data-i18n="tasting.rating">Note globale</label>
-        <div style="display:flex;align-items:center;gap:10px">
-          <div class="star-input" id="tasting-star-input">
-            <span class="star" onclick="setTastingRating(1)">★</span>
-            <span class="star" onclick="setTastingRating(2)">★</span>
-            <span class="star" onclick="setTastingRating(3)">★</span>
-            <span class="star" onclick="setTastingRating(4)">★</span>
-            <span class="star" onclick="setTastingRating(5)">★</span>
-          </div>
-          <span id="tasting-rating-label" style="font-size:.82rem;color:var(--muted)"></span>
-        </div>
-        <input type="hidden" id="tasting-f-rating">
+      <!-- Commentaire libre -->
+      <div class="field" style="margin-bottom:0">
+        <label><i class="fas fa-comment" style="color:var(--muted)"></i> <span data-i18n="tasting.overall_notes">Commentaire libre</span></label>
+        <textarea id="tasting-f-overall" style="height:60px;resize:vertical" data-i18n-placeholder="tasting.ph_overall"></textarea>
       </div>
+      <input type="hidden" id="tasting-f-rating">
       <input type="hidden" id="tasting-f-beer-id">
     </div>
     <div class="modal-foot">
@@ -172,6 +216,17 @@
       <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
         <label style="font-size:.88rem;color:var(--muted);white-space:nowrap" data-i18n="cave.label_copies">Exemplaires :</label>
         <input type="number" id="label-copies" value="1" min="1" max="30" style="width:68px" oninput="renderLabelPreview()">
+        <label style="font-size:.88rem;color:var(--muted);white-space:nowrap;margin-left:8px" data-i18n="cave.label_fmt">Format :</label>
+        <select id="label-format" style="width:auto;min-width:130px">
+          <option value="A4 landscape" data-i18n="cave.label_fmt_a4l">A4 Paysage</option>
+          <option value="A4 portrait" data-i18n="cave.label_fmt_a4p">A4 Portrait</option>
+          <option value="A5 landscape" data-i18n="cave.label_fmt_a5l">A5 Paysage</option>
+          <option value="A5 portrait" data-i18n="cave.label_fmt_a5p">A5 Portrait</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.88rem;color:var(--muted);cursor:pointer;margin-left:8px">
+          <input type="checkbox" id="label-qr" onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_qr">Inclure un QR code</span>
+        </label>
       </div>
       <div class="label-preview-wrap" id="label-preview-wrap"></div>
     </div>

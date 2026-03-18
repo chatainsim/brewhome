@@ -29,6 +29,7 @@ Hébergée localement (sur un Raspberry Pi, NAS, PC ou serveur Linux), accessibl
 - **Vue lecture** : mode lecture seul avec bouton bascule vers l'édition
 - **Miniature du brouillon** : si la recette a été créée depuis un brouillon avec image, la miniature s'affiche en haut à droite de la fiche recette, cliquable pour l'afficher en grand
 - **Étiquettes en cave** : section en bas de la fiche recette affichant les photos des bières liées (cave) sous forme de vignettes 90×90 cliquables
+- **Impression** : imprimez la fiche complète (ingrédients, estimations OG/FG/ABV/IBU/EBC, eaux, notes) avec choix du format papier (A4 Portrait, A4 Paysage, A5 Portrait, A5 Paysage)
 - Archivage et réorganisation
 
 ### Brassins
@@ -53,7 +54,7 @@ Hébergée localement (sur un Raspberry Pi, NAS, PC ou serveur Linux), accessibl
 - Type de bière avec autocomplétion (base de données de styles intégrée)
 - Date de brassin et d'embouteillage
 - Modal de détail avec visualisation plein écran de la photo
-- Impression d'**étiquettes** (format A4 paysage, 5 par ligne, 51 mm de large)
+- Impression d'**étiquettes** (51 mm de large, 5 par ligne) avec choix du format papier : A4 Paysage, A4 Portrait, A5 Paysage, A5 Portrait
 - Archivage et réorganisation
 
 ### Soda Kegs
@@ -165,6 +166,12 @@ Basculez entre **Français** et **English** depuis **Paramètres avancés → La
 - **Nom de l'application** personnalisable (affiché dans la nav, les étiquettes, la vitrine)
 - **Logo** personnalisable (clic pour agrandissement)
 - **Couleur d'accent** (amber par défaut)
+
+### Mises à jour
+Depuis **Paramètres avancés → Mises à jour** :
+- **Version de l'application** : affiche la version installée et vérifie si une nouvelle version est disponible sur GitHub — avec lien direct vers la release
+- **Librairies statiques** : vérifie et met à jour Chart.js, Font Awesome et Google Fonts embarqués localement
+- Un **point rouge** sur l'icône ⚙️ de la navigation et un **toast persistant** signalent automatiquement au démarrage qu'une mise à jour est disponible (vérification en arrière-plan, résultat mis en cache 6 h)
 
 ### Calendrier — Paramètres avancés
 Depuis **Paramètres avancés → Calendrier** :
@@ -281,7 +288,49 @@ http://<IP-du-serveur>:5000
 
 ---
 
+## Intégration Homepage
+
+BrewHome expose un endpoint `/api/stats` compatible avec le widget **Custom API** de [Homepage](https://gethomepage.dev) :
+
+```yaml
+- BrewHome:
+    - Brasserie:
+        icon: mdi-beer
+        href: http://<IP>:5000
+        description: Gestion brassage maison
+        widget:
+          type: customapi
+          url: http://<IP>:5000/api/stats
+          refreshInterval: 60000
+          mappings:
+            - field: recipes_count
+              label: Recettes
+              format: number
+            - field: brews_active
+              label: Brassins en cours
+              format: number
+            - field: total_liters
+              label: Stock cave
+              format: float
+              suffix: " L"
+```
+
+Champs disponibles dans `/api/stats` :
+
+| Champ | Description |
+|-------|-------------|
+| `recipes_count` | Nombre de recettes actives |
+| `brews_count` | Nombre total de brassins |
+| `brews_active` | Brassins en cours (planifiés + en cours + en fermentation) |
+| `beers_count` | Nombre de bières en cave |
+| `total_33cl` | Total bouteilles 33 cl |
+| `total_75cl` | Total bouteilles 75 cl |
+| `total_liters` | Volume total en cave (bouteilles + fûts, en litres) |
+| `inventory_count` | Nombre d'ingrédients en stock |
+| `kegs_count` | Nombre de soda kegs |
+
+---
+
 ## Licence
 
 Usage personnel, pas de licence explicite définie.
-

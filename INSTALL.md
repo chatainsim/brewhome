@@ -522,9 +522,55 @@ Pour trouver votre fuseau : [en.wikipedia.org/wiki/List_of_tz_database_time_zone
 
 ---
 
+## Vérification de mise à jour
+
+BrewHome vérifie automatiquement si une nouvelle version est disponible sur [GitHub Releases](https://github.com/chatainsim/brewhome/releases) :
+
+- La vérification se fait **en arrière-plan** au démarrage de l'application, sans bloquer le chargement
+- Le résultat est **mis en cache 6 h** côté serveur et côté navigateur — l'API GitHub n'est pas interrogée à chaque rechargement
+- En cas de nouvelle version : un **point rouge** apparaît sur l'icône ⚙️ de la navigation + un **toast persistant** avec lien vers la release
+- La version installée et le statut de mise à jour sont consultables dans **Paramètres avancés → Mises à jour**
+
+La version courante est définie par la constante `APP_VERSION` dans `app.py` — elle doit être incrémentée à chaque release.
+
+---
+
+## Intégration Homepage
+
+BrewHome expose un endpoint `/api/stats` (GET, sans authentification) compatible avec le widget **Custom API** de [Homepage](https://gethomepage.dev/widgets/services/customapi/).
+
+Exemple de configuration dans `services.yaml` :
+
+```yaml
+- BrewHome:
+    - Brasserie:
+        icon: mdi-beer
+        href: http://<IP>:5000
+        description: Gestion brassage maison
+        widget:
+          type: customapi
+          url: http://<IP>:5000/api/stats
+          refreshInterval: 60000
+          mappings:
+            - field: recipes_count
+              label: Recettes
+              format: number
+            - field: brews_active
+              label: Brassins en cours
+              format: number
+            - field: total_liters
+              label: Stock cave
+              format: float
+              suffix: " L"
+```
+
+Remplacez `<IP>` par l'adresse de votre serveur. Consultez le README pour la liste complète des champs disponibles.
+
+---
+
 ## Notes
 
 - Le port par défaut est **5000**. Il est fixé dans `app.py` et dans le service systemd/OpenRC.
-- Les deux bases de données SQLite (`brewhome.db` et `brewhome_readings.db`) sont créées automatiquement au premier démarrage. `brewhome_readings.db` contient les mesures des densimètres **et** des sondes de température. Les nouvelles colonnes (`recurrence`, `brew_reminder_days`, etc.) sont ajoutées automatiquement par migration au premier démarrage après mise à jour — aucune intervention manuelle n'est nécessaire.
-- Aucune connexion Internet n'est requise pour le fonctionnement de base. La récupération des données d'eau (HubEau), la synchronisation GitHub, la génération d'images par IA, la suggestion de recette par IA et les notifications Telegram nécessitent un accès réseau.
+- Les deux bases de données SQLite (`brewhome.db` et `brewhome_readings.db`) sont créées automatiquement au premier démarrage. `brewhome_readings.db` contient les mesures des densimètres **et** des sondes de température. Les nouvelles colonnes (`recurrence`, `brew_reminder_days`, `ferm_time`, etc.) sont ajoutées automatiquement par migration au premier démarrage après mise à jour — aucune intervention manuelle n'est nécessaire.
+- Aucune connexion Internet n'est requise pour le fonctionnement de base. La récupération des données d'eau (HubEau), la synchronisation GitHub, la génération d'images par IA, la suggestion de recette par IA, les notifications Telegram et la **vérification de mise à jour** (GitHub Releases API) nécessitent un accès réseau.
 - Tous les paramètres avancés (seuils, eau, énergie, GitHub, IA, Telegram) sont **synchronisés en base de données** et retrouvés automatiquement sur tout appareil accédant à l'instance BrewHome. Les tokens GitHub, les clés IA et le token Telegram sont inclus dans cette synchronisation, visibles en clair dans l'interface de configuration, mais **exclus de l'export JSON** pour éviter toute diffusion accidentelle.
