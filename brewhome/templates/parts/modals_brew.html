@@ -66,14 +66,20 @@
     <div class="modal-head"><h3><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> <span data-i18n="brew.to_cave">Ajouter à la cave</span></h3><button class="modal-close" onclick="closeModal('after-brew-modal')">✕</button></div>
     <div class="modal-body">
       <p style="margin-bottom:16px;color:var(--muted)" data-i18n="brew.after_brew_msg">Le brassin est enregistré. Voulez-vous créer une entrée dans votre cave ?</p>
-      <div class="form-row cols-2">
-        <div class="field"><label data-i18n="brew.stock_33">Stock 33cl</label><input type="number" id="ab-33" value="0" min="0"></div>
-        <div class="field"><label data-i18n="brew.stock_75">Stock 75cl</label><input type="number" id="ab-75" value="0" min="0"></div>
-      </div>
-      <div class="field" style="margin-top:4px">
+      <div class="field" style="margin-bottom:10px">
         <label><i class="fas fa-wine-barrel" style="color:var(--amber)"></i> <span data-i18n="brew.keg_vol">Volume en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="brew.keg_opt">— optionnel, si la bière reste en fût</span></label>
-        <input type="number" id="ab-keg" step="0.1" min="0" value="" placeholder="Ex : 19">
+        <input type="number" id="ab-keg" step="0.1" min="0" value="" placeholder="Ex : 19" oninput="abKegChanged()">
       </div>
+      <div class="form-row cols-2">
+        <div class="field"><label data-i18n="brew.stock_75">Stock 75cl</label><input type="number" id="ab-75" value="0" min="0" oninput="ab75Changed()"></div>
+        <div class="field"><label data-i18n="brew.stock_33">Stock 33cl</label><input type="number" id="ab-33" value="0" min="0" oninput="ab33Changed()"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:-6px;margin-bottom:4px">
+        <button type="button" id="ab-manual-btn" onclick="toggleAbManual()" class="btn btn-sm btn-ghost" style="font-size:.78rem;padding:3px 10px;height:auto;color:var(--muted)">
+          <i class="fas fa-rotate" id="ab-manual-icon"></i> <span id="ab-manual-label" data-i18n="brew.ab_auto">Calcul auto</span>
+        </button>
+      </div>
+      <div id="ab-bottle-hint"></div>
       <div class="form-row cols-2" style="margin-top:4px">
         <div class="field"><label data-i18n="brew.field_date">Date du brassin</label><input type="date" id="ab-brew-date"></div>
         <div class="field"><label data-i18n="brew.field_bottling">Date d'embouteillage</label><input type="date" id="ab-bottling-date"></div>
@@ -95,6 +101,7 @@
       <input type="hidden" id="ab-name">
       <input type="hidden" id="ab-type">
       <input type="hidden" id="ab-abv">
+      <input type="hidden" id="ab-brew-vol">
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('after-brew-modal')" data-i18n="brew.later">Plus tard</button>
@@ -193,9 +200,9 @@
 
 <!-- Modal Coût réel du brassin -->
 <div class="modal-overlay" id="brew-cost-modal" onclick="if(event.target===this)closeModal('brew-cost-modal')">
-  <div class="modal" style="max-width:380px">
+  <div class="modal" style="max-width:460px">
     <div class="modal-head">
-      <h3><i class="fas fa-euro-sign" style="color:var(--success)"></i> <span data-i18n="brew.cost_breakdown">Détail du coût</span> — <span id="bcm-title"></span></h3>
+      <h3><i class="fas fa-euro-sign" style="color:var(--success)"></i> <span data-i18n="brew.cost_breakdown">Détail du coût réel</span> — <span id="bcm-title"></span></h3>
       <button class="modal-close" onclick="closeModal('brew-cost-modal')">✕</button>
     </div>
     <div class="modal-body" id="bcm-body"></div>

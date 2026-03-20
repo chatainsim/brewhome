@@ -1,0 +1,105 @@
+<!-- ══ Modal : Éditeur de template checklist ══════════════════════════════════ -->
+<div class="modal-overlay" id="checklist-editor-modal" onclick="if(event.target===this)closeModal('checklist-editor-modal')">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-head">
+      <h3><i class="fas fa-clipboard-list" style="color:var(--primary)"></i> <span id="ced-title" data-i18n="checklist.new_template">Nouveau template</span></h3>
+      <button class="modal-close" onclick="closeModal('checklist-editor-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="form-row cols-2">
+        <div class="field" style="grid-column:1/-1">
+          <label><span data-i18n="checklist.template_name">Nom du template</span> <span class="req">*</span></label>
+          <input type="text" id="ced-name" placeholder="Ex : Brassage complet, Jour J…">
+        </div>
+      </div>
+      <div class="field">
+        <label data-i18n="checklist.template_desc">Description (optionnel)</label>
+        <input type="text" id="ced-desc" placeholder="Ex : Checklist complète de brassage all-grain">
+      </div>
+
+      <!-- Ajouter une étape -->
+      <div style="display:flex;align-items:center;gap:8px;margin:12px 0 6px">
+        <select id="ced-new-phase" style="width:170px;flex-shrink:0">
+          <option value="preparation"    data-i18n="checklist.phase_preparation">Préparation</option>
+          <option value="empatage"       data-i18n="checklist.phase_empatage">Empâtage</option>
+          <option value="ebullition"     data-i18n="checklist.phase_ebullition">Ébullition</option>
+          <option value="refroidissement" data-i18n="checklist.phase_refroidissement">Refroidissement</option>
+          <option value="fermentation"   data-i18n="checklist.phase_fermentation">Fermentation</option>
+          <option value="embouteillage"  data-i18n="checklist.phase_embouteillage">Embouteillage</option>
+          <option value="autre"          data-i18n="checklist.phase_autre">Autre</option>
+        </select>
+        <input type="text" id="ced-new-item-text" style="flex:1"
+          placeholder="" data-i18n-ph="checklist.item_ph"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();addChecklistEditorItem()}">
+        <button class="btn btn-primary btn-sm" onclick="addChecklistEditorItem()">
+          <i class="fas fa-plus"></i> <span data-i18n="checklist.add_item">Ajouter</span>
+        </button>
+      </div>
+
+      <!-- Liste des items groupés par phase -->
+      <div id="ced-items-list" style="max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:4px"></div>
+
+      <!-- Import template par défaut -->
+      <div style="margin-top:10px;text-align:right">
+        <button class="btn btn-ghost btn-sm" onclick="importDefaultTemplate()">
+          <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="checklist.import_default">Importer le template par défaut</span>
+        </button>
+      </div>
+
+      <input type="hidden" id="ced-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('checklist-editor-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="saveChecklistTemplate()">
+        <i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Modal : Checklist de brassin ══════════════════════════════════════════ -->
+<div class="modal-overlay" id="brew-checklist-modal" onclick="if(event.target===this)closeModal('brew-checklist-modal')">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-head">
+      <h3><i class="fas fa-clipboard-check" style="color:var(--success)"></i>
+        <span data-i18n="checklist.modal_title">Checklist</span> — <span id="bcl-brew-name"></span>
+      </h3>
+      <button class="modal-close" onclick="closeModal('brew-checklist-modal')">✕</button>
+    </div>
+    <div class="modal-body" style="padding-bottom:0">
+
+      <!-- Sélecteur de template + actions -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <select id="bcl-template-select" style="flex:1" onchange="checklistSelectTemplate(this.value)"></select>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="resetBrewChecklist()" title="" data-i18n-title="checklist.reset_btn">
+          <i class="fas fa-rotate-left"></i>
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="printBrewChecklist()">
+          <i class="fas fa-print"></i> <span data-i18n="checklist.print_btn">Imprimer</span>
+        </button>
+      </div>
+
+      <!-- Barre de progression -->
+      <div id="bcl-progress-wrap" style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--muted);margin-bottom:4px">
+          <span id="bcl-progress-label"></span>
+          <span id="bcl-progress-pct" style="font-weight:600"></span>
+        </div>
+        <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+          <div id="bcl-progress-bar" style="height:100%;background:var(--success);border-radius:3px;transition:width .3s"></div>
+        </div>
+      </div>
+
+      <!-- Items par phase -->
+      <div id="bcl-items" style="max-height:460px;overflow-y:auto;padding-bottom:8px"></div>
+
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('brew-checklist-modal')" data-i18n="common.close">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Zone d'impression checklist (injectée avant window.print()) -->
+<div id="checklist-print-area" style="display:none"></div>

@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from collections import defaultdict
 import secrets
 import json
 import base64
@@ -9,7 +10,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import xml.etree.ElementTree as ET
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from flask import Flask, jsonify, request, render_template, make_response, Response
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -76,10 +77,17 @@ SENSOR_RL_MIN_INTERVAL = 30  # secondes
 _rl_lock  = threading.Lock()
 _rl_cache: dict[str, float] = {}  # token → timestamp dernière requête acceptée
 
+_RL_TTL = 3600  # purge les entrées inactives depuis plus d'1 heure
+
 def _sensor_rate_limit(token: str) -> bool:
     """Retourne True si la requête est autorisée, False si elle doit être rejetée."""
     now = time.monotonic()
     with _rl_lock:
+        # Purge des entrées expirées pour éviter la croissance mémoire unbounded
+        if len(_rl_cache) > 100:
+            expired = [t for t, ts in _rl_cache.items() if now - ts > _RL_TTL]
+            for t in expired:
+                del _rl_cache[t]
         last = _rl_cache.get(token, 0.0)
         if now - last < SENSOR_RL_MIN_INTERVAL:
             return False
@@ -448,6 +456,28 @@ def migrate_db():
             "ALTER TABLE inventory_items ADD COLUMN yeast_mfg_date TEXT",
             "ALTER TABLE inventory_items ADD COLUMN yeast_open_date TEXT",
             "ALTER TABLE inventory_items ADD COLUMN yeast_generation INTEGER DEFAULT 1",
+            "ALTER TABLE recipes ADD COLUMN deleted_at TIMESTAMP",
+            "ALTER TABLE inventory_items ADD COLUMN deleted_at TIMESTAMP",
+            "ALTER TABLE brews ADD COLUMN deleted_at TIMESTAMP",
+            "ALTER TABLE beers ADD COLUMN deleted_at TIMESTAMP",
+            "ALTER TABLE beers ADD COLUMN refermentation INTEGER NOT NULL DEFAULT 0",
+            """CREATE TABLE IF NOT EXISTS checklist_templates (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL,
+                description TEXT,
+                items       TEXT NOT NULL DEFAULT '[]',
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS brew_checklists (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                brew_id       INTEGER NOT NULL,
+                template_id   INTEGER,
+                checked_items TEXT NOT NULL DEFAULT '[]',
+                updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(brew_id),
+                FOREIGN KEY (brew_id)     REFERENCES brews(id) ON DELETE CASCADE,
+                FOREIGN KEY (template_id) REFERENCES checklist_templates(id) ON DELETE SET NULL
+            )""",
         ]:
             try:
                 conn.execute(sql)
@@ -937,12 +967,12 @@ def update_catalog_item(item_id):
     with get_db() as conn:
         cur = conn.execute(
             '''UPDATE ingredient_catalog
-               SET name=?, subcategory=?, ebc=?, alpha=?, yeast_type=?, default_unit=?,
+               SET name=?, subcategory=?, ebc=?, gu=?, alpha=?, yeast_type=?, default_unit=?,
                    temp_min=?, temp_max=?, dosage_per_liter=?,
                    attenuation_min=?, attenuation_max=?, alcohol_tolerance=?,
                    max_usage_pct=?, aroma_spec=?
                WHERE id=?''',
-            (d.get('name'), d.get('subcategory'), d.get('ebc'), d.get('alpha'),
+            (d.get('name'), d.get('subcategory'), d.get('ebc'), d.get('gu'), d.get('alpha'),
              d.get('yeast_type'), d.get('default_unit', 'g'),
              d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
              d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
@@ -969,7 +999,7 @@ def delete_catalog_item(item_id):
 def get_inventory():
     with get_db() as conn:
         rows = conn.execute(
-            'SELECT * FROM inventory_items ORDER BY COALESCE(sort_order, 9999) ASC, category, name'
+            'SELECT * FROM inventory_items WHERE deleted_at IS NULL ORDER BY COALESCE(sort_order, 9999) ASC, category, name'
         ).fetchall()
         return jsonify([dict(r) for r in rows])
 
@@ -980,6 +1010,13 @@ def create_inventory_item():
     if not d.get('name') or not d.get('category'):
         return jsonify({'error': 'name and category are required'}), 400
     with get_db() as conn:
+        if request.args.get('force') != '1':
+            dup = conn.execute(
+                'SELECT id, name FROM inventory_items WHERE name=? AND category=? AND deleted_at IS NULL',
+                (d['name'], d['category'])
+            ).fetchone()
+            if dup:
+                return jsonify({'duplicate': True, 'name': dup['name'], 'id': dup['id']}), 409
         cur = conn.execute(
             'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes,price_per_unit,yeast_type,yeast_mfg_date,yeast_open_date,yeast_generation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (d.get('name'), d.get('category'), d.get('quantity', 0), d.get('unit', 'kg'),
@@ -1030,7 +1067,27 @@ def reorder_inventory():
 @app.route('/api/inventory/<int:item_id>', methods=['DELETE'])
 def delete_inventory_item(item_id):
     with get_db() as conn:
-        cur = conn.execute('DELETE FROM inventory_items WHERE id=?', (item_id,))
+        cur = conn.execute(
+            'UPDATE inventory_items SET archived=1, deleted_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL',
+            (item_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify({'success': True})
+
+@app.route('/api/inventory/<int:item_id>/restore', methods=['POST'])
+def restore_inventory_item(item_id):
+    with get_db() as conn:
+        cur = conn.execute(
+            'UPDATE inventory_items SET archived=0, deleted_at=NULL WHERE id=? AND deleted_at IS NOT NULL',
+            (item_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify({'success': True})
+
+@app.route('/api/inventory/<int:item_id>/purge', methods=['DELETE'])
+def purge_inventory_item(item_id):
+    with get_db() as conn:
+        cur = conn.execute('DELETE FROM inventory_items WHERE id=? AND deleted_at IS NOT NULL', (item_id,))
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
@@ -1098,11 +1155,28 @@ def _recipe_with_ingredients(conn, recipe_id):
 @app.route('/api/recipes', methods=['GET'])
 def get_recipes():
     with get_db() as conn:
-        recipes = conn.execute('SELECT * FROM recipes ORDER BY COALESCE(sort_order, 9999) ASC, created_at DESC').fetchall()
-        result = []
-        for r in recipes:
-            result.append(_recipe_with_ingredients(conn, r['id']))
-        return jsonify(result)
+        recipes = conn.execute(
+            'SELECT * FROM recipes WHERE deleted_at IS NULL ORDER BY COALESCE(sort_order, 9999) ASC, created_at DESC'
+        ).fetchall()
+        if not recipes:
+            return jsonify([])
+        ids = [r['id'] for r in recipes]
+        placeholders = ','.join('?' * len(ids))
+        ings = conn.execute(
+            f'''SELECT ri.*, ii.quantity as stock_qty, ii.unit as stock_unit
+                FROM recipe_ingredients ri
+                LEFT JOIN inventory_items ii ON ri.inventory_item_id = ii.id
+                WHERE ri.recipe_id IN ({placeholders})
+                ORDER BY ri.recipe_id, ri.category, ri.id''',
+            ids
+        ).fetchall()
+        ings_by_recipe = defaultdict(list)
+        for ing in ings:
+            ings_by_recipe[ing['recipe_id']].append(dict(ing))
+        return jsonify([
+            {**dict(r), 'ingredients': ings_by_recipe[r['id']]}
+            for r in recipes
+        ])
 
 
 @app.route('/api/recipes/reorder', methods=['PUT'])
@@ -1123,6 +1197,12 @@ def create_recipe():
     if not d.get('name'):
         return jsonify({'error': 'name is required'}), 400
     with get_db() as conn:
+        if request.args.get('force') != '1':
+            dup = conn.execute(
+                'SELECT id, name FROM recipes WHERE name=? AND deleted_at IS NULL', (d['name'],)
+            ).fetchone()
+            if dup:
+                return jsonify({'duplicate': True, 'name': dup['name'], 'id': dup['id']}), 409
         cur = conn.execute(
             '''INSERT INTO recipes
                (batch_no,name,style,volume,brew_date,bottling_date,mash_temp,mash_time,
@@ -1150,7 +1230,7 @@ def create_recipe():
                  ing.get('other_type'), ing.get('other_time'),
                  ing.get('ebc'), ing.get('alpha'), ing.get('notes'))
             )
-        _log('recipe', 'created', f"Recette « {d.get('name')} » créée", recipe_id, conn)
+        _log('recipe', 'created', json.dumps({'_i18n':'act.recipe_created','name':d.get('name','')}), recipe_id, conn)
         return jsonify(_recipe_with_ingredients(conn, recipe_id)), 201
 
 
@@ -1198,7 +1278,7 @@ def update_recipe(recipe_id):
         result = _recipe_with_ingredients(conn, recipe_id)
         if not result:
             return jsonify({'error': 'Not found'}), 404
-        _log('recipe', 'updated', f"Recette « {result['name']} » modifiée", recipe_id, conn)
+        _log('recipe', 'updated', json.dumps({'_i18n':'act.recipe_updated','name':result['name']}), recipe_id, conn)
         return jsonify(result)
 
 
@@ -1206,11 +1286,31 @@ def update_recipe(recipe_id):
 def delete_recipe(recipe_id):
     with get_db() as conn:
         row = conn.execute('SELECT name FROM recipes WHERE id=?', (recipe_id,)).fetchone()
-        cur = conn.execute('DELETE FROM recipes WHERE id=?', (recipe_id,))
+        cur = conn.execute(
+            'UPDATE recipes SET archived=1, deleted_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL',
+            (recipe_id,))
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
         if row:
-            _log('recipe', 'deleted', f"Recette « {row['name']} » supprimée", recipe_id, conn)
+            _log('recipe', 'deleted', json.dumps({'_i18n':'act.recipe_deleted','name':row['name']}), recipe_id, conn)
+        return jsonify({'success': True})
+
+@app.route('/api/recipes/<int:recipe_id>/restore', methods=['POST'])
+def restore_recipe(recipe_id):
+    with get_db() as conn:
+        cur = conn.execute(
+            'UPDATE recipes SET archived=0, deleted_at=NULL WHERE id=? AND deleted_at IS NOT NULL',
+            (recipe_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify({'success': True})
+
+@app.route('/api/recipes/<int:recipe_id>/purge', methods=['DELETE'])
+def purge_recipe(recipe_id):
+    with get_db() as conn:
+        cur = conn.execute('DELETE FROM recipes WHERE id=? AND deleted_at IS NOT NULL', (recipe_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
 
 
@@ -1263,6 +1363,7 @@ def get_brews():
                       (SELECT MAX(c.ts) FROM consumption_log c JOIN beers bx ON c.beer_id=bx.id WHERE bx.brew_id=b.id) as last_consumption,
                       (SELECT SUM(bx.stock_33cl*0.33 + bx.stock_75cl*0.75 + COALESCE(bx.keg_liters,0)) FROM beers bx WHERE bx.brew_id=b.id AND bx.archived=0) as cave_liters
                FROM brews b LEFT JOIN recipes r ON b.recipe_id=r.id
+               WHERE b.deleted_at IS NULL
                ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC'''
         ).fetchall()
         return jsonify([dict(r) for r in rows])
@@ -1349,7 +1450,7 @@ def _do_create_brew():
                LEFT JOIN recipes r ON b.recipe_id=r.id WHERE b.id=?''',
             (brew_id,)
         ).fetchone()
-        _log('brew', 'created', f"Brassin « {d.get('name')} » lancé", brew_id, conn)
+        _log('brew', 'created', json.dumps({'_i18n':'act.brew_created','name':d.get('name','')}), brew_id, conn)
         return jsonify(dict(row)), 201
 
 
@@ -1369,7 +1470,7 @@ def update_brew(brew_id):
             return jsonify({'error': 'Not found'}), 404
         # Quand un brassin passe en "terminé", archiver les mesures du densimètre puis le délier
         if d.get('status') == 'completed':
-            _log('brew', 'completed', f"Brassin « {d.get('name', '–')} » clôturé", brew_id, conn)
+            _log('brew', 'completed', json.dumps({'_i18n':'act.brew_completed','name':d.get('name','–')}), brew_id, conn)
             sp = conn.execute('SELECT id FROM spindles WHERE brew_id=?', (brew_id,)).fetchone()
             if sp:
                 # Copier les mesures dans l'historique de fermentation du brassin
@@ -1406,11 +1507,31 @@ def update_brew(brew_id):
 def delete_brew(brew_id):
     with get_db() as conn:
         row = conn.execute('SELECT name FROM brews WHERE id=?', (brew_id,)).fetchone()
-        cur = conn.execute('DELETE FROM brews WHERE id=?', (brew_id,))
+        cur = conn.execute(
+            'UPDATE brews SET archived=1, deleted_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL',
+            (brew_id,))
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
         if row:
-            _log('brew', 'deleted', f"Brassin « {row['name']} » supprimé", brew_id, conn)
+            _log('brew', 'deleted', json.dumps({'_i18n':'act.brew_deleted','name':row['name']}), brew_id, conn)
+        return jsonify({'success': True})
+
+@app.route('/api/brews/<int:brew_id>/restore', methods=['POST'])
+def restore_brew(brew_id):
+    with get_db() as conn:
+        cur = conn.execute(
+            'UPDATE brews SET archived=0, deleted_at=NULL WHERE id=? AND deleted_at IS NOT NULL',
+            (brew_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify({'success': True})
+
+@app.route('/api/brews/<int:brew_id>/purge', methods=['DELETE'])
+def purge_brew(brew_id):
+    with get_db() as conn:
+        cur = conn.execute('DELETE FROM brews WHERE id=? AND deleted_at IS NOT NULL', (brew_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
 
 
@@ -1511,6 +1632,7 @@ def get_beers():
                FROM beers b
                LEFT JOIN brews br ON b.brew_id=br.id
                LEFT JOIN recipes r ON b.recipe_id=r.id
+               WHERE b.deleted_at IS NULL
                ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC'''
         ).fetchall()
         return jsonify([dict(r) for r in rows])
@@ -1538,18 +1660,19 @@ def create_beer():
         s75 = d.get('stock_75cl', 0)
         keg = d.get('keg_liters')
         cur = conn.execute(
-            '''INSERT INTO beers (name,type,abv,stock_33cl,stock_75cl,initial_33cl,initial_75cl,keg_liters,keg_initial_liters,origin,description,photo,brew_id,recipe_id,brew_date,bottling_date)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            '''INSERT INTO beers (name,type,abv,stock_33cl,stock_75cl,initial_33cl,initial_75cl,keg_liters,keg_initial_liters,origin,description,photo,brew_id,recipe_id,brew_date,bottling_date,refermentation)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (d.get('name'), d.get('type'), d.get('abv'), s33, s75,
              d.get('initial_33cl', s33), d.get('initial_75cl', s75),
              keg, d.get('keg_initial_liters', keg),
              d.get('origin'), d.get('description'),
              d.get('photo'), d.get('brew_id'), d.get('recipe_id'),
-             d.get('brew_date'), d.get('bottling_date'))
+             d.get('brew_date'), d.get('bottling_date'),
+             1 if d.get('refermentation') else 0)
         )
         beer_id = cur.lastrowid
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
-        _log('beer', 'created', f"« {d.get('name')} » ajouté en cave", beer_id, conn)
+        _log('beer', 'created', json.dumps({'_i18n':'act.beer_created','name':d.get('name','')}), beer_id, conn)
     # Telegram bottling notification (outside DB context to avoid locking)
     if d.get('brew_id') and (s33 or s75 or keg):
         _tg_fire_bottling(d.get('name'), s33, s75, keg, d.get('bottling_date'))
@@ -1570,12 +1693,13 @@ def update_beer(beer_id):
         conn.execute(
             '''UPDATE beers SET name=?,type=?,abv=?,stock_33cl=?,stock_75cl=?,
                initial_33cl=?,initial_75cl=?,keg_liters=?,keg_initial_liters=?,origin=?,description=?,photo=?,
-               brew_date=?,bottling_date=? WHERE id=?''',
+               brew_date=?,bottling_date=?,refermentation=? WHERE id=?''',
             (d.get('name'), d.get('type'), d.get('abv'), d.get('stock_33cl', 0),
              d.get('stock_75cl', 0), init33, init75,
              d.get('keg_liters'), keg_init,
              d.get('origin'), d.get('description'),
-             d.get('photo'), d.get('brew_date'), d.get('bottling_date'), beer_id)
+             d.get('photo'), d.get('brew_date'), d.get('bottling_date'),
+             1 if d.get('refermentation') else 0, beer_id)
         )
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
         return jsonify(dict(row))
@@ -1609,7 +1733,27 @@ def update_beer_tasting(beer_id):
 @app.route('/api/beers/<int:beer_id>', methods=['DELETE'])
 def delete_beer(beer_id):
     with get_db() as conn:
-        cur = conn.execute('DELETE FROM beers WHERE id=?', (beer_id,))
+        cur = conn.execute(
+            'UPDATE beers SET archived=1, deleted_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL',
+            (beer_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify({'success': True})
+
+@app.route('/api/beers/<int:beer_id>/restore', methods=['POST'])
+def restore_beer(beer_id):
+    with get_db() as conn:
+        cur = conn.execute(
+            'UPDATE beers SET archived=0, deleted_at=NULL WHERE id=? AND deleted_at IS NOT NULL',
+            (beer_id,))
+        if cur.rowcount == 0:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify({'success': True})
+
+@app.route('/api/beers/<int:beer_id>/purge', methods=['DELETE'])
+def purge_beer(beer_id):
+    with get_db() as conn:
+        cur = conn.execute('DELETE FROM beers WHERE id=? AND deleted_at IS NOT NULL', (beer_id,))
         if cur.rowcount == 0:
             return jsonify({'error': 'Not found'}), 404
         return jsonify({'success': True})
@@ -3314,6 +3458,23 @@ def get_bjcp():
     return jsonify([dict(r) for r in rows])
 
 
+# ── CORBEILLE ────────────────────────────────────────────────────────────────
+
+@app.route('/api/trash')
+def get_trash():
+    with get_db() as conn:
+        recipes  = conn.execute("SELECT id, name, style, deleted_at FROM recipes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
+        inv      = conn.execute("SELECT id, name, category, quantity, unit, deleted_at FROM inventory_items WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
+        brews    = conn.execute("SELECT id, name, brew_date, status, deleted_at FROM brews WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
+        beers    = conn.execute("SELECT id, name, type, abv, deleted_at FROM beers WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
+    return jsonify({
+        'recipes':   [dict(r) for r in recipes],
+        'inventory': [dict(r) for r in inv],
+        'brews':     [dict(r) for r in brews],
+        'beers':     [dict(r) for r in beers],
+    })
+
+
 # ── STATS ────────────────────────────────────────────────────────────────────
 
 @app.route('/api/stats')
@@ -4133,34 +4294,41 @@ def _gh_push_file(repo, pat, branch, file_path, content_str, message, api_base='
     if unchanged:
         return False  # inchangé
 
-    def _do_put(sha_val):
+    def _read_body(exc):
+        try: return exc.read().decode('utf-8', errors='replace')[:400]
+        except Exception: return ''
+
+    def _do_push(sha_val):
+        # Forgejo/Gitea : POST pour créer (pas de SHA), PUT pour mettre à jour
+        # GitHub : PUT fonctionne dans les deux cas
+        method = 'PUT' if (is_github or sha_val) else 'POST'
         body = {'message': message, 'content': encoded, 'branch': branch}
         if sha_val:
             body['sha'] = sha_val
         req = urllib.request.Request(
             base_url, data=json.dumps(body).encode('utf-8'),
-            headers=headers, method='PUT')
+            headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=15) as resp:
             resp.read()
 
     try:
-        _do_put(sha)
+        _do_push(sha)
     except urllib.error.HTTPError as e:
+        body = _read_body(e)
         if e.code != 422:
-            body_hint = ''
-            try: body_hint = e.read().decode()[:300]
-            except Exception: pass
-            app.logger.warning(f'_gh_push_file PUT {file_path} HTTP {e.code}: {body_hint}')
-            raise
+            app.logger.warning(f'_gh_push_file {file_path} HTTP {e.code}: {body}')
+            raise urllib.error.HTTPError(e.url, e.code, f'HTTP Error {e.code}: {e.reason} — {body}', e.headers, None)
         # 422 : SHA périmé ou manquant — re-fetch et retry une fois
-        body_hint = ''
-        try: body_hint = e.read().decode()[:300]
-        except Exception: pass
-        app.logger.warning(f'_gh_push_file 422 on {file_path} (sha={sha!r}), retrying. Detail: {body_hint}')
+        app.logger.warning(f'_gh_push_file 422 on {file_path} (sha={sha!r}), retrying. Detail: {body}')
         fresh_sha, unchanged2 = _fetch_sha()
         if unchanged2:
             return False
-        _do_put(fresh_sha)   # laisse lever si ça échoue encore
+        try:
+            _do_push(fresh_sha)
+        except urllib.error.HTTPError as e2:
+            body2 = _read_body(e2)
+            app.logger.warning(f'_gh_push_file 422 retry failed {file_path}: {body2}')
+            raise Exception(f'HTTP Error {e2.code}: {e2.reason} — {body2}')
 
     return True
 
@@ -4233,6 +4401,10 @@ def _github_data_backup():
                 'SELECT * FROM spindles ORDER BY name').fetchall()]
             catalog = [dict(r) for r in conn.execute(
                 'SELECT * FROM ingredient_catalog ORDER BY category, name').fetchall()]
+            drafts = [dict(r) for r in conn.execute(
+                'SELECT * FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC').fetchall()]
+            calendar = [dict(r) for r in conn.execute(
+                'SELECT * FROM custom_calendar_events ORDER BY event_date').fetchall()]
             settings_rows = conn.execute('SELECT key, value FROM app_settings').fetchall()
         settings_out = {r['key']: r['value'] for r in settings_rows}
         # Retirer les secrets
@@ -4246,6 +4418,8 @@ def _github_data_backup():
             ('cave.json',        beers),
             ('densimetres.json', spindles),
             ('catalogue.json',   catalog),
+            ('brouillons.json',  drafts),
+            ('calendrier.json',  calendar),
             ('parametres.json',  settings_out),
         ]
         total_pushed = total_skipped = total_errors = 0
@@ -4269,8 +4443,8 @@ def _github_data_backup():
                         total_skipped += 1
                 except Exception as push_err:
                     total_errors += 1
-                    push_errors.append(f'{name}: {push_err}')
-                    app.logger.warning(f'GitHub backup push error ({name}): {push_err}')
+                    push_errors.append(f'[{t_repo}] {name}: {push_err}')
+                    app.logger.warning(f'GitHub backup push error ({t_repo}/{name}): {push_err}')
 
         # Enregistrer la date de dernière sauvegarde
         ts = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -4279,7 +4453,8 @@ def _github_data_backup():
             conn.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES ('gh_data_last_backup',?)", (ts,))
             notify = conn.execute("SELECT value FROM app_settings WHERE key='gh_data_backup_notify'").fetchone()
         app.logger.info(f'GitHub backup: {total_pushed} fichier(s) mis à jour, {total_skipped} inchangé(s), {total_errors} erreur(s)')
-        _log('backup', 'auto', f"Backup auto : {total_pushed} fichier(s) mis à jour vers {repo_list}" + (f" ({total_errors} erreur(s))" if total_errors else ""))
+        _i18n_key = 'act.backup_auto_err' if total_errors else 'act.backup_auto'
+        _log('backup', 'auto', json.dumps({'_i18n': _i18n_key, 'n': total_pushed, 'repos': repo_list, 'e': total_errors, 'errors': push_errors}))
         # Notification Telegram si activée
         if notify and notify['value'] == 'true':
             try:
@@ -4391,18 +4566,37 @@ def activity_log_api():
              d.get('label', ''), d.get('entity_id'))
         return jsonify({'success': True})
     if request.method == 'DELETE':
+        category = request.args.get('category')
+        exclude  = request.args.get('exclude')
         with get_db() as conn:
-            conn.execute('DELETE FROM activity_log')
+            if category:
+                conn.execute('DELETE FROM activity_log WHERE category=?', (category,))
+            elif exclude:
+                conn.execute('DELETE FROM activity_log WHERE category!=?', (exclude,))
+            else:
+                conn.execute('DELETE FROM activity_log')
         return jsonify({'success': True})
     # GET
-    limit  = min(int(request.args.get('limit', 50)), 200)
-    offset = int(request.args.get('offset', 0))
+    limit   = min(int(request.args.get('limit', 50)), 200)
+    offset  = int(request.args.get('offset', 0))
+    category = request.args.get('category')
+    exclude  = request.args.get('exclude')
     with get_db() as conn:
-        rows  = conn.execute(
-            'SELECT * FROM activity_log ORDER BY ts DESC LIMIT ? OFFSET ?',
-            (limit, offset)
-        ).fetchall()
-        total = conn.execute('SELECT COUNT(*) FROM activity_log').fetchone()[0]
+        if category:
+            rows  = conn.execute(
+                'SELECT * FROM activity_log WHERE category=? ORDER BY ts DESC LIMIT ? OFFSET ?',
+                (category, limit, offset)).fetchall()
+            total = conn.execute('SELECT COUNT(*) FROM activity_log WHERE category=?', (category,)).fetchone()[0]
+        elif exclude:
+            rows  = conn.execute(
+                'SELECT * FROM activity_log WHERE category!=? ORDER BY ts DESC LIMIT ? OFFSET ?',
+                (exclude, limit, offset)).fetchall()
+            total = conn.execute('SELECT COUNT(*) FROM activity_log WHERE category!=?', (exclude,)).fetchone()[0]
+        else:
+            rows  = conn.execute(
+                'SELECT * FROM activity_log ORDER BY ts DESC LIMIT ? OFFSET ?',
+                (limit, offset)).fetchall()
+            total = conn.execute('SELECT COUNT(*) FROM activity_log').fetchone()[0]
     return jsonify({'items': [dict(r) for r in rows], 'total': total})
 
 
@@ -4748,7 +4942,7 @@ def _ics_fold(line):
 
 
 def _make_ical():
-    now_utc = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%dT%H%M%SZ')
 
     def _vevent(uid, dtstart, dtend, summary, description=None, rrule=None, alarm_days=None):
         ev = [
@@ -5350,6 +5544,90 @@ def _import_section_direct(section, items, mode='merge'):
         return imported
 
     return 0
+
+
+# ── CHECKLIST TEMPLATES ───────────────────────────────────────────────────────
+
+@app.route('/api/checklist-templates', methods=['GET'])
+def get_checklist_templates():
+    with get_db() as conn:
+        rows = conn.execute(
+            'SELECT * FROM checklist_templates ORDER BY created_at'
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/checklist-templates', methods=['POST'])
+def create_checklist_template():
+    d = request.json or {}
+    name = (d.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            'INSERT INTO checklist_templates (name, description, items) VALUES (?,?,?)',
+            (name, d.get('description') or None, json.dumps(d.get('items') or []))
+        )
+        row = conn.execute(
+            'SELECT * FROM checklist_templates WHERE id=?', (cur.lastrowid,)
+        ).fetchone()
+        return jsonify(dict(row)), 201
+
+
+@app.route('/api/checklist-templates/<int:tid>', methods=['PUT'])
+def update_checklist_template(tid):
+    d = request.json or {}
+    with get_db() as conn:
+        conn.execute(
+            'UPDATE checklist_templates SET name=?, description=?, items=? WHERE id=?',
+            (d.get('name'), d.get('description') or None,
+             json.dumps(d.get('items') or []), tid)
+        )
+        row = conn.execute(
+            'SELECT * FROM checklist_templates WHERE id=?', (tid,)
+        ).fetchone()
+        if not row:
+            return jsonify({'error': 'not found'}), 404
+        return jsonify(dict(row))
+
+
+@app.route('/api/checklist-templates/<int:tid>', methods=['DELETE'])
+def delete_checklist_template(tid):
+    with get_db() as conn:
+        conn.execute('DELETE FROM checklist_templates WHERE id=?', (tid,))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/brews/<int:brew_id>/checklist', methods=['GET'])
+def get_brew_checklist(brew_id):
+    with get_db() as conn:
+        row = conn.execute(
+            'SELECT * FROM brew_checklists WHERE brew_id=?', (brew_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({'brew_id': brew_id, 'template_id': None, 'checked_items': []})
+        return jsonify({**dict(row), 'checked_items': json.loads(row['checked_items'] or '[]')})
+
+
+@app.route('/api/brews/<int:brew_id>/checklist', methods=['POST'])
+def save_brew_checklist(brew_id):
+    d = request.json or {}
+    template_id = d.get('template_id')
+    checked     = json.dumps(d.get('checked_items') or [])
+    with get_db() as conn:
+        conn.execute(
+            '''INSERT INTO brew_checklists (brew_id, template_id, checked_items, updated_at)
+               VALUES (?,?,?,CURRENT_TIMESTAMP)
+               ON CONFLICT(brew_id) DO UPDATE SET
+                 template_id=excluded.template_id,
+                 checked_items=excluded.checked_items,
+                 updated_at=CURRENT_TIMESTAMP''',
+            (brew_id, template_id, checked)
+        )
+        row = conn.execute(
+            'SELECT * FROM brew_checklists WHERE brew_id=?', (brew_id,)
+        ).fetchone()
+        return jsonify({**dict(row), 'checked_items': json.loads(row['checked_items'] or '[]')})
 
 
 # ── DB ADMIN ─────────────────────────────────────────────────────────────────

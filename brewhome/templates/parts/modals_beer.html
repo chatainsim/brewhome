@@ -33,6 +33,12 @@
         <div class="field"><label data-i18n="brew.field_date">Date du brassin</label><input type="date" id="beer-f-brew-date"></div>
         <div class="field"><label data-i18n="brew.field_bottling">Date d'embouteillage</label><input type="date" id="beer-f-bottling-date"></div>
       </div>
+      <div style="margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 12px;background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.2);border-radius:9px">
+          <input type="checkbox" id="beer-f-refermentation" style="width:auto;accent-color:var(--info)">
+          <span><i class="fas fa-rotate" style="color:var(--info)"></i> <span data-i18n="cave.refermentation">Refermentation en cours</span></span>
+        </label>
+      </div>
       <div class="field" style="margin-bottom:14px">
         <label><i class="fas fa-wine-barrel" style="color:var(--amber)"></i> <span data-i18n="cave.field_keg">Volume en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.keg_hint">— laisser vide si uniquement en bouteilles</span></label>
         <input type="number" id="beer-f-keg" step="0.1" min="0" placeholder="Ex : 19" oninput="updateKegInitWrap()">
@@ -226,6 +232,37 @@
         <label style="display:flex;align-items:center;gap:6px;font-size:.88rem;color:var(--muted);cursor:pointer;margin-left:8px">
           <input type="checkbox" id="label-qr" onchange="renderLabelPreview()" style="width:auto">
           <span data-i18n="cave.label_qr">Inclure un QR code</span>
+        </label>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <span style="font-size:.85rem;color:var(--muted)" data-i18n="cave.label_show">Afficher :</span>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-style" checked onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_show_style">Style</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-abv" checked onchange="renderLabelPreview()" style="width:auto">
+          <span>ABV</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-ibu" checked onchange="renderLabelPreview()" style="width:auto">
+          <span>IBU</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-ebc" checked onchange="renderLabelPreview()" style="width:auto">
+          <span>EBC</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-photo" checked onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.field_photo">Photo</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-ing" checked onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_show_ing">Ingrédients</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-dates" checked onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_show_dates">Dates</span>
         </label>
       </div>
       <div class="label-preview-wrap" id="label-preview-wrap"></div>
