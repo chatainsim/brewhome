@@ -6,7 +6,15 @@ After=network.target
 Type=simple
 User=www-data
 WorkingDirectory=/opt/brewhome
+ExecStartPre=/bin/mkdir -p /opt/brewhome/logs
+ExecStartPre=/bin/chown www-data:www-data /opt/brewhome/logs
 ExecStart=/opt/brewhome/venv/bin/python app.py
+Environment=PYTHONUNBUFFERED=1
+# Journalisation fichier — décommenter / adapter selon besoin :
+# Environment=BREWHOME_LOG_FILE=/opt/brewhome/logs/brewhome.log
+# Environment=BREWHOME_LOG_DIR=/opt/brewhome/logs
+# Environment=BREWHOME_LOG_LEVEL=INFO
+# Environment=BREWHOME_LOG_KEEP=14
 Restart=always
 RestartSec=5
 

@@ -12,8 +12,10 @@ Fonctionne en local (PC, Raspberry Pi, NAS) et s'ouvre dans n'importe quel navig
 ### Recettes
 - Création et édition de recettes (malts, houblons, levures, autres ingrédients)
 - Calcul automatique IBU (Tinseth), EBC (Morey), ABV estimé, coût
+- **IBU affiché en temps réel** pendant la saisie des houblons (badge dans l'en-tête de section)
 - Correction de l'eau (acidification, profil minéral)
-- Import / Export **BeerXML 1.0** (compatible BeerSmith, Brewfather, BrewFather…)
+- Import / Export **BeerXML 1.0** — détection automatique des ingrédients absents du catalogue avec proposition de les créer
+- **Cloner à X litres** : dialog combiné duplication + mise à l'échelle en une étape
 - Duplication avec numéro de version automatique (`IPA v2` → `IPA v3`)
 - Génération de recette par IA (Google Gemini)
 - Vérification de stock en un clic
@@ -28,6 +30,7 @@ Fonctionne en local (PC, Raspberry Pi, NAS) et s'ouvre dans n'importe quel navig
 ### Brassins
 - Suivi du statut (en cours, fermentation, embouteillage, terminé)
 - **Cycle de vie** visuel : frise chronologique Brassage → Fermentation → Cave → Consommation
+- **Lancement depuis une recette** avec pré-sélection et **coût estimé** (ingrédients + eau + énergie)
 - Notes rapides directement depuis la liste
 - Photos de brassin
 - Intégration densimètres connectés (Tilt, iSpindel…)
@@ -54,9 +57,14 @@ Fonctionne en local (PC, Raspberry Pi, NAS) et s'ouvre dans n'importe quel navig
 ### Notifications Telegram
 - Rappels de fermentation (J-2, J-1, J0, J+1) avec estimation du nombre de bouteilles
 - **Alerte embouteillage** immédiate lors de l'ajout en cave (nombre de bouteilles estimé)
+- **Densité stable** : notification automatique (toutes les 4 h) quand un densimètre lié à un brassin actif affiche une densité stable pendant N jours (seuil Δ ≤ 0,002 SG, fenêtre configurable)
 - Rapport cave et brassins planifiable
 - Rapport inventaire hebdomadaire
 - Événements brassicoles mondiaux (jour J + rappel J-avant)
+
+### Calculateurs
+- **Calculateur ABV** (OG + FG → ABV + atténuation) accessible depuis le tableau de bord et l'onglet **Calculateurs**
+- **Calculateur de primage** (volume, style, température → dose de sucre) dans l'onglet **Calculateurs**
 
 ### Autres
 - **Recherche globale** (Ctrl+K) — recettes, bières, inventaire, brassins, notes de dégustation
