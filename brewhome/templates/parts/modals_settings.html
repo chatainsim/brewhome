@@ -129,12 +129,12 @@
                 <div class="field"><label data-i18n="settings.catalogue.field_alc_tol">Tolérance alcool (%)</label><input type="number" id="scat-alctol" step="0.5" placeholder="Ex : 12"></div>
               </div>
             </div>
-            <button class="btn btn-primary btn-sm" onclick="addCatalogItem()"><i class="fas fa-plus"></i> <span data-i18n="settings.catalogue.btn_add">Ajouter</span></button>
+            <button class="btn btn-primary btn-sm" onclick="withBtn(this, addCatalogItem)"><i class="fas fa-plus"></i> <span data-i18n="settings.catalogue.btn_add">Ajouter</span></button>
           </div>
         </div>
 
         <!-- TAB CALENDRIER -->
-        <div id="stab-calendrier" style="display:none">
+        <template id="stab-calendrier-tpl">
 
           <!-- Rappel global -->
           <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)">
@@ -149,7 +149,7 @@
                 class="form-control" style="width:72px;text-align:center">
               <span style="font-size:.85rem;color:var(--muted)" data-i18n="cal.event_remind_days">j. avant</span>
               <button class="btn btn-primary btn-sm"
-                onclick="saveDefaultBrewReminderDays(document.getElementById('settings-default-remind-days').value)">
+                onclick="withBtn(this, () => saveDefaultBrewReminderDays(document.getElementById('settings-default-remind-days').value))">
                 <i class="fas fa-check"></i> <span data-i18n="common.save">Enregistrer</span>
               </button>
             </div>
@@ -176,10 +176,11 @@
             <div id="settings-custom-ev-list" style="display:flex;flex-direction:column;gap:6px"></div>
           </div>
 
-        </div><!-- /stab-calendrier -->
+        </template>
+        <div id="stab-calendrier" style="display:none"></div>
 
         <!-- TAB SEUILS DE STOCK -->
-        <div id="stab-thresholds" style="display:none">
+        <template id="stab-thresholds-tpl">
           <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px" data-i18n="settings.thresholds.hint">Définissez à partir de quelle quantité un ingrédient passe en "stock faible" (affiché en orange).</p>
           <div class="thresh-row">
             <span class="thresh-lbl" style="color:var(--malt)"><i class="fas fa-seedling"></i> <span data-i18n="cat.malts">Malts</span></span>
@@ -206,10 +207,11 @@
               <div id="thresh-autre-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"></div>
             </div>
           </div>
-        </div><!-- /stab-thresholds -->
+        </template>
+        <div id="stab-thresholds" style="display:none"></div>
 
         <!-- TAB EAU & ÉNERGIE -->
-        <div id="stab-water" style="display:none">
+        <template id="stab-water-tpl">
           <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px" data-i18n="settings.water.hint">Profil de votre eau de brassage et coûts énergétiques par brassin.</p>
 
           <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
@@ -307,7 +309,7 @@
                 <option value="976">976 – Mayotte</option>
               </select>
               <select id="hubeau-commune" disabled style="flex:1 1 200px;min-width:200px"><option value="">— Commune —</option></select>
-              <button class="btn btn-ghost btn-sm" id="hubeau-fetch-btn" onclick="hubEauFetch()" disabled>
+              <button class="btn btn-ghost btn-sm" id="hubeau-fetch-btn" onclick="withBtn(this, hubEauFetch)" disabled>
                 <i class="fas fa-satellite-dish"></i> <span data-i18n="settings.water.hubeau_fetch">Récupérer</span>
               </button>
             </div>
@@ -328,6 +330,18 @@
               <div class="field"><label data-i18n="settings.water.label_hco3">Bicarbonates (HCO₃⁻) mg/L</label><input type="number" id="water-hco3" min="0" step="1" placeholder="Ex : 120"></div>
             </div>
           </div>
+          <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info)">
+                <i class="fas fa-bookmark"></i> <span data-i18n="settings.water.section_profiles">Profils réutilisables</span>
+              </div>
+              <button class="btn btn-sm btn-ghost" onclick="addWaterProfileFromSettings()">
+                <i class="fas fa-plus"></i> <span data-i18n="settings.water.profile_new">Nouveau profil</span>
+              </button>
+            </div>
+            <div id="wc-profiles-manager"></div>
+          </div>
+
           <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
             <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:6px"><i class="fas fa-bucket"></i> <span data-i18n="settings.water.section_vessels">Volumes des cuves</span></div>
             <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px" data-i18n="settings.water.vessel_hint">Capacité maximale de chaque cuve. Utilisé pour vérifier que les volumes d'eau calculés ne dépassent pas la capacité.</p>
@@ -357,12 +371,13 @@
           </div>
 
           <div style="margin-top:16px">
-            <button class="btn btn-primary btn-sm" onclick="saveWaterSettings()"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.water.btn_save">Enregistrer</span></button>
+            <button class="btn btn-primary btn-sm" onclick="withBtn(this, saveWaterSettings)"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.water.btn_save">Enregistrer</span></button>
           </div>
-        </div><!-- /stab-water -->
+        </template>
+        <div id="stab-water" style="display:none"></div>
 
         <!-- TAB GITHUB -->
-        <div id="stab-github" style="display:none">
+        <template id="stab-github-tpl">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
 
             <div>
@@ -373,8 +388,8 @@
                 <div id="gh-vit-targets"></div>
                 <button class="btn btn-ghost btn-sm" onclick="_ghAddTarget('vit')" style="align-self:flex-start"><i class="fas fa-plus"></i> <span data-i18n="settings.github.btn_add_dest">+ Ajouter une destination</span></button>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                  <button id="btn-push-vitrine" class="btn btn-primary btn-sm" onclick="pushVitrine()"><i class="fa-brands fa-github"></i> <span data-i18n="settings.github.btn_push_vitrine">Pousser la vitrine</span></button>
-                  <button id="btn-push-vitrine-force" class="btn btn-ghost btn-sm" onclick="pushVitrine(true)" title="Forcer l'envoi même si les fichiers sont identiques"><i class="fas fa-rotate"></i> <span data-i18n="settings.github.btn_force">Forcer</span></button>
+                  <button id="btn-push-vitrine" class="btn btn-primary btn-sm" onclick="withBtn(this, pushVitrine)"><i class="fa-brands fa-github"></i> <span data-i18n="settings.github.btn_push_vitrine">Pousser la vitrine</span></button>
+                  <button id="btn-push-vitrine-force" class="btn btn-ghost btn-sm" onclick="withBtn(this, () => pushVitrine(true))" title="Forcer l'envoi même si les fichiers sont identiques"><i class="fas fa-rotate"></i> <span data-i18n="settings.github.btn_force">Forcer</span></button>
                 </div>
                 <p style="font-size:.73rem;color:var(--muted);margin:0" data-i18n="settings.github.vitrine_hint">Pousse <code>index.html</code> + <code>beers.json</code>. "Forcer" crée un commit même si le contenu est inchangé.</p>
               </div>
@@ -387,7 +402,7 @@
               <div style="display:flex;flex-direction:column;gap:10px">
                 <div id="gh-dat-targets"></div>
                 <button class="btn btn-ghost btn-sm" onclick="_ghAddTarget('dat')" style="align-self:flex-start"><i class="fas fa-plus"></i> <span data-i18n="settings.github.btn_add_dest">+ Ajouter une destination</span></button>
-                <button id="btn-push-data" class="btn btn-primary btn-sm" onclick="pushGithubData()"><i class="fa-brands fa-github"></i> <span data-i18n="settings.github.btn_export_data">Exporter les données vers GitHub</span></button>
+                <button id="btn-push-data" class="btn btn-primary btn-sm" onclick="withBtn(this, pushGithubData)"><i class="fa-brands fa-github"></i> <span data-i18n="settings.github.btn_export_data">Exporter les données vers GitHub</span></button>
                 <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
                   <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px"><i class="fas fa-clock"></i> <span data-i18n="settings.github.auto_backup_title">Sauvegarde automatique</span></div>
                   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -447,10 +462,11 @@
             </div>
 
           </div>
-        </div><!-- /stab-github -->
+        </template>
+        <div id="stab-github" style="display:none"></div>
 
         <!-- TAB IA -->
-        <div id="stab-ai" style="display:none">
+        <template id="stab-ai-tpl">
           <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px" data-i18n="settings.ai.config_hint">Configurez les fournisseurs d'IA pour la génération d'images et les suggestions de recettes.</p>
 
           <!-- Clés API -->
@@ -532,10 +548,11 @@
             </div>
           </div>
 
-        </div><!-- /stab-ai -->
+        </template>
+        <div id="stab-ai" style="display:none"></div>
 
         <!-- TAB NOTIFICATIONS -->
-        <div id="stab-notif" style="display:none">
+        <template id="stab-notif-tpl">
 
           <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px">
             <i class="fab fa-telegram"></i> <span data-i18n="settings.notif.tg_title">Connexion Telegram</span>
@@ -561,7 +578,7 @@
             </div>
           </div>
           <div style="margin-bottom:20px">
-            <button class="btn btn-ghost btn-sm" onclick="testTelegramConnection()"><i class="fab fa-telegram"></i> <span data-i18n="settings.notif.tg_test">Tester la connexion</span></button>
+            <button class="btn btn-ghost btn-sm" onclick="withBtn(this, testTelegramConnection)"><i class="fab fa-telegram"></i> <span data-i18n="settings.notif.tg_test">Tester la connexion</span></button>
             <span id="tg-test-result" style="font-size:.82rem;margin-left:10px"></span>
           </div>
 
@@ -579,7 +596,7 @@
               <input type="number" id="tg-brews-hour" min="0" max="23" value="8" style="width:62px" placeholder="HH">
               <span style="color:var(--muted)">h</span>
               <input type="number" id="tg-brews-min" min="0" max="59" value="0" style="width:62px" placeholder="MM">
-              <button class="btn btn-ghost btn-sm" onclick="triggerTelegram('brews')"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
+              <button class="btn btn-ghost btn-sm" onclick="withBtn(this, () => triggerTelegram('brews'))"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
             </div>
           </div>
 
@@ -597,7 +614,7 @@
               <input type="number" id="tg-cave-hour" min="0" max="23" value="8" style="width:62px" placeholder="HH">
               <span style="color:var(--muted)">h</span>
               <input type="number" id="tg-cave-min" min="0" max="59" value="0" style="width:62px" placeholder="MM">
-              <button class="btn btn-ghost btn-sm" onclick="triggerTelegram('cave')"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
+              <button class="btn btn-ghost btn-sm" onclick="withBtn(this, () => triggerTelegram('cave'))"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
             </div>
           </div>
 
@@ -615,7 +632,7 @@
               <input type="number" id="tg-inv-hour" min="0" max="23" value="8" style="width:62px" placeholder="HH">
               <span style="color:var(--muted)">h</span>
               <input type="number" id="tg-inv-min" min="0" max="59" value="0" style="width:62px" placeholder="MM">
-              <button class="btn btn-ghost btn-sm" onclick="triggerTelegram('inventory')"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
+              <button class="btn btn-ghost btn-sm" onclick="withBtn(this, () => triggerTelegram('inventory'))"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
             </div>
           </div>
 
@@ -626,13 +643,13 @@
                 <span data-i18n="settings.notif.ferm_label">Rappels de fermentation</span> — <span style="color:var(--muted);font-weight:400" data-i18n="settings.notif.brews_freq">quotidien</span>
               </label>
             </div>
-            <div style="font-size:.78rem;color:var(--muted);margin-bottom:8px" data-i18n="settings.notif.ferm_hint">Alerte J-2, J-1, J0 et J+1 basée sur brew_date + durée de fermentation.</div>
+            <div style="font-size:.78rem;color:var(--muted);margin-bottom:8px" data-i18n="settings.notif.ferm_hint">Alerte J-2→J+1 fermentation, J-1/J0 dry hops, J-2→J+1 refermentation.</div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <span style="font-size:.83rem;color:var(--muted)" data-i18n="settings.notif.send_hour">Heure d'envoi :</span>
               <input type="number" id="tg-ferm-hour" min="0" max="23" value="8" style="width:62px" placeholder="HH">
               <span style="color:var(--muted)">h</span>
               <input type="number" id="tg-ferm-min" min="0" max="59" value="0" style="width:62px" placeholder="MM">
-              <button class="btn btn-ghost btn-sm" onclick="triggerTelegram('ferm_reminders')"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
+              <button class="btn btn-ghost btn-sm" onclick="withBtn(this, () => triggerTelegram('ferm_reminders'))"><i class="fas fa-paper-plane"></i> <span data-i18n="settings.notif.send_now">Envoyer maintenant</span></button>
             </div>
           </div>
 
@@ -644,6 +661,23 @@
               </label>
             </div>
             <div style="font-size:.78rem;color:var(--muted)" data-i18n="settings.notif.bottling_hint">Notification lors de l'ajout d'une bière en cave (depuis un brassin), avec le nombre de bouteilles estimé.</div>
+          </div>
+
+          <div style="background:var(--card2);border-radius:10px;padding:14px 16px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+              <input type="checkbox" id="tg-spindle-enabled" style="width:auto" onchange="document.getElementById('tg-spindle-config').style.display=this.checked?'flex':'none'">
+              <label for="tg-spindle-enabled" style="font-weight:700;font-size:.92rem;text-transform:none;color:var(--text)">
+                <span data-i18n="settings.notif.spindle_label">Densité stable (fin de fermentation)</span>
+              </label>
+            </div>
+            <div id="tg-spindle-config" style="display:none;flex-direction:column;gap:8px">
+              <div style="font-size:.78rem;color:var(--muted)" data-i18n="settings.notif.spindle_hint">Notification automatique quand un spindle lié à un brassin actif affiche une densité stable pendant N jours consécutifs.</div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+                <span style="font-size:.83rem;color:var(--muted)" data-i18n="settings.notif.spindle_days_label">Fenêtre de stabilité :</span>
+                <input type="number" id="tg-spindle-days" min="1" max="14" value="3" style="width:62px">
+                <span style="font-size:.83rem;color:var(--muted)" data-i18n="settings.notif.spindle_days_unit">jours</span>
+              </div>
+            </div>
           </div>
 
           <div style="background:var(--card2);border-radius:10px;padding:14px 16px;margin-top:12px">
@@ -675,10 +709,11 @@
             </div>
           </div>
 
-        </div><!-- /stab-notif -->
+        </template>
+        <div id="stab-notif" style="display:none"></div>
 
         <!-- TAB APPARENCE -->
-        <div id="stab-apparence" style="display:none">
+        <template id="stab-apparence-tpl">
 
           <div style="margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--border)">
             <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--info);margin-bottom:10px"><i class="fas fa-signature"></i> <span data-i18n="settings.tabs.apparence">Apparence</span></div>
@@ -718,7 +753,8 @@
             </div>
           </div>
 
-        </div><!-- /stab-apparence -->
+        </template>
+        <div id="stab-apparence" style="display:none"></div>
 
         <!-- TAB LANGUE -->
         <div id="stab-lang" style="display:none">
@@ -726,7 +762,7 @@
         </div>
 
         <!-- TAB IMPORT / EXPORT -->
-        <div id="stab-import" style="display:none">
+        <template id="stab-import-tpl">
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px">
 
             <div style="background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:14px">
@@ -735,7 +771,7 @@
                 <button class="btn btn-ghost btn-sm" onclick="exportCatalog()"><i class="fas fa-file-export"></i> <span data-i18n="settings.import.btn_export">Exporter (JSON)</span></button>
                 <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-catalog-file')"><i class="fas fa-file-import"></i> <span data-i18n="settings.import.btn_import">Importer (JSON)</span></button>
                 <input type="file" id="import-catalog-file" accept=".json" style="display:none" onchange="importCatalog(this)">
-                <button class="btn btn-ghost btn-sm" id="btn-import-hopsteiner" onclick="importHopsDb()" style="border-color:rgba(99,102,241,.4)"><i class="fas fa-cloud-arrow-down"></i> <span data-i18n="settings.import.btn_import_hopsteiner">Importer depuis Hopsteiner</span></button>
+                <button class="btn btn-ghost btn-sm" id="btn-import-hopsteiner" onclick="withBtn(this, importHopsDb)" style="border-color:rgba(99,102,241,.4)"><i class="fas fa-cloud-arrow-down"></i> <span data-i18n="settings.import.btn_import_hopsteiner">Importer depuis Hopsteiner</span></button>
                 <p style="font-size:.72rem;color:var(--muted);margin:0" data-i18n="settings.import.catalog_hint">Malts, houblons, levures, autres. Met à jour les existants, ajoute les nouveaux.</p>
               </div>
             </div>
@@ -879,7 +915,7 @@
             <div id="restore-git-results" style="display:none;margin-bottom:12px;font-size:.8rem;display:flex;flex-wrap:wrap;gap:6px"></div>
 
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-ghost btn-sm" onclick="restoreFromGit()" id="btn-restore-git" style="border-color:rgba(6,182,212,.4);color:#22d3ee">
+              <button class="btn btn-ghost btn-sm" onclick="withBtn(this, restoreFromGit)" id="btn-restore-git" style="border-color:rgba(6,182,212,.4);color:#22d3ee">
                 <i class="fas fa-cloud-arrow-down"></i> <span data-i18n="settings.restore.btn_restore">Restaurer depuis Git</span>
               </button>
               <button class="btn btn-ghost btn-sm" onclick="toggleRestoreAll(true)" style="font-size:.75rem;padding:4px 10px" data-i18n="settings.restore.btn_all">Tout sélectionner</button>
@@ -887,10 +923,11 @@
             </div>
           </div>
 
-        </div><!-- /stab-import -->
+        </template>
+        <div id="stab-import" style="display:none"></div>
 
         <!-- TAB MISES À JOUR -->
-        <div id="stab-updates" style="display:none">
+        <template id="stab-updates-tpl">
           <!-- Version application -->
           <div id="app-version-row" style="margin-bottom:18px"></div>
           <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px" data-i18n="settings.updates.hint">Vérifiez et mettez à jour les librairies statiques embarquées (Chart.js, Font Awesome, Google Fonts).</p>
@@ -898,12 +935,13 @@
             <div style="color:var(--muted);font-size:.85rem"><i class="fas fa-spinner fa-spin"></i> <span data-i18n="settings.updates.checking">Vérification en cours…</span></div>
           </div>
           <div style="margin-top:16px">
-            <button class="btn btn-ghost btn-sm" onclick="checkStaticUpdates(true)"><i class="fas fa-rotate"></i> <span data-i18n="settings.updates.btn_check_again">Vérifier à nouveau</span></button>
+            <button class="btn btn-ghost btn-sm" onclick="withBtn(this, () => checkStaticUpdates(true))"><i class="fas fa-rotate"></i> <span data-i18n="settings.updates.btn_check_again">Vérifier à nouveau</span></button>
           </div>
-        </div><!-- /stab-updates -->
+        </template>
+        <div id="stab-updates" style="display:none"></div>
 
         <!-- TAB CHECKLISTS -->
-        <div id="stab-checklist" style="display:none">
+        <template id="stab-checklist-tpl">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
             <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">
               <i class="fas fa-clipboard-list"></i> <span data-i18n="settings.tabs.checklist">Checklists</span>
@@ -913,27 +951,29 @@
             </button>
           </div>
           <div id="checklist-templates-list"><div style="color:var(--muted);font-size:.85rem"><i class="fas fa-spinner fa-spin"></i></div></div>
-        </div><!-- /stab-checklist -->
+        </template>
+        <div id="stab-checklist" style="display:none"></div>
 
         <!-- TAB CORBEILLE -->
-        <div id="stab-trash" style="display:none">
+        <template id="stab-trash-tpl">
           <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:16px">
             <i class="fas fa-trash-can"></i> <span data-i18n="settings.tabs.trash">Corbeille</span>
           </div>
           <p style="font-size:.83rem;color:var(--muted);margin-bottom:18px" data-i18n="settings.trash.hint">Les éléments supprimés sont conservés ici. Vous pouvez les restaurer ou les supprimer définitivement.</p>
           <div id="trash-content"><div style="color:var(--muted);font-size:.85rem"><i class="fas fa-spinner fa-spin"></i></div></div>
-        </div><!-- /stab-trash -->
+        </template>
+        <div id="stab-trash" style="display:none"></div>
 
       </div><!-- /content pane -->
     </div><!-- /modal-body -->
 
     <div class="modal-foot" style="flex-shrink:0">
       <button class="btn btn-ghost" onclick="closeSettings()" data-i18n="settings.footer.close">Fermer</button>
-      <button class="btn btn-primary" id="settings-save-btn"  onclick="saveThresholds()"      style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_thresholds">Enregistrer les seuils</span></button>
-      <button class="btn btn-success" id="github-save-btn"    onclick="saveGithubSettings()"  style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_github">Enregistrer la config GitHub</span></button>
-      <button class="btn btn-primary" id="apparence-save-btn" onclick="saveApparence()"        style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_apparence">Appliquer</span></button>
-      <button class="btn btn-primary" id="ai-save-btn"        onclick="saveAISettings()"      style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_ai">Enregistrer la config IA</span></button>
-      <button class="btn btn-primary" id="notif-save-btn"     onclick="saveTelegramSettings()" style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_notif">Enregistrer les notifications</span></button>
+      <button class="btn btn-primary" id="settings-save-btn"  onclick="withBtn(this, saveThresholds)"       style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_thresholds">Enregistrer les seuils</span></button>
+      <button class="btn btn-success" id="github-save-btn"    onclick="withBtn(this, saveGithubSettings)"   style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_github">Enregistrer la config GitHub</span></button>
+      <button class="btn btn-primary" id="apparence-save-btn" onclick="withBtn(this, saveApparence)"        style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_apparence">Appliquer</span></button>
+      <button class="btn btn-primary" id="ai-save-btn"        onclick="withBtn(this, saveAISettings)"       style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_ai">Enregistrer la config IA</span></button>
+      <button class="btn btn-primary" id="notif-save-btn"     onclick="withBtn(this, saveTelegramSettings)" style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_notif">Enregistrer les notifications</span></button>
     </div>
   </div>
 </div>

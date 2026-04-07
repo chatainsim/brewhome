@@ -4,18 +4,49 @@
     <div class="actions">
       <button class="btn btn-ghost btn-sm" id="cave-arch-btn" onclick="toggleShowArchived('cave')"></button>
       <div style="position:relative;display:inline-flex;align-items:center">
-        <input type="text" id="cave-search" placeholder="🔍 Rechercher..." style="width:220px;padding-right:24px" oninput="renderCave();document.getElementById('cave-search-clear').style.display=this.value?'flex':'none'">
+        <input type="text" id="cave-search" placeholder="🔍 Rechercher..." style="width:220px;padding-right:24px" oninput="renderCaveDebounced();document.getElementById('cave-search-clear').style.display=this.value?'flex':'none'">
         <button id="cave-search-clear" onclick="document.getElementById('cave-search').value='';renderCave();this.style.display='none'" style="display:none;position:absolute;right:5px;background:none;border:none;cursor:pointer;color:var(--muted);font-size:.8rem;padding:0;line-height:1;align-items:center" title="Vider">✕</button>
       </div>
+      <span id="cave-search-count" style="font-size:.75rem;color:var(--muted);white-space:nowrap"></span>
       <button class="btn btn-ghost btn-sm" onclick="printAllCaveLabels()" title="Imprimer toutes les étiquettes"><i class="fas fa-tags"></i></button>
       <button class="btn btn-primary" onclick="openBeerModal()"><i class="fas fa-plus"></i> <span data-i18n="common.add">Ajouter</span></button>
     </div>
   </div>
 
-  <div class="grid-4" style="margin-bottom:20px" id="cave-stats"></div>
+  <div class="grid-4" style="margin-bottom:20px" id="cave-stats">
+    <div class="skel skel-stat"></div>
+    <div class="skel skel-stat"></div>
+    <div class="skel skel-stat"></div>
+    <div class="skel skel-stat"></div>
+  </div>
 
-  <div class="beer-grid" id="cave-grid"></div>
-  <div class="empty" id="cave-empty" style="display:none"><i class="fas fa-beer-mug-empty"></i><p data-i18n="cave.empty_cave">Votre cave est vide</p></div>
+  <div id="cave-depl-alert" style="display:none;margin-bottom:14px"></div>
+
+  <div class="beer-grid" id="cave-grid">
+    <div class="skel skel-card"></div>
+    <div class="skel skel-card"></div>
+    <div class="skel skel-card"></div>
+    <div class="skel skel-card"></div>
+    <div class="skel skel-card"></div>
+    <div class="skel skel-card"></div>
+  </div>
+  <div id="cave-empty" style="display:none">
+    <!-- Vraiment vide -->
+    <div id="cave-empty-default" class="empty-state">
+      <div class="empty-state-icon" style="background:rgba(245,158,11,.12)"><i class="fas fa-wine-bottle" style="color:var(--amber)"></i></div>
+      <div class="empty-state-title" data-i18n="cave.empty_title">Votre cave est vide</div>
+      <div class="empty-state-sub" data-i18n="cave.empty_sub">Ajoutez vos bières en stock ou marquez un brassin comme terminé pour le faire apparaître ici</div>
+      <div class="empty-state-actions">
+        <button class="btn btn-primary" onclick="openBeerModal()"><i class="fas fa-plus"></i> <span data-i18n="cave.empty_add">Ajouter une bière</span></button>
+        <button class="btn btn-ghost" onclick="navigate('brassins')"><i class="fas fa-fire-burner"></i> <span data-i18n="nav.brassins">Brassins</span></button>
+      </div>
+    </div>
+    <!-- Recherche sans résultat -->
+    <div id="cave-empty-noresults" class="empty-state" style="display:none">
+      <div class="empty-state-icon" style="background:rgba(148,163,184,.08)"><i class="fas fa-magnifying-glass" style="color:var(--muted)"></i></div>
+      <div class="empty-state-title" data-i18n="common.no_results">Aucun résultat</div>
+    </div>
+  </div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════

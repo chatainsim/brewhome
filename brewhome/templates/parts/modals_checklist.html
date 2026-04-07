@@ -42,7 +42,7 @@
 
       <!-- Import template par défaut -->
       <div style="margin-top:10px;text-align:right">
-        <button class="btn btn-ghost btn-sm" onclick="importDefaultTemplate()">
+        <button class="btn btn-ghost btn-sm" onclick="withBtn(this, importDefaultTemplate)">
           <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="checklist.import_default">Importer le template par défaut</span>
         </button>
       </div>
@@ -51,7 +51,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('checklist-editor-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveChecklistTemplate()">
+      <button class="btn btn-primary" onclick="withBtn(this, saveChecklistTemplate)">
         <i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span>
       </button>
     </div>
@@ -72,7 +72,7 @@
       <!-- Sélecteur de template + actions -->
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
         <select id="bcl-template-select" style="flex:1" onchange="checklistSelectTemplate(this.value)"></select>
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="resetBrewChecklist()" title="" data-i18n-title="checklist.reset_btn">
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="withBtn(this, resetBrewChecklist)" title="" data-i18n-title="checklist.reset_btn">
           <i class="fas fa-rotate-left"></i>
         </button>
         <button class="btn btn-ghost btn-sm" onclick="printBrewChecklist()">

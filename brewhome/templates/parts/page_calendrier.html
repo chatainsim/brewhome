@@ -236,7 +236,7 @@
       </button>
       <div style="display:flex;gap:8px;margin-left:auto">
         <button class="btn btn-ghost" onclick="closeModal('custom-event-modal')" data-i18n="common.cancel">Annuler</button>
-        <button class="btn btn-primary" onclick="saveCustomEvent()">
+        <button class="btn btn-primary" onclick="withBtn(this, saveCustomEvent)">
           <i class="fas fa-check"></i> <span data-i18n="common.save">Enregistrer</span>
         </button>
       </div>
@@ -294,6 +294,7 @@
 .cal-event-brew    { background:rgba(245,158,11,.18);color:var(--amber); }
 .cal-event-ferm    { background:rgba(59,130,246,.15);color:var(--info); }
 .cal-event-bottle  { background:rgba(16,185,129,.15);color:#10b981; }
+.cal-event-dryhop  { background:rgba(16,185,129,.12);color:var(--hop);border:1px dashed rgba(16,185,129,.4); }
 #cal-btn-grid.active,#cal-btn-agenda.active{background:var(--amber);color:#000}
 .agenda-group-head{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
   color:var(--amber);padding:14px 0 6px;border-bottom:1px solid var(--border);margin-bottom:2px}

@@ -33,7 +33,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('spindle-modal')" data-i18n="common.close">Fermer</button>
-      <button class="btn btn-primary" id="spindle-save-btn" onclick="saveSpindle()"><i class="fas fa-plus"></i> <span data-i18n="spin.create">Créer</span></button>
+      <button class="btn btn-primary" id="spindle-save-btn" onclick="withBtn(this, saveSpindle)"><i class="fas fa-plus"></i> <span data-i18n="spin.create">Créer</span></button>
     </div>
   </div>
 </div>
@@ -149,7 +149,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('temp-sensor-modal')" data-i18n="common.close">Fermer</button>
-      <button class="btn btn-primary" id="temp-save-btn" onclick="saveTempSensor()"><i class="fas fa-plus"></i> <span data-i18n="spin.create">Créer</span></button>
+      <button class="btn btn-primary" id="temp-save-btn" onclick="withBtn(this, saveTempSensor)"><i class="fas fa-plus"></i> <span data-i18n="spin.create">Créer</span></button>
     </div>
   </div>
 </div>

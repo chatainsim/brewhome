@@ -6,8 +6,19 @@
     </div>
   </div>
 
+  <div id="kegs-revision-alert" style="display:none;margin-bottom:14px"></div>
+
   <div class="grid-4" style="margin-bottom:20px" id="kegs-stats"></div>
 
   <div class="beer-grid" id="kegs-grid"></div>
-  <div class="empty" id="kegs-empty" style="display:none"><i class="fas fa-jar"></i><p data-i18n="keg.empty_state">Aucun keg. Cliquez sur + Ajouter un keg.</p></div>
+  <div id="kegs-empty" style="display:none">
+    <div class="empty-state">
+      <div class="empty-state-icon" style="background:rgba(245,158,11,.12)"><i class="fas fa-jar" style="color:var(--amber)"></i></div>
+      <div class="empty-state-title" data-i18n="keg.empty_title">Aucun fût pour l'instant</div>
+      <div class="empty-state-sub" data-i18n="keg.empty_sub">Ajoutez votre premier fût pour suivre vos carbonatations et révisions</div>
+      <div class="empty-state-actions">
+        <button class="btn btn-primary" onclick="openKegModal()"><i class="fas fa-plus"></i> <span data-i18n="keg.add">Ajouter un keg</span></button>
+      </div>
+    </div>
+  </div>
 </div>

@@ -1,0 +1,1101 @@
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// CALENDRIER
+// ══════════════════════════════════════════════════════════════════════════════
+let _calYear  = new Date().getFullYear();
+let _calMonth = new Date().getMonth(); // 0-based
+
+// Retourne le Nème jour de semaine (0=dim…6=sam) d'un mois donné (nth : 1=premier, -1=dernier)
+function _nthDow(year, month, dow, nth) {
+  if (nth > 0) {
+    const d = new Date(year, month, 1);
+    while (d.getDay() !== dow) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + (nth - 1) * 7);
+    return d;
+  } else { // dernier
+    const d = new Date(year, month + 1, 0);
+    while (d.getDay() !== dow) d.setDate(d.getDate() - 1);
+    return d;
+  }
+}
+function _ymd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function _brewingEvents(year) {
+  const ev = [];
+  const add = (date, label, emoji, color, canonical) => ev.push({ date, label, emoji, color, canonical: canonical || label });
+  const p = n => String(n).padStart(2, '0');
+  const fd = (m, d) => `${year}-${p(m)}-${p(d)}`;
+
+  // ── Janvier ───────────────────────────────────────────────────────────────
+  add(fd(1, 1),  'National Hangover Day',           '🤕', '#6b7280');
+  add(fd(1,17),  'Baltic Porter Day',               '🍺', '#6366f1');
+  add(fd(1,17),  'National Bootlegger\'s Day',      '🥃', '#78350f');
+  add(fd(1,24),  'National Beer Can Day',            '🥫', '#f59e0b');
+  // ── Février ───────────────────────────────────────────────────────────────
+  add(fd(2,24),  'World Bartender Day',             '🍸', '#a855f7');
+  add(fd(2,28),  'Open That Bottle Night',          '🍾', '#a855f7');
+  // ── Mars ──────────────────────────────────────────────────────────────────
+  add(fd(3, 8),  'Pink Boots Collaboration Brew Day','👢', '#ec4899');
+  add(fd(3,16),  'Orval International Day',         '🍺', '#d97706');
+  add(fd(3,17),  'St. Patrick\'s Day',              '🍀', '#16a34a');
+  add(fd(3,20),  'National Bock Day',               '🐐', '#92400e');
+  // ── Avril ─────────────────────────────────────────────────────────────────
+  add(fd(4, 6),  'New Beer\'s Eve',                 '🍺', '#f59e0b');
+  add(fd(4, 7),  'National Beer Day',               '🍺', '#f59e0b');
+  add(fd(4,11),  'King Gambrinus Day',              '👑', '#d97706');
+  add(fd(4,23),  'German Beer Day / Reinheitsgebot','🇩🇪', '#ef4444');
+  add(fd(4,25),  'Beer-Clean Glass Day',            '🥃', '#06b6d4');
+  add(fd(4,26),  'Saison Day',                      '🌾', '#84cc16');
+  // ── Mai ───────────────────────────────────────────────────────────────────
+  add(fd(5, 1),  'National Rotate Your Beer Day',   '🔄', '#f59e0b');
+  add(fd(5, 2),  'Beer Pong Day',                   '🏓', '#84cc16');
+  add(fd(5, 5),  'Cinco de Mayo',                   '🌮', '#16a34a');
+  add(fd(5, 7),  'National Homebrew Day',           '🍻', '#8b5cf6');
+  add(fd(5,11),  'American Craft Beer Week (début)','🇺🇸', '#3b82f6');
+  // ── Juin ──────────────────────────────────────────────────────────────────
+  add(fd(6, 8),  'Name Your Poison Day',            '☠️', '#6b7280');
+  add(fd(6,15),  'Beer Day Britain',                '🏴󠁧󠁢󠁥󠁮󠁧󠁿', '#3b82f6');
+  // ── Juillet ───────────────────────────────────────────────────────────────
+  add(fd(7, 7),  'National Dive Bar Day',           '🍺', '#92400e');
+  add(fd(7,12),  'National Michelada Day',          '🌶️', '#dc2626');
+  add(fd(7,23),  'National Refreshment Day',        '🥤', '#06b6d4');
+  // ── Septembre ─────────────────────────────────────────────────────────────
+  add(fd(9, 7),  'National Beer Lover\'s Day',      '🍺', '#f59e0b');
+  add(fd(9,20),  'Sour Beer Day',                   '🍋', '#facc15');
+  add(fd(9,24),  'Arthur Guinness Day',             '🖤', '#374151');
+  add(fd(9,27),  'National Crush-A-Can Day',        '🥫', '#6b7280');
+  add(fd(9,28),  'National Drink A Beer Day',       '🍺', '#f59e0b');
+  // ── Octobre ───────────────────────────────────────────────────────────────
+  add(fd(10, 2), 'Barrel-Aged Beer Day',            '🛢️', '#92400e');
+  add(fd(10, 4), 'Buy A Stranger A Drink Day',      '🍺', '#f59e0b');
+  add(fd(10, 9), 'Beer & Pizza Day',                '🍕', '#ef4444');
+  add(fd(10,10), 'National Black Brewers Day',      '✊', '#374151');
+  add(fd(10,14), 'Homebrewing Legalization Day',    '⚖️', '#8b5cf6');
+  add(fd(10,27), 'National American Beer Day',      '🇺🇸', '#3b82f6');
+  // ── Novembre ──────────────────────────────────────────────────────────────
+  add(fd(11, 5), 'International Stout Day',         '🖤', '#374151');
+  add(_ymd(_nthDow(year, 10, 6, 1)), 'Learn to Homebrew Day', '🏠', '#8b5cf6'); // 1er samedi de novembre
+  add(fd(11,12), 'National Happy Hour Day',         '🍺', '#f59e0b');
+  add(fd(11,17), 'International Happy Gose Day',    '🧂', '#06b6d4');
+  add(fd(11,29), 'Small Brewery Sunday',            '🏠', '#8b5cf6');
+  // ── Décembre ──────────────────────────────────────────────────────────────
+  add(fd(12, 4), 'National Bartender Day',          '🍸', '#a855f7');
+  add(fd(12, 5), 'National Repeal Day',             '🗽', '#3b82f6');
+  add(fd(12,10), 'National Lager Day',              '🍺', '#f59e0b');
+  add(fd(12,25), t('cal.ev_noel'),                   '🎄', '#dc2626', 'Noël — Bière de Noël');
+
+  // ── Dates calculées ───────────────────────────────────────────────────────
+  // IPA Day : 1er jeudi d'août
+  add(_ymd(_nthDow(year, 7, 4, 1)),  'IPA Day',               '🌿', '#84cc16');
+  // International Beer Day : 1er vendredi d'août
+  add(_ymd(_nthDow(year, 7, 5, 1)),  'International Beer Day','🍺', '#f59e0b');
+  // Beaujolais Nouveau : 3e jeudi de novembre
+  add(_ymd(_nthDow(year, 10, 4, 3)), 'Beaujolais Nouveau',    '🍷', '#dc2626');
+  // Oktoberfest : commence le samedi précédant le 22 sept
+  const oktStart = (() => {
+    const d = new Date(year, 8, 22);
+    while (d.getDay() !== 6) d.setDate(d.getDate() - 1);
+    return d;
+  })();
+  add(_ymd(oktStart),               t('cal.ev_okts'),  '🥨', '#d97706', 'Début Oktoberfest');
+  add(_ymd(_nthDow(year, 9, 0, 1)), t('cal.ev_okte'),  '🥨', '#d97706', 'Fin Oktoberfest');
+
+  return ev;
+}
+
+function calNav(dir) {
+  _calMonth += dir;
+  if (_calMonth > 11) { _calMonth = 0;  _calYear++; }
+  if (_calMonth < 0)  { _calMonth = 11; _calYear--; }
+  renderCalendar();
+}
+function calGoToday() {
+  _calYear  = new Date().getFullYear();
+  _calMonth = new Date().getMonth();
+  renderCalendar();
+}
+
+function setCalView(mode) {
+  _calViewMode = mode;
+  localStorage.setItem('calViewMode', mode);
+  document.getElementById('cal-grid-view').style.display = mode === 'grid'   ? '' : 'none';
+  document.getElementById('cal-agenda').style.display    = mode === 'agenda' ? '' : 'none';
+  document.getElementById('cal-btn-grid').classList.toggle('active',   mode === 'grid');
+  document.getElementById('cal-btn-agenda').classList.toggle('active', mode === 'agenda');
+  if (mode === 'agenda') renderAgendaView();
+  else renderCalendar();
+}
+
+function renderAgendaView() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const horizon = new Date(today); horizon.setDate(horizon.getDate() + 180);
+  const todayStr = _ymd(today);
+
+  const events = [];
+  const add = (date, type, label, color, emoji, id) => {
+    if (!date) return;
+    const d = new Date(date + 'T00:00:00');
+    if (d >= today && d <= horizon) events.push({ date, type, label, color, emoji, id });
+  };
+
+  // Brassins
+  (S.brews || []).filter(b => !b.archived).forEach(b => {
+    add(b.brew_date,    'brew',   b.name || '?', 'var(--amber)', '🍺', b.id);
+    add(b.bottling_date,'bottle', b.name || '?', '#10b981',      '🍾', b.id);
+    if (b.brew_date && b.ferm_time) {
+      const d = new Date(b.brew_date + 'T00:00:00'); d.setDate(d.getDate() + b.ferm_time);
+      add(_ymd(d), 'ferm', b.name || '?', 'var(--info)', '🌡️', b.id);
+    }
+    // Dry hops
+    if (b.brew_date && b.ferm_time && b.recipe_id) {
+      const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
+      if (recipe?.ingredients) {
+        const dhByDay = {};
+        recipe.ingredients
+          .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
+          .forEach(dh => {
+            const k = dh.hop_days;
+            if (!dhByDay[k]) dhByDay[k] = [];
+            dhByDay[k].push(`${dh.quantity}\u202f${dh.unit} ${dh.name}`);
+          });
+        Object.entries(dhByDay).forEach(([days, hops]) => {
+          const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
+          if (offset < 0) return;
+          const d = new Date(b.brew_date + 'T00:00:00');
+          d.setDate(d.getDate() + offset);
+          add(_ymd(d), 'dryhop', `${b.name || '?'} — 🌿 Dry Hop (J${offset}) : ${hops.join(', ')}`, 'var(--hop)', '🌿', b.id);
+        });
+      }
+    }
+  });
+
+  // Fin de refermentation (bières en cave)
+  (S.beers || []).filter(b => b.refermentation && b.bottling_date && b.refermentation_days).forEach(b => {
+    const d = new Date(b.bottling_date + 'T00:00:00');
+    d.setDate(d.getDate() + b.refermentation_days);
+    add(_ymd(d), 'referm', b.name || '?', 'var(--info)', '🔄', b.id);
+  });
+
+  // Brouillons
+  (S.drafts || []).filter(dr => dr.target_date).forEach(dr => {
+    add(dr.target_date, 'draft', dr.title || '?', '#8b5cf6', '📖', dr.id);
+  });
+
+  // Événements personnalisés (avec expansion récurrence)
+  const savedYear = _calYear, savedMonth = _calMonth;
+  _calYear = today.getFullYear(); _calMonth = today.getMonth();
+  (S.customEvents || []).forEach(ev => {
+    _expandCustomEvent(ev).forEach(ds => {
+      add(ds, 'custom', ev.title, ev.color || 'var(--amber)', ev.emoji || '📅', ev.id);
+      if (ev.brew_reminder) {
+        const rd = new Date(ds + 'T00:00:00');
+        rd.setDate(rd.getDate() - (ev.brew_reminder_days || appSettings.defaultBrewReminderDays || 45));
+        add(_ymd(rd), 'remind', ev.title, '#a855f7', '🔔', ev.id);
+      }
+    });
+  });
+  _calYear = savedYear; _calMonth = savedMonth;
+
+  // Événements mondiaux
+  [today.getFullYear(), today.getFullYear() + 1].forEach(yr =>
+    _brewingEvents(yr).forEach(we => add(we.date, 'world', we.label, we.color, we.emoji))
+  );
+
+  events.sort((a, b) => a.date.localeCompare(b.date));
+
+  const container = document.getElementById('cal-agenda');
+  if (!events.length) {
+    container.innerHTML = `<div class="empty"><i class="fas fa-calendar-check"></i><p>${t('cal.agenda_empty')}</p></div>`;
+    return;
+  }
+
+  const MONTHS     = t('cal.months');
+  const DAY_NAMES  = t('cal.agenda_day_names');
+  const MON_SHORT  = t('cal.agenda_months_short');
+  const typeColor  = { brew:'var(--amber)', ferm:'var(--info)', bottle:'#10b981', referm:'var(--info)', dryhop:'var(--hop)', custom:'', remind:'#a855f7', draft:'#8b5cf6', world:'' };
+  const thisWeekEnd  = _ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7));
+  const thisMonthEnd = _ymd(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+
+  let html = '', lastGroup = null;
+  events.forEach(ev => {
+    const d = new Date(ev.date + 'T00:00:00');
+    let group;
+    if (ev.date === todayStr)          group = t('cal.agenda_today');
+    else if (ev.date < thisWeekEnd)    group = t('cal.agenda_this_week');
+    else if (ev.date <= thisMonthEnd)  group = t('cal.agenda_this_month');
+    else                               group = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    if (group !== lastGroup) { html += `<div class="agenda-group-head">${group}</div>`; lastGroup = group; }
+
+    const dot  = ev.color || typeColor[ev.type] || 'var(--muted)';
+    const ico  = ev.emoji || '📅';
+    const ds   = `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${MON_SHORT[d.getMonth()]}`;
+    const edit = ev.type === 'custom'
+      ? `<button class="btn btn-ghost btn-icon btn-sm" onclick="editCustomEvent(${ev.id})" style="flex-shrink:0"><i class="fas fa-pen"></i></button>`
+      : ev.type === 'brew' ? `<button class="btn btn-ghost btn-icon btn-sm" onclick="navigate('brassins')" style="flex-shrink:0"><i class="fas fa-arrow-right"></i></button>` : '';
+
+    html += `<div class="agenda-row">
+      <div class="agenda-date">${ds}</div>
+      <div class="agenda-dot" style="background:${dot}"></div>
+      <div class="agenda-label">${ico} ${ev.label}</div>
+      ${edit}
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+function _expandCustomEvent(ev) {
+  const rec = ev.recurrence
+    ? (typeof ev.recurrence === 'string' ? JSON.parse(ev.recurrence) : ev.recurrence)
+    : null;
+  if (!rec?.type) return [ev.event_date];
+  const years = [_calYear - 1, _calYear, _calYear + 1];
+
+  if (rec.type === 'yearly') {
+    return years.map(year => `${year}-${ev.event_date.slice(5, 10)}`);
+  }
+  if (rec.type === 'yearly_nth_dow') {
+    const month = parseInt(ev.event_date.slice(5, 7)) - 1;
+    return years.map(year => _ymd(_nthDow(year, month, rec.dow, rec.nth))).filter(Boolean);
+  }
+  if (rec.type === 'monthly') {
+    const day = parseInt(ev.event_date.slice(8, 10));
+    const results = [];
+    for (const year of years)
+      for (let m = 0; m < 12; m++) {
+        const d = new Date(year, m, day);
+        if (d.getMonth() === m) results.push(_ymd(d));
+      }
+    return results;
+  }
+  if (rec.type === 'monthly_nth_dow') {
+    const results = [];
+    for (const year of years)
+      for (let m = 0; m < 12; m++) {
+        const d = _nthDow(year, m, rec.dow, rec.nth);
+        if (d) results.push(_ymd(d));
+      }
+    return results;
+  }
+  if (rec.type === 'weekly') {
+    const interval = Math.max(1, parseInt(rec.interval) || 1);
+    const anchor = new Date(ev.event_date + 'T00:00:00');
+    const rangeStart = new Date(_calYear - 1, 0, 1);
+    const rangeEnd   = new Date(_calYear + 1, 11, 31);
+    const cur = new Date(anchor);
+    while (cur > rangeStart) cur.setDate(cur.getDate() - 7 * interval);
+    cur.setDate(cur.getDate() + 7 * interval);
+    const results = [];
+    while (cur <= rangeEnd) { results.push(_ymd(new Date(cur))); cur.setDate(cur.getDate() + 7 * interval); }
+    return results;
+  }
+  return [ev.event_date];
+}
+
+function renderCalendar() {
+  const MONTHS = t('cal.months');
+  document.getElementById('cal-title').textContent = `${MONTHS[_calMonth]} ${_calYear}`;
+
+  // Construire les événements depuis S.brews
+  _calEvStore = []; // réinitialisé à chaque rendu
+  const events = {}; // { 'YYYY-MM-DD': [{type, label, brewId}] }
+  const addEv = (date, ev) => {
+    if (!date) return;
+    const d = date.slice(0, 10);
+    if (!events[d]) events[d] = [];
+    events[d].push({ ...ev, date: d });
+  };
+
+  (S.brews || []).filter(b => !b.archived).forEach(b => {
+    const label = b.name || t('brew.title');
+    if (b.brew_date)     addEv(b.brew_date,    { type: 'brew',   label, id: b.id });
+    if (b.bottling_date) addEv(b.bottling_date, { type: 'bottle', label, id: b.id });
+    if (b.brew_date && b.ferm_time) {
+      const d = new Date(b.brew_date + 'T00:00:00');
+      d.setDate(d.getDate() + (b.ferm_time | 0));
+      addEv(_ymd(d), { type: 'ferm', label: `${label} ${t('cal.ferm_abbr')}`, id: b.id });
+    }
+    // Dry hops
+    if (b.brew_date && b.ferm_time && b.recipe_id) {
+      const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
+      if (recipe?.ingredients) {
+        const dhByDay = {};
+        recipe.ingredients
+          .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
+          .forEach(dh => {
+            const k = dh.hop_days;
+            if (!dhByDay[k]) dhByDay[k] = [];
+            dhByDay[k].push(dh.name);
+          });
+        Object.entries(dhByDay).forEach(([days, hops]) => {
+          const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
+          if (offset < 0) return;
+          const d = new Date(b.brew_date + 'T00:00:00');
+          d.setDate(d.getDate() + offset);
+          addEv(_ymd(d), { type: 'dryhop', label: `${label} 🌿 DH`, color: 'var(--hop)', id: b.id });
+        });
+      }
+    }
+  });
+
+  // Fin de refermentation (bières en cave)
+  (S.beers || []).filter(b => b.refermentation && b.bottling_date && b.refermentation_days).forEach(b => {
+    const label = b.name || t('cave.modal_title_add');
+    const d = new Date(b.bottling_date + 'T00:00:00');
+    d.setDate(d.getDate() + (b.refermentation_days | 0));
+    addEv(_ymd(d), { type: 'referm', label: `🔄 ${label} — ${t('cave.refermentation_end')}`, color: 'var(--info)', id: b.id });
+  });
+
+  // Brouillons planifiés
+  (S.drafts || []).filter(d => d.target_date).forEach(d => {
+    addEv(d.target_date, { type: 'draft', label: d.title || 'Brouillon', color: d.color || '#8b5cf6', draftId: d.id });
+  });
+
+  // Événements personnalisés + leur rappel J-45
+  (S.customEvents || []).forEach(ev => {
+    const c = ev.color || '#f59e0b';
+    const occurrences = _expandCustomEvent(ev);
+    occurrences.forEach(eventDate => {
+      addEv(eventDate, { type: 'custom', label: (ev.emoji || '📅') + ' ' + ev.title, color: c, customId: ev.id });
+      if (ev.brew_reminder) {
+        const days = ev.brew_reminder_days ?? appSettings.defaultBrewReminderDays ?? 45;
+        const rd = new Date(eventDate + 'T00:00:00');
+        rd.setDate(rd.getDate() - days);
+        addEv(_ymd(rd), { type: 'custom_remind', label: '🔔 ' + t('cal.brew_for') + ' ' + ev.title, color: '#a855f7', eventDate, reminderDays: days, customId: ev.id });
+      }
+    });
+  });
+
+  // Événements brassicoles mondiaux + rappels J-45
+  const _hiddenWorldEvs  = appSettings.hiddenWorldEvents   || [];
+  const _worldOverrides  = appSettings.worldEventOverrides || {};
+  const _allWorldEvs = [
+    ..._brewingEvents(_calYear),
+    ..._brewingEvents(_calYear - 1),
+    ..._brewingEvents(_calYear + 1),
+  ].filter(e => !_hiddenWorldEvs.includes(e.canonical || e.label));
+  _allWorldEvs.forEach(e => {
+    const eKey  = e.canonical || e.label;
+    const ov    = _worldOverrides[eKey] || {};
+    const emoji = ov.emoji || e.emoji;
+    const lbl   = ov.label || e.label;
+    const color = ov.color || e.color;
+    const evYear = e.date.slice(0, 4);
+    const date  = ov.date_mmdd ? `${evYear}-${ov.date_mmdd}` : e.date;
+    addEv(date, { type: 'world', label: emoji + ' ' + lbl, color, origLabel: eKey });
+    // Rappel brassage (délai global)
+    const _remDays = appSettings.defaultBrewReminderDays ?? 45;
+    const rd = new Date(date + 'T00:00:00');
+    rd.setDate(rd.getDate() - _remDays);
+    addEv(_ymd(rd), { type: 'remind', label: '🔔 ' + t('cal.brew_for') + ' ' + lbl, color: '#a855f7', eventDate: date, reminderDays: _remDays, origLabel: eKey });
+  });
+
+  // Calcul des cellules du mois
+  const today    = new Date(); today.setHours(0,0,0,0);
+  const firstDay = new Date(_calYear, _calMonth, 1);
+  const lastDay  = new Date(_calYear, _calMonth + 1, 0);
+  // Lundi = 0 … Dimanche = 6
+  const startDow = (firstDay.getDay() + 6) % 7; // lundi en premier
+  const totalCells = Math.ceil((startDow + lastDay.getDate()) / 7) * 7;
+
+  let html = '';
+  for (let i = 0; i < totalCells; i++) {
+    const cellDate = new Date(_calYear, _calMonth, 1 - startDow + i);
+    const isOther  = cellDate.getMonth() !== _calMonth;
+    const isToday  = cellDate.getTime() === today.getTime();
+    const key      = _ymd(cellDate);
+    const dayEvs   = events[key] || [];
+
+    const evHtml = dayEvs.map(ev => {
+      const idx = _calEvStore.push(ev) - 1;
+      if (ev.type === 'world') {
+        return `<div class="cal-event" style="background:${ev.color}22;color:${ev.color};border:1px solid ${ev.color}44"
+          onclick="calEvClick(event,${idx})">
+          <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
+        </div>`;
+      }
+      if (ev.type === 'remind') {
+        return `<div class="cal-event" style="background:rgba(168,85,247,.12);color:#a855f7;border:1px dashed rgba(168,85,247,.4)"
+          onclick="calEvClick(event,${idx})">
+          <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
+        </div>`;
+      }
+      if (ev.type === 'draft') {
+        const c = ev.color || '#8b5cf6';
+        return `<div class="cal-event" style="background:${c}22;color:${c};border:1px solid ${c}44"
+          onclick="calEvClick(event,${idx})">
+          <i class="fas fa-book-open" style="flex-shrink:0;font-size:.65rem"></i>
+          <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
+        </div>`;
+      }
+      if (ev.type === 'custom') {
+        const c = ev.color || '#f59e0b';
+        return `<div class="cal-event" style="background:${c}22;color:${c};border:1px solid ${c}55"
+          onclick="event.stopPropagation();editCustomEvent(${ev.customId})" title="${t('common.edit')}">
+          <i class="fas fa-star" style="flex-shrink:0;font-size:.6rem"></i>
+          <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
+          <i class="fas fa-pen" style="flex-shrink:0;font-size:.55rem;margin-left:auto;opacity:.6"></i>
+        </div>`;
+      }
+      if (ev.type === 'custom_remind') {
+        return `<div class="cal-event" style="background:rgba(168,85,247,.12);color:#a855f7;border:1px dashed rgba(168,85,247,.4)"
+          onclick="calEvClick(event,${idx})">
+          <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
+        </div>`;
+      }
+      const cls  = ev.type === 'brew' ? 'cal-event-brew' : ev.type === 'bottle' ? 'cal-event-bottle' : ev.type === 'dryhop' ? 'cal-event-dryhop' : 'cal-event-ferm';
+      const icon = ev.type === 'brew' ? 'fa-fire-burner'  : ev.type === 'bottle' ? 'fa-wine-bottle'   : ev.type === 'dryhop' ? 'fa-leaf'          : 'fa-clock';
+      return `<div class="cal-event ${cls}" onclick="calEvClick(event,${idx})">
+        <i class="fas ${icon}" style="flex-shrink:0;font-size:.65rem"></i>
+        <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
+      </div>`;
+    }).join('');
+
+    html += `<div class="cal-cell${isOther?' cal-other-month':''}${isToday?' cal-today':''}">
+      <div class="cal-day-num">${cellDate.getDate()}</div>
+      ${evHtml}
+    </div>`;
+  }
+  document.getElementById('cal-grid').innerHTML = html;
+  _closeCalPopover();
+  updateCalBadge();
+}
+
+let _calEvStore = [];
+let _calViewMode = localStorage.getItem('calViewMode') || 'grid';
+
+const _BREW_EV_DETAILS = {
+  "National Hangover Day":                  { desc: "Célébration de la récupération après les fêtes du Nouvel An.", desc_en: "Celebrate recovering from New Year's Eve. Stay hydrated!" },
+  "Baltic Porter Day":                      { desc: "10e anniversaire de cet événement dédié aux bières brunes baltiques.", desc_en: "Dedicated to Baltic Porter, a rich lager-fermented dark beer. Notes of chocolate, coffee and dried fruit.", style: "Baltic Porter" },
+  "National Bootlegger's Day":              { desc: "Hommage aux distributeurs clandestins d'alcool pendant la Prohibition.", desc_en: "Tribute to those who kept alcohol flowing underground during Prohibition." },
+  "National Beer Can Day":                  { desc: "Reconnaît la canette pour sa praticité et son recyclabilité.", desc_en: "Recognises the beer can for its convenience and recyclability." },
+  "World Bartender Day":                    { desc: "Remerciez votre barman ! Journée de reconnaissance des bartenders.", desc_en: "Thank your bartender! A day of recognition for those who craft your drinks." },
+  "Open That Bottle Night":                 { desc: "Profitez enfin de cette bouteille spéciale que vous gardez précieusement.", desc_en: "Finally open that special bottle you've been saving for the right moment." },
+  "Pink Boots Collaboration Brew Day":      { desc: "Célèbre les femmes brasseurs et leurs créations. Journée internationale des droits des femmes.", desc_en: "Celebrates women in brewing. A worldwide collaboration brew day on International Women's Day.", style: "Bière collaborative", style_en: "Collaboration Brew" },
+  "Orval International Day":               { desc: "Hommage à la Brasserie d'Orval, active depuis 1931. Une des plus emblématiques bières trappistes.", desc_en: "Tribute to Brasserie d'Orval, brewing since 1931. One of the most iconic Trappist beers.", style: "Trappiste / Belgian Ale" },
+  "St. Patrick's Day":                      { desc: "Plus de 13 millions de pintes de Guinness consommées dans le monde. La fête irlandaise par excellence !", desc_en: "Over 13 million pints of Guinness consumed worldwide. The ultimate Irish celebration!", style: "Irish Stout / Red Ale" },
+  "National Bock Day":                      { desc: "Célèbre cette lager allemande traditionnelle, forte et maltée.", desc_en: "Celebrates this traditional German strong lager, rich and malty.", style: "Bock / Doppelbock" },
+  "New Beer's Eve":                         { desc: "Veille de la fin de la Prohibition aux États-Unis (1933). Anticipe le retour de la bière légale.", desc_en: "The eve of the end of Prohibition in the United States (1933). Anticipating the return of legal beer." },
+  "National Beer Day":                      { desc: "Marque la fin de la Prohibition et la reprise du brassage légal aux USA (7 avril 1933).", desc_en: "Marks the end of Prohibition and the resumption of legal brewing in the USA (April 7, 1933)." },
+  "King Gambrinus Day":                     { desc: "Célèbre le roi légendaire de la bière, symbole du brassage et de la bonne humeur.", desc_en: "Celebrates the legendary king of beer, symbol of brewing and good cheer." },
+  "German Beer Day / Reinheitsgebot":       { desc: "Honore la loi de pureté allemande de 1516 (eau, malt, houblon). Pilier de la tradition brassicole.", desc_en: "Honours the German Purity Law of 1516 (water, malt, hops). A cornerstone of brewing tradition.", style: "Lager / Weizen / Märzen" },
+  "Beer-Clean Glass Day":                   { desc: "L'importance d'un verre parfaitement propre pour révéler tous les arômes d'une bière.", desc_en: "The importance of a perfectly clean glass to reveal all the aromas of a beer." },
+  "Saison Day":                             { desc: "Célèbre les bières de saison belges, légères, épicées et rafraîchissantes.", desc_en: "Celebrates Belgian farmhouse ales — light, spicy and refreshing.", style: "Saison / Farmhouse Ale" },
+  "National Rotate Your Beer Day":          { desc: "Pensez à consommer vos bières par ordre d'achat pour garantir leur fraîcheur !", desc_en: "Remember to drink your beers in order of purchase to ensure freshness!" },
+  "Beer Pong Day":                          { desc: "Journée dédiée au jeu de bière pong, classique des soirées étudiantes.", desc_en: "A day dedicated to the classic drinking game, a staple of student parties." },
+  "Cinco de Mayo":                          { desc: "Fête mexicaine célébrée avec des cervezas bien fraîches.", desc_en: "Mexican holiday celebrated with ice-cold cervezas.", style: "Mexican Lager / Cerveza" },
+  "National Homebrew Day":                  { desc: "Honore la tradition du brassage maison, vieille de 7 000 ans. Brassin communautaire mondial !", desc_en: "Honors the 7,000-year-old tradition of homebrewing. A worldwide community brew day!", style: "Style libre — brassez ce que vous aimez !", style_en: "Free style — brew what you love!" },
+  "American Craft Beer Week (début)":       { desc: "Semaine de soutien aux brasseries artisanales américaines. Explorez les styles locaux !", desc_en: "A week supporting American craft breweries. Explore local styles!" },
+  "Name Your Poison Day":                   { desc: "Choisissez votre boisson préférée et célébrez-la sans modération (mais avec modération 😄).", desc_en: "Choose your favourite drink and celebrate it — in moderation of course 😄." },
+  "Beer Day Britain":                       { desc: "Célèbre les traditions brassicoles britanniques : ales, porters, bitters…", desc_en: "Celebrates British brewing traditions: ales, porters, bitters…", style: "British Ale / Porter / Bitter" },
+  "National Dive Bar Day":                  { desc: "Soutien aux bars de quartier sympas et sans chichi. Un classique à préserver !", desc_en: "Support for neighbourhood bars without pretension. A classic worth preserving!" },
+  "National Michelada Day":                 { desc: "Cocktail bière mexicain épicé (tomate, citron, piment). Parfait pour l'été !", desc_en: "Spiced Mexican beer cocktail (tomato, lime, chilli). Perfect for summer!", style: "Mexican Lager / Cerveza" },
+  "National Refreshment Day":              { desc: "Rien de tel qu'une bière bien fraîche pour se désaltérer en plein été.", desc_en: "Nothing beats an ice-cold beer to quench your thirst on a summer day." },
+  "IPA Day":                                { desc: "Célèbre le style le plus populaire de la bière craft. Houblonnée à souhait !", desc_en: "Celebrates the most popular craft beer style. Hop forward to the max!", style: "IPA / Double IPA / Hazy IPA" },
+  "International Beer Day":                { desc: "Rassemblement mondial autour d'une bière de qualité. Célébrez avec vos amis !", desc_en: "A global celebration of quality beer. Celebrate with friends!", style: "Votre style préféré !", style_en: "Your favourite style!" },
+  "National Beer Lover's Day":              { desc: "Journée pour les vrais amateurs — explorez un style que vous ne connaissez pas encore.", desc_en: "A day for true enthusiasts — explore a style you haven't tried yet." },
+  "Sour Beer Day":                          { desc: "Célèbre les bières acidulées et fermentées : lambics, gueuzes, Berliner Weisse…", desc_en: "Celebrates tart and fermented beers: lambics, gueuzes, Berliner Weisse…", style: "Gueuze / Lambic / Berliner Weisse / Gose" },
+  "Arthur Guinness Day":                    { desc: "Anniversaire d'Arthur Guinness (1725), fondateur de la brasserie irlandaise la plus célèbre.", desc_en: "Birthday of Arthur Guinness (1725), founder of the world's most famous Irish brewery.", style: "Irish Stout" },
+  "National Crush-A-Can Day":              { desc: "Pensez à recycler vos canettes ! La canette est le contenant le plus recyclé au monde.", desc_en: "Remember to recycle your cans! The beer can is the most recycled container in the world." },
+  "National Drink A Beer Day":             { desc: "La plus simple des célébrations : ouvrez une bière et savourez-la.", desc_en: "The simplest of celebrations: open a beer and savour it." },
+  "Barrel-Aged Beer Day":                  { desc: "Célèbre les bières vieillie en fût de bois. Complexité et caractère garantis !", desc_en: "Celebrates beers aged in wooden barrels. Complexity and character guaranteed!", style: "Barrel-Aged Stout / Barleywine / Sour" },
+  "Buy A Stranger A Drink Day":            { desc: "Offrez une bière à quelqu'un que vous ne connaissez pas. Un geste simple et convivial.", desc_en: "Buy a beer for someone you don't know. A simple and convivial gesture." },
+  "Beer & Pizza Day":                       { desc: "Le mariage parfait : une pizza et une bière bien choisie. IPA et pepperoni ? Stout et margherita ?", desc_en: "The perfect pairing: a pizza and the right beer. IPA and pepperoni? Stout and margherita?" },
+  "National Black Brewers Day":            { desc: "Soutien aux brasseries afro-américaines, représentant moins de 1% des brasseries aux USA.", desc_en: "Supporting African-American breweries, representing less than 1% of breweries in the USA." },
+  "Homebrewing Legalization Day":          { desc: "Commémore la légalisation du brassage à domicile aux USA (1978). Merci Jimmy Carter !", desc_en: "Commemorates the legalization of homebrewing in the USA (1978). Thank you, Jimmy Carter!" },
+  "National American Beer Day":            { desc: "Célèbre les presque 10 000 brasseries artisanales américaines et leur diversité.", desc_en: "Celebrates the nearly 10,000 American craft breweries and their diversity." },
+  "International Stout Day":               { desc: "La bière brune à l'honneur ! Du Dry Irish au Imperial Stout en passant par le Milk Stout.", desc_en: "Dark beer in the spotlight! From Dry Irish to Imperial Stout to Milk Stout.", style: "Stout (toutes déclinaisons)", style_en: "Stout (all variations)" },
+  "Learn to Homebrew Day":                 { desc: "Journée idéale pour se lancer dans le brassage maison ! Ateliers et kits d'initiation.", desc_en: "The ideal day to get started with homebrewing! Workshops and starter kits available." },
+  "National Happy Hour Day":               { desc: "Profitez des happy hours et des tarifs réduits en fin de journée. Santé !", desc_en: "Enjoy happy hours and discounted drinks at the end of the day. Cheers!" },
+  "International Happy Gose Day":          { desc: "Célèbre la Gose, bière de blé acidulée et salée, originaire de Goslar en Allemagne.", desc_en: "Celebrates the Gose, a tart and salty wheat beer from Goslar, Germany.", style: "Gose / Salted Sour Wheat Beer" },
+  "Small Brewery Sunday":                  { desc: "Soutien aux micro-brasseries locales. Visitez-en une près de chez vous !", desc_en: "Supporting local microbreweries. Visit one near you!" },
+  "National Bartender Day":               { desc: "Remerciez ceux qui servent vos bières avec expertise et passion.", desc_en: "Thank those who serve your beers with expertise and passion." },
+  "National Repeal Day":                   { desc: "Commémore l'abrogation du 18e amendement (5 déc. 1933) : fin de la Prohibition aux USA.", desc_en: "Commemorates the repeal of the 18th Amendment (Dec. 5, 1933): end of Prohibition in the USA." },
+  "National Lager Day":                    { desc: "Célèbre le style de bière le plus consommé au monde. Fraîche, limpide, désaltérante.", desc_en: "Celebrates the world's most consumed beer style. Fresh, clear, refreshing.", style: "Lager / Pilsner / Helles" },
+  "Noël — Bière de Noël":                  { desc: "Brassez une bière épicée et chaleureuse pour les fêtes. Cannelle, orange, muscade…", desc_en: "Brew a spiced, warming beer for the holidays. Cinnamon, orange, nutmeg…", style: "Winter Warmer / Belgian Dark Strong / Spiced Ale" },
+  "Début Oktoberfest":                     { desc: "Le plus grand festival de bière au monde à Munich. 6 millions de litres consommés chaque année !", desc_en: "The world's largest beer festival in Munich. 6 million litres consumed every year!", style: "Märzen / Festbier / Weizen" },
+  "Fin Oktoberfest":                       { desc: "Clôture de l'Oktoberfest de Munich. Encore une dernière chope ?", desc_en: "Closing of the Munich Oktoberfest. One last stein for the road?" },
+  "Beaujolais Nouveau":                    { desc: "Soirée de dégustation du Beaujolais Nouveau. Certains brasseurs font aussi une bière de saison !", desc_en: "Beaujolais Nouveau tasting evening. Some brewers also release a seasonal beer!" },
+};
+
+function calEvClick(e, idx) {
+  e.stopPropagation();
+  const ev  = _calEvStore[idx];
+  if (!ev) return;
+  const pop = document.getElementById('cal-popover');
+  const cnt = document.getElementById('cal-pop-content');
+
+  let html = '';
+  if (ev.type === 'draft') {
+    const d = (S.drafts || []).find(x => x.id === ev.draftId);
+    const c = ev.color || '#8b5cf6';
+    html = `
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
+        <i class="fas fa-book-open" style="color:${c}"></i>
+        <span style="font-weight:700;font-size:.9rem">${esc(ev.label)}</span>
+      </div>`;
+    if (d) {
+      const ingCount = (() => { try { return JSON.parse(d.ingredients||'[]').length; } catch(e) { return 0; } })();
+      html += `
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:6px">${d.style ? esc(d.style) + ' · ' : ''}${ingCount ? ingCount + ' ' + t('draft.ing_count_label') : t('draft.no_ing_short')}</div>
+      ${d.notes ? `<div style="font-size:.8rem;color:var(--text);line-height:1.4;margin-bottom:8px;font-style:italic">${esc(d.notes.slice(0,120))}${d.notes.length>120?'…':''}</div>` : ''}
+      <button class="btn btn-sm btn-ghost" style="width:100%" onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>openDraft(${d.id}),300)">
+        <i class="fas fa-arrow-right"></i> ${t('cal.open_draft')}
+      </button>`;
+    }
+  } else if (ev.type === 'world') {
+    const rawLabel = ev.origLabel || ev.label.replace(/^\S+\s/, '');
+    const _ov      = (appSettings.worldEventOverrides || {})[rawLabel] || {};
+    const details  = { ..._BREW_EV_DETAILS[rawLabel] || {} };
+    if (_ov.desc  !== undefined) details.desc  = _ov.desc;
+    if (_ov.style !== undefined) details.style = _ov.style;
+    const dateStr  = new Date(ev.date + 'T00:00:00').toLocaleDateString(_lang || 'fr', { weekday:'long', day:'numeric', month:'long' });
+    // Brouillons liés à cet événement
+    const linkedDrafts = (S.drafts || []).filter(d =>
+      d.target_date === ev.date || d.event_label === rawLabel
+    );
+    html = `
+      <div style="font-size:1rem;font-weight:700;margin-bottom:4px">${esc(ev.label)}</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:8px;text-transform:capitalize">${dateStr}</div>
+      ${details.desc ? `<div style="font-size:.82rem;color:var(--text);line-height:1.45;margin-bottom:6px">${esc(_lang === 'en' ? (details.desc_en || details.desc) : details.desc)}</div>` : ''}
+      ${details.style ? `<div style="font-size:.78rem;margin-top:4px;padding:4px 8px;background:rgba(245,158,11,.1);border-radius:6px;color:var(--amber)"><i class="fas fa-beer-mug-empty"></i> ${t('cal.style_hint')} <strong>${esc(_lang === 'en' ? (details.style_en || details.style) : details.style)}</strong></div>` : ''}`;
+    if (linkedDrafts.length) {
+      html += `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+        <div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+          <i class="fas fa-book-open"></i> ${t('draft.planned_drafts')} (${linkedDrafts.length})
+        </div>`;
+      linkedDrafts.forEach(d => {
+        const c = d.color || '#8b5cf6';
+        html += `<div style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:7px;background:${c}15;margin-bottom:4px;cursor:pointer"
+          onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>openDraft(${d.id}),300)">
+          <span style="width:8px;height:8px;border-radius:50%;background:${c};flex-shrink:0"></span>
+          <span style="font-size:.8rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.title||'Brouillon')}</span>
+          <i class="fas fa-arrow-right" style="font-size:.65rem;color:var(--muted)"></i>
+        </div>`;
+      });
+      html += `</div>`;
+    } else {
+      html += `<div style="margin-top:8px">
+        <button class="btn btn-sm btn-ghost" style="width:100%;font-size:.75rem"
+          onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${ev.date.replace(/'/g,'\\\'') }','${rawLabel.replace(/'/g,'\\\'')}'),300)">
+          <i class="fas fa-plus"></i> ${t('cal.prepare_draft')}
+        </button>
+      </div>`;
+    }
+  } else if (ev.type === 'remind') {
+    const evLabel  = ev.origLabel || ev.label.replace('🔔 ', '').replace(t('cal.brew_for') + ' ', '');
+    const _brewForPfx = '🔔 ' + t('cal.brew_for') + ' ';
+    const evDisplayLabel = ev.label.startsWith(_brewForPfx) ? ev.label.slice(_brewForPfx.length) : evLabel;
+    const details  = _BREW_EV_DETAILS[evLabel] || {};
+    const evDateStr = ev.eventDate
+      ? new Date(ev.eventDate + 'T00:00:00').toLocaleDateString(_lang || 'fr', { day:'numeric', month:'long' })
+      : '';
+    const linkedDrafts = (S.drafts || []).filter(d =>
+      d.target_date === ev.eventDate || d.event_label === evLabel
+    );
+    html = `
+      <div style="color:#a855f7;font-weight:700;font-size:.82rem;margin-bottom:6px"><i class="fas fa-bell"></i> ${t('cal.remind_label')} — J-${ev.reminderDays || 45}</div>
+      <div style="font-size:.92rem;font-weight:600;margin-bottom:4px">${esc(evDisplayLabel)}</div>
+      ${evDateStr ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:6px">${t('cal.event_date')} <strong>${evDateStr}</strong></div>` : ''}
+      ${details.desc ? `<div style="font-size:.8rem;color:var(--text);line-height:1.4;margin-bottom:6px">${esc(_lang === 'en' ? (details.desc_en || details.desc) : details.desc)}</div>` : ''}
+      ${details.style ? `<div style="font-size:.78rem;padding:4px 8px;background:rgba(245,158,11,.1);border-radius:6px;color:var(--amber);margin-bottom:6px"><i class="fas fa-beer-mug-empty"></i> ${t('cal.style_recommended')} : <strong>${esc(_lang === 'en' ? (details.style_en || details.style) : details.style)}</strong></div>` : ''}
+      <div style="font-size:.75rem;color:#a855f7;font-style:italic;margin-bottom:8px">${t('cal.remind_msg')}</div>`;
+    if (linkedDrafts.length) {
+      html += `<div style="padding-top:8px;border-top:1px solid var(--border)">
+        <div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+          <i class="fas fa-book-open"></i> ${t('draft.planned_drafts')} (${linkedDrafts.length})
+        </div>`;
+      linkedDrafts.forEach(d => {
+        const c = d.color || '#8b5cf6';
+        html += `<div style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:7px;background:${c}15;margin-bottom:4px;cursor:pointer"
+          onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>openDraft(${d.id}),300)">
+          <span style="width:8px;height:8px;border-radius:50%;background:${c};flex-shrink:0"></span>
+          <span style="font-size:.8rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.title||'Brouillon')}</span>
+          <i class="fas fa-arrow-right" style="font-size:.65rem;color:var(--muted)"></i>
+        </div>`;
+      });
+      html += `</div>`;
+    } else {
+      html += `<button class="btn btn-sm btn-ghost" style="width:100%;font-size:.75rem"
+        onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${(ev.eventDate||'').replace(/'/g,'\\\'') }','${evLabel.replace(/'/g,'\\\'')}'),300)">
+        <i class="fas fa-plus"></i> ${t('cal.prepare_draft')}
+      </button>`;
+    }
+  } else if (ev.type === 'custom') {
+    const ce   = (S.customEvents || []).find(x => x.id === ev.customId);
+    const c    = ev.color || '#f59e0b';
+    const dateStr = new Date(ev.date + 'T00:00:00').toLocaleDateString(_lang || 'fr', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+    html = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span style="font-size:1.2rem">${ce?.emoji || '📅'}</span>
+        <span style="font-weight:700;font-size:.95rem">${esc(ce?.title || ev.label)}</span>
+      </div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:8px;text-transform:capitalize">${dateStr}</div>`;
+    if (ce?.notes) html += `<div style="font-size:.82rem;color:var(--text);line-height:1.45;margin-bottom:8px">${esc(ce.notes)}</div>`;
+    if (ce?.style) html += `<div style="font-size:.78rem;padding:3px 8px;background:rgba(245,158,11,.1);border-radius:6px;color:var(--amber);margin-bottom:6px"><i class="fas fa-beer-mug-empty"></i> ${esc(ce.style)}</div>`;
+    if (ce?.recipe_id) { const r=(S.recipes||[]).find(x=>x.id===ce.recipe_id); if(r) html+=`<div style="font-size:.78rem;color:var(--info);margin-bottom:6px"><i class="fas fa-scroll"></i> ${t('cal.recipe_linked')} : <strong>${esc(r.name)}</strong></div>`; }
+    if (ce?.draft_id)  { const d=(S.drafts||[]).find(x=>x.id===ce.draft_id);   if(d) html+=`<div style="font-size:.78rem;color:#8b5cf6;margin-bottom:6px"><i class="fas fa-book-open"></i> ${t('cal.draft_linked')} : <strong>${esc(d.title||t('draft.title'))}</strong></div>`; }
+    if (ce?.brew_reminder) { const _rd = ce.brew_reminder_days ?? appSettings.defaultBrewReminderDays ?? 45; html += `<div style="font-size:.75rem;color:#a855f7;margin-bottom:8px"><i class="fas fa-bell"></i> ${t('cal.reminder_active').replace('${days}', _rd)}</div>`; }
+    if (ce?.telegram_notify) html += `<div style="font-size:.75rem;color:#0088cc;margin-bottom:8px"><i class="fas fa-paper-plane"></i> ${t('cal.telegram_active')}</div>`;
+    html += `<div style="display:flex;gap:6px">
+      <button class="btn btn-sm btn-ghost" style="flex:1" onclick="_closeCalPopover();editCustomEvent(${ce?.id})">
+        <i class="fas fa-pen"></i> ${t('common.edit')}
+      </button>
+    </div>`;
+  } else if (ev.type === 'custom_remind') {
+    const ce      = (S.customEvents || []).find(x => x.id === ev.customId);
+    const evDateStr = ev.eventDate
+      ? new Date(ev.eventDate + 'T00:00:00').toLocaleDateString(_lang || 'fr', { day:'numeric', month:'long' })
+      : '';
+    html = `
+      <div style="color:#a855f7;font-weight:700;font-size:.82rem;margin-bottom:6px"><i class="fas fa-bell"></i> ${t('cal.remind_label')} — J-${ev.reminderDays || 45}</div>
+      <div style="font-size:.92rem;font-weight:600;margin-bottom:4px">${ce?.emoji || '📅'} ${esc(ce?.title || '')}</div>
+      ${evDateStr ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:8px">${t('cal.event_date')} <strong>${evDateStr}</strong></div>` : ''}
+      ${ce?.notes ? `<div style="font-size:.8rem;color:var(--text);line-height:1.4;margin-bottom:8px">${esc(ce.notes)}</div>` : ''}
+      ${ce?.style ? `<div style="font-size:.78rem;padding:3px 8px;background:rgba(245,158,11,.1);border-radius:6px;color:var(--amber);margin-bottom:6px"><i class="fas fa-beer-mug-empty"></i> ${esc(ce.style)}</div>` : ''}
+      ${ce?.recipe_id ? (() => { const r=(S.recipes||[]).find(x=>x.id===ce.recipe_id); return r?`<div style="font-size:.78rem;color:var(--info);margin-bottom:6px"><i class="fas fa-scroll"></i> ${t('cal.recipe_linked')} : <strong>${esc(r.name)}</strong></div>`:''; })() : ''}
+      ${ce?.draft_id  ? (() => { const d=(S.drafts||[]).find(x=>x.id===ce.draft_id);   return d?`<div style="font-size:.78rem;color:#8b5cf6;margin-bottom:6px"><i class="fas fa-book-open"></i> ${t('cal.draft_linked')} : <strong>${esc(d.title||t('draft.title'))}</strong></div>`:''; })() : ''}
+      <div style="font-size:.75rem;color:#a855f7;font-style:italic;margin-bottom:8px">${t('cal.remind_msg')}</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-ghost" style="flex:1;font-size:.75rem"
+          onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${(ev.eventDate||'').replace(/'/g,'\\\'') }','${(ce?.title||'').replace(/'/g,'\\\'')}'),300)">
+          <i class="fas fa-plus"></i> ${t('cal.prepare_draft')}
+        </button>
+        ${ce ? `<button class="btn btn-sm btn-ghost" style="font-size:.75rem"
+          onclick="_closeCalPopover();editCustomEvent(${ce.id})">
+          <i class="fas fa-pen"></i> ${t('common.edit')}
+        </button>` : ''}
+      </div>`;
+  } else {
+    const brew = (S.brews || []).find(b => b.id === ev.id);
+    const TYPE_LABELS = { brew:t('cal.legend_brew'), bottle:t('cal.legend_bottle'), ferm:t('cal.legend_ferm') };
+    const TYPE_ICONS  = { brew:'fa-fire-burner', bottle:'fa-wine-bottle', ferm:'fa-clock' };
+    const TYPE_COLORS = { brew:'var(--amber)', bottle:'#10b981', ferm:'var(--info)' };
+    html = `
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+        <i class="fas ${TYPE_ICONS[ev.type]}" style="color:${TYPE_COLORS[ev.type]}"></i>
+        <span style="font-weight:700;font-size:.9rem">${esc(ev.label)}</span>
+      </div>
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:4px">${TYPE_LABELS[ev.type]} — ${esc(ev.date)}</div>`;
+    if (brew) {
+      const statusMap = { planned:t('brew.status_planned'), active:t('brew.status_in_progress'), completed:t('brew.status_completed') };
+      html += `
+      <div style="font-size:.78rem;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
+        ${brew.style ? `<div style="color:var(--muted)">${esc(brew.style)}</div>` : ''}
+        ${brew.volume_brewed ? `<div>Volume : <strong>${brew.volume_brewed} L</strong></div>` : ''}
+        ${brew.og ? `<div>DI : <strong>${brew.og}</strong></div>` : ''}
+        ${brew.fg ? `<div>DF : <strong>${brew.fg}</strong> — ABV : <strong>${brew.abv ?? '–'}%</strong></div>` : ''}
+        <div style="margin-top:4px">${t('common.status')} : <strong>${statusMap[brew.status] || brew.status}</strong></div>
+      </div>
+      <button class="btn btn-sm btn-ghost" style="width:100%;margin-top:8px" onclick="_closeCalPopover();navigate('brassins')">
+        <i class="fas fa-arrow-right"></i> ${t('cal.open_brew')}
+      </button>`;
+    }
+  }
+  cnt.innerHTML = html;
+
+  // Positionnement du popover
+  const rect = e.currentTarget.getBoundingClientRect();
+  pop.style.display = 'block';
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let left = rect.left, top = rect.bottom + 6;
+  if (left + pw > window.innerWidth - 8)  left = window.innerWidth - pw - 8;
+  if (top  + ph > window.innerHeight - 8) top  = rect.top - ph - 6;
+  pop.style.left = left + 'px';
+  pop.style.top  = top  + 'px';
+}
+
+function _closeCalPopover() {
+  document.getElementById('cal-popover').style.display = 'none';
+}
+
+document.addEventListener('click', e => {
+  const pop = document.getElementById('cal-popover');
+  if (pop && !pop.contains(e.target)) _closeCalPopover();
+});
+
+// THÈME
+// ══════════════════════════════════════════════════════════════════════════════
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('brewhome-theme', next);
+  _updateThemeBtn(next);
+}
+function _updateThemeBtn(theme) {
+  const btn = document.getElementById('btn-theme');
+  if (!btn) return;
+  if (theme === 'light') {
+    btn.innerHTML = '<i class="fas fa-moon"></i>';
+    btn.title = 'Passer en thème sombre';
+  } else {
+    btn.innerHTML = '<i class="fas fa-sun"></i>';
+    btn.title = 'Passer en thème clair';
+  }
+}
+
+// UTILS
+// ══════════════════════════════════════════════════════════════════════════════
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════════
+// L'IIFE de démarrage a été déplacée dans script_core.html (fin de fichier)
+// pour s'exécuter avec les scripts core, indépendamment du lazy-loading.
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUSTOM CALENDAR EVENTS
+// ══════════════════════════════════════════════════════════════════════════════
+const _CE_EMOJIS = [
+  { label: 'cal.emoji_cat_beers', items: [
+    '🍺','🍻','🥃','🍷','🍾','🥂','🧃','🥤',
+    '🍵','☕','🫖','🧋','🍹','🍸','🧉','🫗',
+    '🍶','🥛','🍫','🧊',
+  ]},
+  { label: 'cal.emoji_cat_brew', items: [
+    '⚗️','🧪','🧫','🫙','🛢️','🥫','🔬','🧲',
+    '🔩','🔧','🛠️','⚙️','🔌','💡','🌡️','⏱️',
+    '⚖️','🪣','🫧','🧴','🪠','🔭','🪄','📐',
+  ]},
+  { label: 'cal.emoji_cat_ing', items: [
+    '🌾','🌿','🌱','🍃','🌺','🌸','🪴','🌵',
+    '🍋','🍊','🍇','🫐','🍎','🍏','🥭','🍑',
+    '🍓','🍒','🍈','🫒','🌶️','🧄','🧅','🥥',
+    '🍌','🍍','🫚','🧂','🍯','🫛','🌰','🪸',
+  ]},
+  { label: 'cal.emoji_cat_celeb', items: [
+    '🎉','🎊','🎈','🥳','🎂','🎁','🏆','🥇',
+    '🥈','🥉','🎖️','🏅','🎗️','🎀','🎟️','🎫',
+    '🎯','🎪','🎭','🎨','🎬','🎤','🎵','🎶',
+    '🎸','🎹','🥁','🎺','🎻','🪗','🪘','🪕',
+  ]},
+  { label: 'cal.emoji_cat_cal', items: [
+    '📅','📆','🗓️','📋','📌','📍','🔔','🔕',
+    '⏰','⏱️','⏲️','🕐','🕑','🕒','🕓','🕔',
+    '⌛','⏳','🗒️','📝','✏️','📖','📚','📓',
+  ]},
+  { label: 'cal.emoji_cat_nature', items: [
+    '🌸','🌼','🌻','🌹','💐','🍀','🍂','🍁',
+    '❄️','⛄','🌨️','☃️','☀️','⛅','🌤️','🌦️',
+    '🌈','🌙','🌛','🌝','⭐','🌟','✨','💫',
+    '☄️','🌊','⛰️','🏔️','🌄','🌅','🌃','🎆',
+    '🏕️','🌲','🌳','🎋','🎍','🪨','🪵','🌍',
+  ]},
+  { label: 'cal.emoji_cat_places', items: [
+    '🏠','🏡','🏘️','🏗️','🏭','🏪','🍻','🍺',
+    '🚗','🚕','🚌','🚂','✈️','🚢','🛳️','⛵',
+    '🗺️','🧭','🏖️','🏝️','🏞️','🌉','🌁','🗽',
+  ]},
+  { label: 'cal.emoji_cat_emot', items: [
+    '❤️','🧡','💛','💚','💙','💜','🖤','🤍',
+    '💯','✅','❌','❗','❓','⚡','🔥','💥',
+    '👍','👏','🤝','🙌','🎊','🌠','🍀','♻️',
+    '🚀','💎','👑','🦁','🐻','🦊','🐺','🦅',
+    '🐝','🦋','🌟','💪','🧠','👁️','🫀','🎲',
+  ]},
+];
+
+function _buildEmojiGrid() {
+  const grid = document.getElementById('ce-emoji-grid');
+  if (!grid) return;
+  const btn = e => `<div onclick="selectEmoji('${e}')" style="width:32px;height:32px;font-size:1.3rem;
+      display:flex;align-items:center;justify-content:center;
+      border-radius:6px;cursor:pointer;transition:background .1s"
+      onmouseover="this.style.background='rgba(255,255,255,.1)'"
+      onmouseout="this.style.background=''"
+      title="${e}">${e}</div>`;
+  grid.innerHTML = _CE_EMOJIS.map(cat =>
+    `<div style="width:100%;font-size:.65rem;font-weight:700;color:var(--muted);
+      text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px;flex-basis:100%">${t(cat.label)}</div>
+     ${cat.items.map(btn).join('')}`
+  ).join('');
+}
+
+function toggleEmojiPicker() {
+  _buildEmojiGrid();
+  const p = document.getElementById('ce-emoji-picker');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function selectEmoji(e) {
+  document.getElementById('ce-emoji').value        = e;
+  document.getElementById('ce-emoji-display').textContent = e;
+  document.getElementById('ce-emoji-picker').style.display = 'none';
+}
+
+function _ceAlert(msg, type = 'danger') {
+  const el = document.getElementById('ce-alert');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `alert alert-${type}${msg ? ' show' : ''}`;
+}
+
+function _ceSetEmoji(e) {
+  document.getElementById('ce-emoji').value = e;
+  document.getElementById('ce-emoji-display').textContent = e;
+  document.getElementById('ce-emoji-picker').style.display = 'none';
+}
+
+function _ceResetAssoc() {
+  document.getElementById('ce-style').value      = '';
+  document.getElementById('ce-recipe-name').value = '';
+  document.getElementById('ce-recipe-id').value   = '';
+  document.getElementById('ce-draft-name').value  = '';
+  document.getElementById('ce-draft-id').value    = '';
+}
+
+function _ceUpdateRecurrenceUI() {
+  const type = document.getElementById('ce-recurrence').value;
+  const isNth = type === 'yearly_nth_dow' || type === 'monthly_nth_dow';
+  document.getElementById('ce-rec-nth-wrap').style.display    = isNth ? 'flex' : 'none';
+  document.getElementById('ce-rec-weekly-wrap').style.display = type === 'weekly' ? 'flex' : 'none';
+  const suffix = document.getElementById('ce-rec-nth-suffix');
+  if (suffix) suffix.textContent = type === 'monthly_nth_dow' ? t('cal.rec_of_month_monthly') : t('cal.rec_of_month');
+  if (isNth) _ceAutoDetectNthDow(document.getElementById('ce-date').value);
+}
+
+function _ceOnDateChange() {
+  const type = document.getElementById('ce-recurrence').value;
+  if (type === 'yearly_nth_dow' || type === 'monthly_nth_dow')
+    _ceAutoDetectNthDow(document.getElementById('ce-date').value);
+}
+
+function _ceAutoDetectNthDow(dateStr) {
+  if (!dateStr) return;
+  const d = new Date(dateStr + 'T00:00:00');
+  const raw = Math.ceil(d.getDate() / 7);
+  document.getElementById('ce-rec-dow').value = d.getDay();
+  document.getElementById('ce-rec-nth').value = raw >= 5 ? -1 : raw;
+}
+
+function _ceGetRecurrence() {
+  const type = document.getElementById('ce-recurrence').value;
+  if (!type) return null;
+  if (type === 'yearly')  return JSON.stringify({ type: 'yearly' });
+  if (type === 'monthly') return JSON.stringify({ type: 'monthly' });
+  if (type === 'yearly_nth_dow' || type === 'monthly_nth_dow') return JSON.stringify({
+    type,
+    nth: parseInt(document.getElementById('ce-rec-nth').value),
+    dow: parseInt(document.getElementById('ce-rec-dow').value),
+  });
+  if (type === 'weekly') return JSON.stringify({
+    type: 'weekly',
+    interval: Math.max(1, parseInt(document.getElementById('ce-rec-weekly-interval').value) || 1),
+  });
+  return null;
+}
+
+function _ceSetRecurrence(rec) {
+  const obj = rec ? (typeof rec === 'string' ? JSON.parse(rec) : rec) : null;
+  document.getElementById('ce-recurrence').value = obj?.type || '';
+  const isNth = obj?.type === 'yearly_nth_dow' || obj?.type === 'monthly_nth_dow';
+  document.getElementById('ce-rec-nth-wrap').style.display    = isNth ? 'flex' : 'none';
+  document.getElementById('ce-rec-weekly-wrap').style.display = obj?.type === 'weekly' ? 'flex' : 'none';
+  const suffix = document.getElementById('ce-rec-nth-suffix');
+  if (suffix) suffix.textContent = obj?.type === 'monthly_nth_dow' ? t('cal.rec_of_month_monthly') : t('cal.rec_of_month');
+  if (isNth) {
+    document.getElementById('ce-rec-nth').value = obj.nth ?? 1;
+    document.getElementById('ce-rec-dow').value  = obj.dow ?? 1;
+  }
+  if (obj?.type === 'weekly')
+    document.getElementById('ce-rec-weekly-interval').value = obj.interval ?? 1;
+}
+
+function openCustomEventModal(prefillDate) {
+  document.getElementById('ce-id').value   = '';
+  document.getElementById('ce-title').value= '';
+  document.getElementById('ce-date').value = prefillDate || _ymd(new Date());
+  document.getElementById('ce-color').value= '#f59e0b';
+  document.getElementById('ce-notes').value= '';
+  document.getElementById('ce-brew-reminder').checked          = false;
+  document.getElementById('ce-brew-reminder-days').value       = '';
+  document.getElementById('ce-brew-reminder-days').placeholder = String(appSettings.defaultBrewReminderDays || 45);
+  document.getElementById('ce-telegram').checked               = false;
+  document.getElementById('ce-delete-btn').style.display = 'none';
+  document.getElementById('custom-event-modal-title').innerHTML =
+    '<i class="fas fa-calendar-plus" style="color:var(--amber)"></i> Nouvel événement';
+  _ceSetEmoji('📅');
+  _ceResetAssoc();
+  _ceSetRecurrence(null);
+  _ceAlert('');
+  const hasTg = !!(appSettings.telegram?.token || appSettings.telegram?.chatId);
+  document.getElementById('ce-tg-wrap').style.display = hasTg ? '' : 'none';
+  openModal('custom-event-modal');
+  setTimeout(() => document.getElementById('ce-title').focus(), 100);
+}
+
+function editCustomEvent(id) {
+  const ev = (S.customEvents || []).find(x => x.id === id);
+  if (!ev) return;
+  document.getElementById('ce-id').value   = ev.id;
+  document.getElementById('ce-title').value= ev.title      || '';
+  document.getElementById('ce-date').value = ev.event_date || '';
+  document.getElementById('ce-color').value= ev.color      || '#f59e0b';
+  document.getElementById('ce-notes').value= ev.notes      || '';
+  document.getElementById('ce-brew-reminder').checked          = !!ev.brew_reminder;
+  document.getElementById('ce-brew-reminder-days').value       = ev.brew_reminder_days != null ? ev.brew_reminder_days : '';
+  document.getElementById('ce-brew-reminder-days').placeholder = String(appSettings.defaultBrewReminderDays || 45);
+  document.getElementById('ce-telegram').checked               = !!ev.telegram_notify;
+  // Association
+  document.getElementById('ce-style').value      = ev.style || '';
+  document.getElementById('ce-recipe-id').value   = ev.recipe_id || '';
+  document.getElementById('ce-recipe-name').value = ev.recipe_id
+    ? ((S.recipes||[]).find(r=>r.id===ev.recipe_id)?.name || '') : '';
+  document.getElementById('ce-draft-id').value    = ev.draft_id || '';
+  document.getElementById('ce-draft-name').value  = ev.draft_id
+    ? ((S.drafts||[]).find(d=>d.id===ev.draft_id)?.title || '') : '';
+  document.getElementById('ce-delete-btn').style.display = '';
+  document.getElementById('custom-event-modal-title').innerHTML =
+    `<i class="fas fa-pen" style="color:var(--amber)"></i> ${t('cal.event_edit')}`;
+  _ceSetEmoji(ev.emoji || '📅');
+  _ceSetRecurrence(ev.recurrence || null);
+  _ceAlert('');
+  const hasTg = !!(appSettings.telegram?.token || appSettings.telegram?.chatId);
+  document.getElementById('ce-tg-wrap').style.display = hasTg ? '' : 'none';
+  openModal('custom-event-modal');
+}
+
+async function saveCustomEvent() {
+  const title = document.getElementById('ce-title').value.trim();
+  const date  = document.getElementById('ce-date').value;
+  if (!title) { _ceAlert('Le titre est requis'); return; }
+  if (!date)  { _ceAlert('La date est requise'); return; }
+
+  const payload = {
+    title,
+    emoji:          document.getElementById('ce-emoji').value.trim() || '📅',
+    event_date:     date,
+    color:          document.getElementById('ce-color').value,
+    notes:          document.getElementById('ce-notes').value.trim() || null,
+    brew_reminder:       document.getElementById('ce-brew-reminder').checked,
+    brew_reminder_days:  document.getElementById('ce-brew-reminder-days').value !== ''
+                           ? parseInt(document.getElementById('ce-brew-reminder-days').value) || null
+                           : null,
+    telegram_notify:     document.getElementById('ce-telegram').checked,
+    style:          document.getElementById('ce-style').value.trim() || null,
+    recipe_id:      parseInt(document.getElementById('ce-recipe-id').value) || null,
+    draft_id:       parseInt(document.getElementById('ce-draft-id').value)  || null,
+    recurrence:     _ceGetRecurrence(),
+  };
+
+  const id = document.getElementById('ce-id').value;
+  try {
+    let saved;
+    if (id) {
+      saved = await api('PUT', `/api/custom_events/${id}`, payload);
+      const idx = S.customEvents.findIndex(x => x.id === parseInt(id));
+      if (idx !== -1) S.customEvents[idx] = saved;
+    } else {
+      saved = await api('POST', '/api/custom_events', payload);
+      S.customEvents.push(saved);
+    }
+    closeModal('custom-event-modal');
+    renderCalendar();
+    toast(id ? t('settings.toast.event_modified') : t('settings.toast.event_created'), 'success');
+  } catch(e) { _ceAlert('Erreur lors de l\'enregistrement'); }
+}
+
+// ── Suggests : style BJCP, recette, brouillon ─────────────────────────────
+function ceStyleSearch(input) {
+  const q   = input.value.toLowerCase().trim();
+  const sug = document.getElementById('ce-style-sug');
+  sug.classList.remove('open');
+  let html = '', count = 0;
+  const commonMatches = [];
+  for (const types of Object.values(BEER_TYPES))
+    types.forEach(t => { if (!q || t.toLowerCase().includes(q)) commonMatches.push(t); });
+  if (commonMatches.length) {
+    html += `<div class="ing-suggest-cat">Styles courants</div>`;
+    commonMatches.slice(0, q ? 30 : 10).forEach(t => {
+      html += `<div class="ing-suggest-item" onmousedown="selectCeStyle(${JSON.stringify(t).replace(/"/g,'&quot;')})"><span>${esc(t)}</span></div>`;
+      count++;
+    });
+  }
+  const bycat = _bjcpByCategory(s => !q || s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q));
+  for (const [cat, styles] of Object.entries(bycat)) {
+    html += `<div class="ing-suggest-cat" style="color:var(--gold)">BJCP — ${esc(cat)}</div>`;
+    styles.forEach(s => {
+      html += `<div class="ing-suggest-item" onmousedown="selectCeStyle(${JSON.stringify(s.name).replace(/"/g,'&quot;')})"><span style="font-size:.83rem">${esc(s.name)}</span></div>`;
+      count++;
+    });
+    if (!q && count > 50) break;
+  }
+  if (!html) return;
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+function closeCeStyleSug() { document.getElementById('ce-style-sug')?.classList.remove('open'); }
+function selectCeStyle(name) { document.getElementById('ce-style').value = name; closeCeStyleSug(); }
+
+function ceSuggestRecipe(input) {
+  const q   = input.value.toLowerCase().trim();
+  const sug = document.getElementById('ce-recipe-sug');
+  const items = (S.recipes || []).filter(r => !q || (r.name||'').toLowerCase().includes(q)).slice(0, 20);
+  if (!items.length) { sug.classList.remove('open'); return; }
+  sug.innerHTML = items.map(r =>
+    `<div class="ing-suggest-item" onmousedown="selectCeRecipe(${r.id},${JSON.stringify(r.name||'').replace(/"/g,'&quot;')})">
+      <span>${esc(r.name||'')}</span>
+      ${r.style ? `<span style="color:var(--muted);font-size:.75rem;margin-left:6px">${esc(r.style)}</span>` : ''}
+    </div>`
+  ).join('');
+  sug.classList.add('open');
+}
+function closeCeRecipeSug() { document.getElementById('ce-recipe-sug')?.classList.remove('open'); }
+function selectCeRecipe(id, name) {
+  document.getElementById('ce-recipe-id').value   = id;
+  document.getElementById('ce-recipe-name').value = name;
+  // Si style non rempli et que la recette a un style, on pré-remplit
+  const rec = (S.recipes||[]).find(r=>r.id===id);
+  if (rec?.style && !document.getElementById('ce-style').value)
+    document.getElementById('ce-style').value = rec.style;
+  closeCeRecipeSug();
+}
+
+function ceSuggestDraft(input) {
+  const q   = input.value.toLowerCase().trim();
+  const sug = document.getElementById('ce-draft-sug');
+  const items = (S.drafts || []).filter(d => !q || (d.title||'').toLowerCase().includes(q)).slice(0, 20);
+  if (!items.length) { sug.classList.remove('open'); return; }
+  sug.innerHTML = items.map(d =>
+    `<div class="ing-suggest-item" onmousedown="selectCeDraft(${d.id},${JSON.stringify(d.title||'Brouillon').replace(/"/g,'&quot;')})">
+      <i class="fas fa-book-open" style="font-size:.7rem;color:#8b5cf6;margin-right:4px"></i>
+      <span>${esc(d.title||'Brouillon')}</span>
+      ${d.style ? `<span style="color:var(--muted);font-size:.75rem;margin-left:6px">${esc(d.style)}</span>` : ''}
+    </div>`
+  ).join('');
+  sug.classList.add('open');
+}
+function closeCeDraftSug() { document.getElementById('ce-draft-sug')?.classList.remove('open'); }
+function selectCeDraft(id, name) {
+  document.getElementById('ce-draft-id').value    = id;
+  document.getElementById('ce-draft-name').value  = name;
+  // Pré-remplit style si vide
+  const dr = (S.drafts||[]).find(d=>d.id===id);
+  if (dr?.style && !document.getElementById('ce-style').value)
+    document.getElementById('ce-style').value = dr.style;
+  closeCeDraftSug();
+}
+
+async function deleteCustomEvent() {
+  const id = document.getElementById('ce-id').value;
+  if (!id || !await confirmModal(t('settings.toast.custom_event_confirm_delete'), { danger: true })) return;
+  try {
+    await api('DELETE', `/api/custom_events/${id}`);
+    S.customEvents = S.customEvents.filter(x => x.id !== parseInt(id));
+    closeModal('custom-event-modal');
+    renderCalendar();
+    toast(t('settings.toast.event_deleted'), 'success');
+  } catch(e) { _ceAlert('Erreur lors de la suppression'); }
+}
+
+
+</script>

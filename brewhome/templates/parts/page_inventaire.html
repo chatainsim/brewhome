@@ -15,18 +15,35 @@
   <div class="grid-4" style="margin-bottom:20px" id="inv-stats"></div>
 
   <div class="card">
-    <div class="filter-tabs" id="inv-filters" style="margin-bottom:16px">
-      <button class="filter-tab active" data-cat="all" onclick="setInvFilter('all',this)" data-i18n="cat.all">Tous</button>
-      <button class="filter-tab" data-cat="malt" onclick="setInvFilter('malt',this)" data-i18n="cat.malt">Malt</button>
-      <button class="filter-tab" data-cat="houblon" onclick="setInvFilter('houblon',this)" data-i18n="cat.houblon">Houblon</button>
-      <button class="filter-tab" data-cat="levure" onclick="setInvFilter('levure',this)" data-i18n="cat.levure">Levure</button>
-      <button class="filter-tab" data-cat="autre" onclick="setInvFilter('autre',this)" data-i18n="cat.autre">Autre</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+      <div class="filter-tabs" id="inv-filters" style="margin-bottom:0">
+        <button class="filter-tab active" data-cat="all" onclick="setInvFilter('all',this)" data-i18n="cat.all">Tous</button>
+        <button class="filter-tab" data-cat="malt" onclick="setInvFilter('malt',this)" data-i18n="cat.malt">Malt</button>
+        <button class="filter-tab" data-cat="houblon" onclick="setInvFilter('houblon',this)" data-i18n="cat.houblon">Houblon</button>
+        <button class="filter-tab" data-cat="levure" onclick="setInvFilter('levure',this)" data-i18n="cat.levure">Levure</button>
+        <button class="filter-tab" data-cat="autre" onclick="setInvFilter('autre',this)" data-i18n="cat.autre">Autre</button>
+      </div>
+      <div style="position:relative;display:flex;align-items:center">
+        <i class="fas fa-magnifying-glass" style="position:absolute;left:8px;color:var(--muted);font-size:.78rem;pointer-events:none"></i>
+        <input type="search" id="inv-search" data-i18n-placeholder="inv.search_placeholder"
+          autocomplete="off" oninput="renderInventaire()"
+          onkeydown="if(event.key==='Escape'){this.value='';renderInventaire();this.blur();event.stopPropagation()}"
+          style="padding:5px 28px 5px 28px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:.83rem;width:200px;outline:none">
+      </div>
+      <span id="inv-search-count" style="font-size:.75rem;color:var(--muted);white-space:nowrap"></span>
+    </div>
+    <div id="inv-bulk-bar" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:rgba(99,102,241,.1);border-radius:8px;margin-bottom:10px;flex-wrap:wrap">
+      <span id="inv-bulk-count" style="font-weight:600;font-size:.88rem;color:var(--text)"></span>
+      <input id="inv-bulk-qty" type="number" min="0" step="0.001" placeholder="0" style="width:90px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:.85rem">
+      <button class="btn btn-sm btn-ghost" onclick="applyInvSelectionStock()" data-i18n="inv.bulk_update">Mettre à jour stock</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteInvSelection()"><i class="fas fa-trash"></i> <span data-i18n="common.delete">Supprimer</span></button>
+      <button class="btn btn-icon btn-sm btn-ghost" onclick="clearInvSel()" style="margin-left:auto"><i class="fas fa-times"></i></button>
     </div>
     <div class="inv-table-wrap">
     <table id="inv-table">
       <thead>
         <tr>
-          <th style="width:18px"></th><th data-i18n="inv.col_ingredient">Ingrédient</th><th data-i18n="inv.col_cat">Catégorie</th><th class="col-hide-sm" data-i18n="inv.col_origin">Origine</th>
+          <th style="width:18px;padding:2px 4px"></th><th style="width:44px;padding:0"><label class="inv-cb-label"><input type="checkbox" id="inv-sel-all" onchange="_invSelAll(this.checked)"></label></th><th data-i18n="inv.col_ingredient">Ingrédient</th><th data-i18n="inv.col_cat">Catégorie</th><th class="col-hide-sm" data-i18n="inv.col_origin">Origine</th>
           <th class="col-hide-sm" data-i18n="inv.col_specs">Specs</th><th style="text-align:right" data-i18n="inv.col_qty">Quantité</th><th style="text-align:right" data-i18n="common.actions">Actions</th>
         </tr>
       </thead>

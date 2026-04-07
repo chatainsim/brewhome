@@ -58,6 +58,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,10,10,.95
 .btn-danger:hover{background:rgba(239,68,68,.25)}
 .btn-success{background:rgba(34,197,94,.15);color:var(--success);border:1px solid rgba(34,197,94,.25)}
 .btn-success:hover{background:rgba(34,197,94,.25)}
+.btn-saved-flash{background:var(--success)!important;color:#fff!important;border-color:var(--success)!important;transition:background .12s,color .12s,border-color .12s!important;pointer-events:none!important}
 .btn-sm{padding:6px 13px;font-size:.8rem}
 .btn-icon{padding:7px;border-radius:8px;width:32px;height:32px;justify-content:center}
 .restore-chk{display:flex;align-items:center;gap:6px;font-size:.82rem;cursor:pointer;padding:6px 10px;border:1px solid rgba(255,255,255,.1);border-radius:6px;transition:background .15s}
@@ -191,9 +192,11 @@ td{padding:10px 12px;vertical-align:middle}
 .inv-row.dragging td{border-style:dashed}
 .inv-row.drag-over td{background:rgba(59,130,246,.08)}
 .inv-row.drag-over td:first-child{border-left:2px solid var(--info)}
-.inv-drag-handle{cursor:grab;color:var(--muted);opacity:.35;transition:opacity .15s;text-align:center;width:18px;padding:0 6px;user-select:none}
+.inv-drag-handle{cursor:grab;color:var(--muted);opacity:.4;transition:opacity .15s;display:inline-flex;align-items:center;justify-content:center;width:20px;padding:0 4px;flex-shrink:0;user-select:none}
 .inv-drag-handle:hover{opacity:1}
 .inv-drag-handle:active{cursor:grabbing}
+.inv-cb-label{display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;cursor:pointer;margin:0}
+.draft-back-btn{display:none}
 .inv-row input,.inv-row button{-webkit-user-drag:none}
 .brew-card-name{font-weight:600}
 .brew-card-meta{font-size:.8rem;color:var(--muted);margin-top:3px}
@@ -211,7 +214,7 @@ td{padding:10px 12px;vertical-align:middle}
 .beer-photo{width:100%;height:160px;object-fit:cover;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:3rem;overflow:hidden}
 .beer-photo img{width:100%;height:160px;object-fit:cover;transition:transform .3s}
 .beer-photo:hover img{transform:scale(1.04)}
-#beer-detail-modal .modal{overflow:hidden;overflow-y:auto}
+#beer-detail-modal .modal-body{max-height:none}
 .badge-info{background:rgba(99,179,237,.18);color:var(--info)}
 .beer-body{padding:14px}
 .beer-name{font-weight:700;font-size:1rem;margin-bottom:6px}
@@ -227,15 +230,15 @@ td{padding:10px 12px;vertical-align:middle}
 /* ── MODALS ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .2s}
 .modal-overlay.open{opacity:1;pointer-events:all}
-.modal{background:var(--card);border:1px solid var(--border);border-radius:18px;width:100%;max-width:640px;max-height:90vh;overflow-y:auto;transform:translateY(20px);transition:transform .2s}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:18px;width:100%;max-width:640px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;transform:translateY(20px);transition:transform .2s}
 .modal-overlay.open .modal{transform:translateY(0)}
 .modal-lg{max-width:860px}
-.modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--border)}
+.modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--border);flex-shrink:0}
 .modal-head h3{font-size:1.2rem}
 .modal-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.3rem;padding:4px;transition:color .2s;line-height:1}
 .modal-close:hover{color:var(--text)}
-.modal-body{padding:24px}
-.modal-foot{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px}
+.modal-body{padding:24px;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.modal-foot{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px;flex-shrink:0}
 
 /* ── ALERTS ── */
 .alert{padding:12px 16px;border-radius:9px;font-size:.875rem;margin-bottom:14px;display:none}
@@ -249,8 +252,36 @@ td{padding:10px 12px;vertical-align:middle}
 .divider{height:1px;background:var(--border);margin:20px 0}
 .section-label{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px}
 
+/* ── OUTILS — résultats ── */
+.ot-hint{font-size:.8rem;color:var(--muted);margin-bottom:14px;line-height:1.5}
+.ot-result-row{display:flex;align-items:stretch;background:var(--card2);border-radius:12px;overflow:hidden}
+.ot-result-main{flex:1;padding:16px 20px}
+.ot-result-side{padding:16px 20px;border-left:1px solid var(--border)}
+.ot-result-val{font-size:2.4rem;font-weight:800;line-height:1}
+.ot-result-val-sm{font-size:1.5rem;font-weight:700;line-height:1}
+.ot-result-lbl{font-size:.72rem;color:var(--muted);margin-top:4px;letter-spacing:.04em;text-transform:uppercase}
+
+/* ── COMPARATEUR — combobox ── */
+.cmp-select{position:relative}
+.cmp-select-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:.78rem;pointer-events:none;z-index:1}
+.cmp-select-input{padding-left:30px!important;padding-right:30px!important;cursor:pointer;width:100%}
+.cmp-select-arrow{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:.72rem;cursor:pointer;transition:transform .15s}
+.cmp-select.open .cmp-select-arrow{transform:translateY(-50%) rotate(180deg)}
+.cmp-select-list{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:300;background:var(--card);border:1px solid var(--border);border-radius:10px;max-height:240px;overflow-y:auto;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+.cmp-select.open .cmp-select-list{display:block}
+.cmp-select-opt{padding:9px 13px;font-size:.88rem;cursor:pointer;transition:background .1s;line-height:1.3}
+.cmp-select-opt:hover,.cmp-select-opt.active{background:var(--card2)}
+.cmp-select-opt.active{color:var(--info)}
+.cmp-select-style{color:var(--muted);font-size:.8rem}
+.cmp-select-empty{color:var(--muted);font-style:italic;cursor:default;padding:10px 13px}
+
 /* ── EMPTY STATE ── */
 .empty{text-align:center;padding:48px 24px;color:var(--muted)}
+.empty-state{text-align:center;padding:60px 20px 72px;grid-column:1/-1}
+.empty-state-icon{width:72px;height:72px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-bottom:18px;font-size:1.8rem}
+.empty-state-title{font-size:1.05rem;font-weight:600;color:var(--text);margin-bottom:8px}
+.empty-state-sub{font-size:.87rem;color:var(--muted);max-width:320px;margin:0 auto 20px}
+.empty-state-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
 .empty i{font-size:3rem;margin-bottom:12px;opacity:.4}
 .empty p{font-size:1rem}
 
@@ -283,11 +314,12 @@ td{padding:10px 12px;vertical-align:middle}
 .rvp-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;font-size:.92rem;color:var(--text)}
 .rvp-lbl{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin-right:3px}
 .rvp-sep{color:var(--border);font-size:.88rem;margin:0 2px}
-/* ── INGREDIENT MOVE BUTTONS ── */
-.ing-move-btns{display:flex;flex-direction:column;gap:2px;flex-shrink:0;justify-content:center;margin-bottom:1px}
-.ing-move-btn{background:none;border:1px solid var(--border);border-radius:3px;color:var(--muted);cursor:pointer;padding:0;width:18px;height:15px;font-size:.5rem;display:flex;align-items:center;justify-content:center;transition:all .15s;line-height:1}
-.ing-move-btn:hover:not(:disabled){color:var(--amber);border-color:var(--amber)}
-.ing-move-btn:disabled{opacity:.18;cursor:default}
+/* ── INGREDIENT DRAG HANDLE ── */
+.ing-drag-handle{display:flex;align-items:center;flex-shrink:0;padding:0 4px;color:var(--muted);font-size:.85rem;cursor:grab;opacity:.45;transition:opacity .15s;touch-action:none;margin-bottom:1px}
+.ing-drag-handle:hover{opacity:1;color:var(--accent)}
+.ing-drag-handle:active{cursor:grabbing}
+.ing-row.ing-dragging{opacity:.35}
+.ing-row.ing-drop-target{box-shadow:0 -3px 0 var(--accent);border-color:var(--accent)}
 /* ── MALT PCT BADGE ── */
 .malt-pct{flex-shrink:0;font-size:.75rem;font-weight:700;color:var(--malt);min-width:44px;text-align:center}
 
@@ -335,6 +367,7 @@ td{padding:10px 12px;vertical-align:middle}
 
 @keyframes timerPulse{0%,100%{opacity:1}50%{opacity:.4}}
 .archived-item { opacity:.38; filter:saturate(.3); }
+.beer-card--empty { opacity:.45; filter:saturate(.25); }
 .archived-item strong, .archived-item .brew-card-name,
 .archived-item .recipe-item-name, .archived-item .beer-name { text-decoration:line-through; }
 
@@ -369,6 +402,12 @@ td{padding:10px 12px;vertical-align:middle}
 .token-box:hover{border-color:var(--amber)}
 .battery-bar{height:5px;border-radius:3px;background:var(--border);overflow:hidden;width:48px;display:inline-block;vertical-align:middle;margin-right:4px}
 .battery-fill{height:100%;border-radius:3px;transition:width .4s}
+@keyframes skel-shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.skel{background:linear-gradient(90deg,var(--bg2) 25%,rgba(255,255,255,.06) 50%,var(--bg2) 75%);background-size:800px 100%;animation:skel-shimmer 1.4s linear infinite;border-radius:8px}
+.skel-stat{height:90px;border-radius:12px}
+.skel-row{height:64px;border-radius:10px;margin-bottom:8px}
+.skel-row:last-child{margin-bottom:0}
+.skel-card{height:200px;border-radius:12px}
 
 @media(max-width:768px){
   /* Forms */
@@ -392,10 +431,25 @@ td{padding:10px 12px;vertical-align:middle}
   .nav-dropdown .nav-btn{padding:13px 18px;font-size:.92rem;gap:10px}
   .nav-dropdown .nav-btn i{font-size:.95rem}
 
+  /* Recettes — masquer la liste quand une recette est ouverte + pleine largeur */
+  #recipe-layout:not(.recipe-list-only) > div:first-child{display:none}
+  #recipe-layout:not(.recipe-list-only){grid-template-columns:1fr}
+
+  /* Brouillons — masquer la liste quand un brouillon est ouvert */
+  #brouillons-layout.draft-editor-open #draft-list-panel{display:none}
+  #brouillons-layout.draft-editor-open #draft-editor{width:100%}
+  .draft-back-btn{display:inline-flex}
+
   /* Inventaire — colonnes secondaires cachées, scroll horizontal si besoin */
   .inv-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .col-hide-sm{display:none}
   .inv-drag-handle{display:none}
+
+  /* Brew cards — texte sur ligne 1, boutons sur ligne 2 */
+  .brew-card{flex-wrap:wrap;gap:4px 8px;align-items:flex-start}
+  .brew-drag-handle{display:none}
+  .brew-card-info{width:100%;flex:none}
+  .brew-card > div:last-child{flex-wrap:wrap;width:100%}
 
   /* Spindle card — boutons sur 2 rangées */
   .spindle-grid{grid-template-columns:1fr}
@@ -408,11 +462,18 @@ td{padding:10px 12px;vertical-align:middle}
   .ing-row{flex-wrap:wrap}
 
   /* Modales */
-  .modal{margin:8px;max-height:calc(100dvh - 16px)}
+  .modal-overlay{padding:8px}
+  .modal{max-height:calc(100dvh - 16px)}
   .modal-body{padding:14px}
+  .modal-head{padding:14px 16px}
+  .modal-foot{padding:12px 16px}
 
   /* Section head */
   .section-head h2{font-size:1.15rem}
+  /* Brassins — titre sur ligne 1, boutons sur ligne 2 */
+  #page-brassins .section-head{flex-direction:column;align-items:flex-start;gap:8px}
+  #page-brassins .section-head .actions{flex-wrap:wrap;width:100%}
+  #page-brassins .section-head .actions #brew-search{width:120px}
 
   /* Brouillons — empilement vertical */
   #brouillons-layout{flex-direction:column}
@@ -534,4 +595,9 @@ input,select,textarea,.stabs,.stab,.filter-tabs,.filter-tab{
 .ced-move-btn:hover{color:var(--text)}
 .ced-del-btn{background:none;border:none;color:var(--muted);cursor:pointer;padding:2px 6px;font-size:.8rem}
 .ced-del-btn:hover{color:var(--danger)}
+/* ══ Menu actions recette ════════════════════════════════════════════════ */
+.rec-menu{position:absolute;top:calc(100% + 6px);right:0;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.35);z-index:300;min-width:210px;padding:4px 0;overflow:hidden}
+.rec-menu-item{display:flex;align-items:center;gap:10px;width:100%;padding:8px 14px;background:none;border:none;cursor:pointer;color:var(--text);font-size:.85rem;text-align:left;transition:background .12s}
+.rec-menu-item:hover{background:var(--card2)}
+.rec-menu-sep{height:1px;background:var(--border);margin:3px 0}
 </style>

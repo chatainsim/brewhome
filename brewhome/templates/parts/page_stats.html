@@ -33,6 +33,15 @@
     </div>
   </div>
 
+  <!-- IBU/ABV par brassin + Taux d'utilisation catalogue -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+    <div class="card">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.chart_ibu_abv">IBU &amp; ABV par brassin</div>
+      <div style="height:220px;position:relative"><canvas id="stats-ibu-abv-chart"></canvas></div>
+    </div>
+    <div class="card" id="stats-catalog-util"></div>
+  </div>
+
   <!-- Saisonnalité + Fermentation -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
     <div class="card">
@@ -91,6 +100,33 @@
       <div style="height:200px;position:relative"><canvas id="stats-cpl-chart"></canvas></div>
       <div style="font-size:.72rem;color:var(--muted);margin-top:6px" data-i18n="stat.cost_hint">Estimé d'après les prix de l'inventaire</div>
     </div>
+  </div>
+
+  <!-- Analytics avancées par brassin -->
+  <div id="stats-advanced-section" style="margin-bottom:24px">
+    <div style="font-size:.85rem;font-weight:700;color:var(--text);margin-bottom:16px;display:flex;align-items:center;gap:8px">
+      <i class="fas fa-microscope" style="color:var(--info)"></i>
+      <span data-i18n="stat.adv_title">Analytics avancées — brassin par brassin</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+      <div class="card">
+        <div class="section-label" style="margin-bottom:12px" data-i18n="stat.adv_brew_eff">Efficacité réelle vs prévue (%)</div>
+        <div id="stats-brew-eff-wrap" style="position:relative;height:220px"><canvas id="stats-brew-eff-chart"></canvas></div>
+        <div id="stats-brew-eff-empty" style="display:none;text-align:center;padding:40px 0;font-size:.82rem;color:var(--muted)" data-i18n="stat.adv_no_og">Aucun OG mesuré</div>
+      </div>
+      <div class="card">
+        <div class="section-label" style="margin-bottom:12px" data-i18n="stat.adv_brew_cpl">Coût / litre par brassin (€)</div>
+        <div id="stats-brew-cpl-wrap" style="position:relative;height:220px"><canvas id="stats-brew-cpl-chart"></canvas></div>
+        <div id="stats-brew-cpl-empty" style="display:none;text-align:center;padding:40px 0;font-size:.82rem;color:var(--muted)" data-i18n="stat.adv_no_cost">Aucun prix renseigné</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:6px" data-i18n="stat.cost_hint">Estimé d'après les prix de l'inventaire</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:20px">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="stat.adv_brew_ferm">Durée de fermentation par brassin (jours)</div>
+      <div id="stats-brew-ferm-wrap" style="position:relative;height:200px"><canvas id="stats-brew-ferm-chart"></canvas></div>
+      <div id="stats-brew-ferm-empty" style="display:none;text-align:center;padding:40px 0;font-size:.82rem;color:var(--muted)" data-i18n="stat.adv_no_ferm">Aucune durée renseignée</div>
+    </div>
+    <div class="card" id="stats-adv-table"></div>
   </div>
 
   <div id="stats-empty" class="empty" style="display:none"><i class="fas fa-chart-bar"></i><p data-i18n="stat.no_brews">Aucun brassin terminé</p></div>

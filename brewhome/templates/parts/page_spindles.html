@@ -28,17 +28,16 @@
 
   <!-- Gestion de la base de données des mesures -->
   <div class="card" style="margin-top:24px">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px">
-      <div>
-        <div style="font-weight:700;margin-bottom:6px"><i class="fas fa-database" style="color:var(--amber);margin-right:7px"></i><span data-i18n="spin.db_title">Base de données des mesures</span></div>
-        <div style="font-size:.83rem;color:var(--muted);display:flex;flex-direction:column;gap:3px">
-          <div><i class="fas fa-water" style="color:var(--info);width:14px;text-align:center;margin-right:5px"></i><span id="spin-db-stats">Chargement…</span></div>
-          <div><i class="fas fa-thermometer-half" style="color:#ef4444;width:14px;text-align:center;margin-right:5px"></i><span id="temp-db-stats">Chargement…</span></div>
-        </div>
+    <div style="font-weight:700;margin-bottom:14px"><i class="fas fa-database" style="color:var(--amber);margin-right:7px"></i><span data-i18n="spin.db_title">Base de données des mesures</span></div>
+    <!-- Densimètres -->
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px;font-size:.83rem;color:var(--muted)">
+        <i class="fas fa-water" style="color:var(--info);width:14px;text-align:center"></i>
+        <span id="spin-db-stats">Chargement…</span>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span style="font-size:.85rem;color:var(--muted)" data-i18n="spin.purge_label">Purger les mesures de plus de</span>
-        <select id="purge-days" style="width:110px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:.82rem;color:var(--muted)" data-i18n="spin.purge_label">Purger les mesures de plus de</span>
+        <select id="purge-days" style="width:100px">
           <option value="7" data-i18n="spin.purge_7d">7 jours</option>
           <option value="30" selected data-i18n="spin.purge_30d">30 jours</option>
           <option value="90" data-i18n="spin.purge_3m">3 mois</option>
@@ -47,6 +46,29 @@
         </select>
         <button class="btn btn-danger btn-sm" onclick="purgeReadings()">
           <i class="fas fa-trash-can"></i> <span data-i18n="spin.purge_btn">Purger</span>
+        </button>
+      </div>
+    </div>
+    <!-- Sondes de température -->
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:10px 0">
+      <div style="display:flex;align-items:center;gap:8px;font-size:.83rem;color:var(--muted)">
+        <i class="fas fa-thermometer-half" style="color:#ef4444;width:14px;text-align:center"></i>
+        <span id="temp-db-stats">Chargement…</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:.82rem;color:var(--muted)" data-i18n="spin.purge_temp_label">Purger les mesures de temp. de plus de</span>
+        <select id="purge-temp-days" style="width:100px">
+          <option value="7" data-i18n="spin.purge_7d">7 jours</option>
+          <option value="30" selected data-i18n="spin.purge_30d">30 jours</option>
+          <option value="90" data-i18n="spin.purge_3m">3 mois</option>
+          <option value="180" data-i18n="spin.purge_6m">6 mois</option>
+          <option value="365" data-i18n="spin.purge_1y">1 an</option>
+        </select>
+        <button class="btn btn-danger btn-sm" onclick="purgeTempReadings()">
+          <i class="fas fa-trash-can"></i> <span data-i18n="spin.purge_btn">Purger</span>
+        </button>
+        <button class="btn btn-danger btn-sm" onclick="purgeUnassignedTempReadings()" title="Supprimer les mesures des capteurs non assignés à un brassin">
+          <i class="fas fa-link-slash"></i> <span data-i18n="spin.purge_unassigned_btn">Non-assignés</span>
         </button>
       </div>
     </div>

@@ -38,6 +38,7 @@
 {% include 'parts/page_kegs.html' %}
 {% include 'parts/page_stats.html' %}
 {% include 'parts/page_dbadmin.html' %}
+{% include 'parts/page_outils.html' %}
 
 <!-- MODALS -->
 {% include 'parts/modals_inv.html' %}
@@ -48,8 +49,16 @@
 {% include 'parts/modals_kegs.html' %}
 {% include 'parts/modals_checklist.html' %}
 
-<!-- SCRIPTS -->
-{% include 'parts/scripts.html' %}
+<!-- SCRIPTS — core (chargés immédiatement) -->
+<script>const _BH_STATIC_V = "{{ static_v }}";</script>
+<script src="/static/js/bh-state.js?v={{ static_v }}"></script>
+<script src="/static/js/bh-locales.js?v={{ static_v }}"></script>
+<script src="/static/js/bh-core.js?v={{ static_v }}"></script>
+<script src="/static/js/bh-ui.js?v={{ static_v }}"></script>
+<script src="/static/js/bh-inventaire.js?v={{ static_v }}"></script>
+<!-- SCRIPTS — pages (lazy-loaded à la première navigation, voir _PAGE_LAZY_SCRIPTS dans bh-core.js) -->
+<!-- bh-recettes.js | bh-brassins.js | bh-cave.js | bh-spindles.js -->
+<!-- bh-settings.js | bh-calendrier.js | bh-brouillons.js             -->
 
 <!-- GLOBAL SEARCH OVERLAY -->
 <div id="global-search-overlay" onclick="if(event.target===this)closeGlobalSearch()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:500;align-items:flex-start;justify-content:center;padding:80px 20px 20px">

@@ -15,6 +15,23 @@
 
     <!-- LISTE -->
     <div id="draft-list-panel" style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
+      <select id="draft-sort" style="font-size:.8rem;padding:4px 6px;border-radius:7px;border:1px solid var(--border);background:var(--card2);color:var(--text);width:100%;margin-bottom:6px"
+        onchange="_draftSort=this.value;renderBrouillons()">
+        <option value="manual"  data-i18n="draft.sort_manual">Ordre manuel</option>
+        <option value="recent"  data-i18n="draft.sort_recent">Modifié récemment</option>
+        <option value="alpha"   data-i18n="draft.sort_alpha">A → Z</option>
+        <option value="target"  data-i18n="draft.sort_target">Date cible</option>
+      </select>
+      <div style="position:relative;display:flex;align-items:center">
+        <input type="text" id="draft-search"
+          style="width:100%;padding-right:24px;font-size:.85rem"
+          oninput="renderBrouillons();document.getElementById('draft-search-clear').style.display=this.value?'flex':'none'"
+          data-i18n-placeholder="common.search">
+        <button id="draft-search-clear"
+          onclick="document.getElementById('draft-search').value='';renderBrouillons();this.style.display='none'"
+          style="display:none;position:absolute;right:6px;background:none;border:none;cursor:pointer;color:var(--muted);font-size:.8rem;padding:0;line-height:1;align-items:center" title="✕">✕</button>
+      </div>
+      <span id="draft-search-count" style="font-size:.75rem;color:var(--muted);white-space:nowrap;padding:0 2px"></span>
       <div id="draft-list-empty" style="display:none;color:var(--muted);font-size:.875rem;padding:24px 0;text-align:center">
         <i class="fas fa-book-open" style="font-size:2rem;display:block;margin-bottom:8px;opacity:.4"></i>
         <p data-i18n="draft.empty" style="margin:0">Aucun brouillon. Cliquez sur + Nouveau brouillon.</p>
@@ -208,3 +225,16 @@
 
   </div>
 </div>
+<script>
+// Mobile : cache la liste quand l'éditeur est visible (MutationObserver)
+(function() {
+  const ed   = document.getElementById('draft-editor');
+  const list = document.getElementById('draft-list-panel');
+  if (!ed || !list) return;
+  new MutationObserver(function() {
+    if (window.innerWidth > 768) return;
+    const open = ed.style.display !== 'none' && ed.style.display !== '';
+    list.style.display = open ? 'none' : '';
+  }).observe(ed, { attributes: true, attributeFilter: ['style'] });
+})();
+</script>

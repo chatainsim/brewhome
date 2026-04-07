@@ -61,7 +61,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('keg-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveKeg()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveKeg)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>
@@ -84,7 +84,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('keg-pour-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" id="keg-pour-save-btn" onclick="saveKegPour()"><i class="fas fa-check"></i> <span data-i18n="keg.pour_save">Valider</span></button>
+      <button class="btn btn-primary" id="keg-pour-save-btn" onclick="withBtn(this, saveKegPour)"><i class="fas fa-check"></i> <span data-i18n="keg.pour_save">Valider</span></button>
     </div>
   </div>
 </div>
@@ -137,7 +137,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('keg-status-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveKegStatus()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveKegStatus)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>

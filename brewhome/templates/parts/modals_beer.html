@@ -1,7 +1,7 @@
 <!-- Lightbox image bière -->
 <div id="beer-lightbox" onclick="closeBeerLightbox()" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.93);cursor:zoom-out;align-items:center;justify-content:center;flex-direction:column;gap:12px">
   <button onclick="event.stopPropagation();closeBeerLightbox()" style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.12);border:none;color:#fff;font-size:1.4rem;width:40px;height:40px;border-radius:50%;cursor:pointer;line-height:1">✕</button>
-  <img id="beer-lightbox-img" src="" alt="" style="max-width:95vw;max-height:88vh;object-fit:contain;border-radius:6px;box-shadow:0 8px 48px rgba(0,0,0,.7)">
+  <img id="beer-lightbox-img" src="" alt="" onclick="event.stopPropagation();closeBeerLightbox()" style="max-width:95vw;max-height:88vh;object-fit:contain;border-radius:6px;box-shadow:0 8px 48px rgba(0,0,0,.7);cursor:zoom-out">
   <div id="beer-lightbox-name" style="color:rgba(255,255,255,.7);font-size:.95rem;letter-spacing:.03em"></div>
 </div>
 
@@ -35,9 +35,15 @@
       </div>
       <div style="margin-bottom:14px">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 12px;background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.2);border-radius:9px">
-          <input type="checkbox" id="beer-f-refermentation" style="width:auto;accent-color:var(--info)">
+          <input type="checkbox" id="beer-f-refermentation" style="width:auto;accent-color:var(--info)" onchange="toggleRefermDays()">
           <span><i class="fas fa-rotate" style="color:var(--info)"></i> <span data-i18n="cave.refermentation">Refermentation en cours</span></span>
         </label>
+        <div id="beer-f-referm-days-wrap" style="display:none;margin-top:8px">
+          <div class="field" style="margin:0">
+            <label data-i18n="cave.refermentation_days">Durée de refermentation (jours)</label>
+            <input type="number" id="beer-f-refermentation-days" min="1" max="365" placeholder="Ex : 21">
+          </div>
+        </div>
       </div>
       <div class="field" style="margin-bottom:14px">
         <label><i class="fas fa-wine-barrel" style="color:var(--amber)"></i> <span data-i18n="cave.field_keg">Volume en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.keg_hint">— laisser vide si uniquement en bouteilles</span></label>
@@ -52,7 +58,7 @@
           <label for="beer-f-photo" style="flex:1;display:block;padding:10px;border:2px dashed var(--border);border-radius:9px;cursor:pointer;text-align:center;color:var(--muted)">
             <i class="fas fa-camera" style="font-size:1.5rem;display:block;margin-bottom:4px"></i> <span data-i18n="cave.photo_click">Cliquer pour ajouter une photo</span>
           </label>
-          <button type="button" id="beer-gen-ai-btn" class="btn btn-ghost btn-sm" onclick="generateBeerImage()" style="display:none;white-space:nowrap;align-self:center" title="Générer une image avec l'IA configurée">
+          <button type="button" id="beer-gen-ai-btn" class="btn btn-ghost btn-sm" onclick="withBtn(this, generateBeerImage)" style="display:none;white-space:nowrap;align-self:center" title="Générer une image avec l'IA configurée">
             <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="draft.img_generate">Générer avec IA</span>
           </button>
         </div>
@@ -67,9 +73,10 @@
       <input type="hidden" id="beer-f-id">
       <input type="hidden" id="beer-f-photo-b64">
     </div>
+    <div id="beer-modal-alert" class="alert"></div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('beer-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveBeer()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveBeer)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>
@@ -88,6 +95,7 @@
       <div style="padding:20px 24px">
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px" id="bd-badges"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px" id="bd-stocks"></div>
+        <div id="bd-depletion" style="margin-bottom:10px"></div>
         <div id="bd-desc" style="font-size:.9rem;line-height:1.6;color:var(--text);margin-bottom:12px;white-space:pre-wrap"></div>
         <div id="bd-meta" style="font-size:.82rem;color:var(--muted)"></div>
         <div id="bd-tasting" style="display:none;margin-top:16px;border-top:1px solid var(--border);padding-top:14px"></div>
@@ -206,7 +214,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('tasting-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveTasting()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveTasting)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>
@@ -299,9 +307,9 @@
       <input type="hidden" id="ck-prev-keg-id">
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" id="ck-unlink-btn" onclick="unlinkCaveKeg()" style="margin-right:auto;display:none"><i class="fas fa-link-slash"></i> <span data-i18n="cave.keg_unlink">Dissocier</span></button>
+      <button class="btn btn-ghost" id="ck-unlink-btn" onclick="withBtn(this, unlinkCaveKeg)" style="margin-right:auto;display:none"><i class="fas fa-link-slash"></i> <span data-i18n="cave.keg_unlink">Dissocier</span></button>
       <button class="btn btn-ghost" onclick="closeModal('cave-keg-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveCaveKegAssoc()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveCaveKegAssoc)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>
@@ -330,7 +338,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('keg-transfer-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" id="keg-tr-save-btn" onclick="saveKegTransfer()"><i class="fas fa-check"></i> <span data-i18n="cave.validate">Valider</span></button>
+      <button class="btn btn-primary" id="keg-tr-save-btn" onclick="withBtn(this, saveKegTransfer)"><i class="fas fa-check"></i> <span data-i18n="cave.validate">Valider</span></button>
     </div>
   </div>
 </div>

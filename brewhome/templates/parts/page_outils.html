@@ -1,0 +1,308 @@
+<div class="page" id="page-outils">
+  <div class="section-head">
+    <h2><i class="fas fa-calculator" style="font-size:.85em;margin-right:6px"></i><span data-i18n="nav.outils">Calculateurs</span></h2>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+
+    <!-- ── Calculateur ABV ──────────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="section-label" style="margin-bottom:16px">
+        <i class="fas fa-calculator" style="color:var(--hop)"></i>
+        <span data-i18n="dash.abv_title">Calculateur ABV</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:end;gap:10px;margin-bottom:16px">
+        <div class="field" style="margin:0">
+          <label data-i18n="dash.abv_og">DI (densité initiale)</label>
+          <input type="number" id="ot-abv-og" step="0.001" min="1.000" max="1.200" placeholder="1.050" oninput="outilsAbvCalc()">
+        </div>
+        <div style="font-size:1.1rem;color:var(--muted);padding-bottom:8px;text-align:center">→</div>
+        <div class="field" style="margin:0">
+          <label data-i18n="dash.abv_fg">DF (densité finale)</label>
+          <input type="number" id="ot-abv-fg" step="0.001" min="1.000" max="1.100" placeholder="1.010" oninput="outilsAbvCalc()">
+        </div>
+      </div>
+      <div class="ot-result-row">
+        <div class="ot-result-main">
+          <div id="ot-abv-val" class="ot-result-val" style="color:var(--amber)">–</div>
+          <div class="ot-result-lbl">ABV</div>
+        </div>
+        <div id="ot-abv-att-block" class="ot-result-side" style="display:none">
+          <div id="ot-abv-att" class="ot-result-val-sm" style="color:var(--muted)"></div>
+          <div class="ot-result-lbl" data-i18n="dash.abv_att">Atténuation app.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Correction densimètre / température ─────────────────────────────── -->
+    <div class="card">
+      <div class="section-label" style="margin-bottom:16px">
+        <i class="fas fa-temperature-half" style="color:var(--info)"></i>
+        <span data-i18n="ot.hydro_title">Correction densimètre (température)</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.hydro_sg">Densité lue</label>
+          <input type="number" id="ot-hydro-sg" step="0.001" min="1.000" max="1.200" placeholder="1.050" oninput="calcHydroTemp()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.hydro_meas_temp">T° mesure (°C)</label>
+          <input type="number" id="ot-hydro-meas" step="0.5" min="0" max="60" placeholder="25" oninput="calcHydroTemp()">
+        </div>
+        <div class="field" style="margin:0;grid-column:1/-1">
+          <label data-i18n="ot.hydro_cal_temp">T° étalonnage (°C)</label>
+          <input type="number" id="ot-hydro-cal" step="0.5" min="0" max="60" value="20" oninput="calcHydroTemp()">
+        </div>
+      </div>
+      <div class="ot-result-row">
+        <div class="ot-result-main">
+          <div id="ot-hydro-corrected" class="ot-result-val" style="color:var(--info)">–</div>
+          <div class="ot-result-lbl" data-i18n="ot.hydro_corrected">Densité corrigée</div>
+        </div>
+        <div id="ot-hydro-delta-block" class="ot-result-side" style="display:none">
+          <div id="ot-hydro-delta" class="ot-result-val-sm" style="color:var(--muted)"></div>
+          <div class="ot-result-lbl" data-i18n="ot.hydro_delta">Écart</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Correction réfractomètre / alcool ──────────────────────────────── -->
+    <div class="card">
+      <div class="section-label" style="margin-bottom:8px">
+        <i class="fas fa-eye-dropper" style="color:var(--hop)"></i>
+        <span data-i18n="ot.refracto_title">Correction réfractomètre (fermentation)</span>
+      </div>
+      <div class="ot-hint" data-i18n="ot.refracto_hint">
+        Corrige l'erreur introduite par l'alcool sur un réfractomètre en cours de fermentation (formule Novotný).
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.refracto_og">DI (Brix ou SG)</label>
+          <input type="number" id="ot-refracto-og" step="0.1" min="1" max="30" placeholder="12.0" oninput="calcRefractoCorrection()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.refracto_current">Lecture actuelle (Brix)</label>
+          <input type="number" id="ot-refracto-current" step="0.1" min="0" max="30" placeholder="5.0" oninput="calcRefractoCorrection()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.refracto_wcf">Facteur correction (WCF)</label>
+          <input type="number" id="ot-refracto-wcf" step="0.01" min="0.9" max="1.2" value="1.04" oninput="calcRefractoCorrection()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.refracto_og_unit">Unité DI</label>
+          <select id="ot-refracto-og-unit" onchange="calcRefractoCorrection()" style="width:100%">
+            <option value="brix">Brix</option>
+            <option value="sg">SG (ex: 1.050)</option>
+          </select>
+        </div>
+      </div>
+      <div class="ot-result-row">
+        <div class="ot-result-main">
+          <div id="ot-refracto-fg" class="ot-result-val" style="color:var(--hop)">–</div>
+          <div class="ot-result-lbl" data-i18n="ot.refracto_fg">DF corrigée</div>
+        </div>
+        <div id="ot-refracto-abv-block" class="ot-result-side" style="display:none">
+          <div id="ot-refracto-abv" class="ot-result-val-sm" style="color:var(--amber)"></div>
+          <div class="ot-result-lbl">ABV</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Température d'empâtage (strike water) ───────────────────────────── -->
+    <div class="card">
+      <div class="section-label" style="margin-bottom:8px">
+        <i class="fas fa-fire-flame-simple" style="color:var(--amber)"></i>
+        <span data-i18n="ot.strike_title">Température d'empâtage</span>
+      </div>
+      <div class="ot-hint" data-i18n="ot.strike_hint">
+        Chaleur de l'eau à ajouter aux malts pour atteindre la température de mash cible.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.strike_grain_wt">Poids des malts (kg)</label>
+          <input type="number" id="ot-strike-grain" step="0.1" min="0.5" max="50" placeholder="5.0" oninput="calcStrikeWater()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.strike_grain_temp">T° malts (°C)</label>
+          <input type="number" id="ot-strike-grain-temp" step="0.5" min="0" max="40" value="20" oninput="calcStrikeWater()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.strike_mash_temp">T° mash cible (°C)</label>
+          <input type="number" id="ot-strike-mash" step="0.5" min="40" max="80" value="65" oninput="calcStrikeWater()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.strike_ratio">Ratio eau/malt (L/kg)</label>
+          <input type="number" id="ot-strike-ratio" step="0.1" min="1" max="10" value="3.0" oninput="calcStrikeWater()">
+        </div>
+      </div>
+      <div class="ot-result-row">
+        <div class="ot-result-main">
+          <div id="ot-strike-temp" class="ot-result-val" style="color:var(--amber)">–</div>
+          <div class="ot-result-lbl" data-i18n="ot.strike_temp_out">T° d'empâtage</div>
+        </div>
+        <div class="ot-result-side">
+          <div id="ot-strike-vol" class="ot-result-val-sm" style="color:var(--info)">–</div>
+          <div class="ot-result-lbl" data-i18n="ot.strike_vol_out">Volume eau</div>
+        </div>
+      </div>
+      <div id="ot-strike-note" style="display:none;margin-top:10px;font-size:.8rem;color:var(--muted);background:var(--card2);border-radius:8px;padding:10px 14px"></div>
+    </div>
+
+    <!-- ── Calculateur de primage ───────────────────────────────────────────── -->
+    <div class="card" style="grid-column:1/-1;max-width:560px;justify-self:center;width:100%">
+      <div class="section-label" style="margin-bottom:16px">
+        <i class="fas fa-flask" style="color:var(--info)"></i>
+        <span data-i18n="rec.priming_title">Calculateur de primage</span>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label data-i18n="rec.priming_style">Style de référence</label>
+        <select id="ot-priming-style" onchange="primingStylePreset('ot-priming-')" style="width:100%">
+          <option value="" data-i18n="rec.priming_style_none">— Choisir un style —</option>
+          <option value="1.7">Ales britanniques (1.5–2.0) → 1.7</option>
+          <option value="2.5">Ales américaines / IPA (2.2–2.8) → 2.5</option>
+          <option value="1.8">Stout / Porter (1.5–2.1) → 1.8</option>
+          <option value="3.5">Weizen / Hefeweizen (3.3–4.5) → 3.5</option>
+          <option value="3.2">Belges (Tripel, Saison) (2.8–3.8) → 3.2</option>
+          <option value="2.5">Lager / Pilsner (2.3–2.7) → 2.5</option>
+          <option value="3.0">Sour / Lambic (3.0–4.0) → 3.0</option>
+          <option value="3.0">Cider (2.5–4.0) → 3.0</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+        <div class="field" style="margin:0">
+          <label data-i18n="rec.priming_vol">Volume (L)</label>
+          <input type="number" id="ot-priming-vol" value="20" min="1" max="200" step="0.5" oninput="calcPriming('ot-priming-')">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="rec.priming_temp">Temp. (°C)</label>
+          <input type="number" id="ot-priming-temp" value="20" min="0" max="35" step="0.5" oninput="calcPriming('ot-priming-')">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="rec.priming_target">CO₂ cible</label>
+          <input type="number" id="ot-priming-co2" value="2.5" min="0.5" max="5.0" step="0.1" oninput="calcPriming('ot-priming-')">
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:16px">
+        <label data-i18n="rec.priming_sugar">Type de sucre</label>
+        <select id="ot-priming-sugar" onchange="calcPriming('ot-priming-')" style="width:100%">
+          <option value="3.97" data-i18n="rec.priming_sugar_sucrose">Sucrose (sucre de table)</option>
+          <option value="4.21" data-i18n="rec.priming_sugar_dextrose">Dextrose anhydre</option>
+          <option value="4.64" selected data-i18n="rec.priming_sugar_dextrose_h">Dextrose monohydraté (corn sugar)</option>
+          <option value="6.14" data-i18n="rec.priming_sugar_dme">Extrait de malt sec (DME)</option>
+          <option value="8.57" data-i18n="rec.priming_sugar_honey">Miel</option>
+        </select>
+      </div>
+      <div id="ot-priming-result-block"></div>
+    </div>
+
+    <!-- ── Dilution RO / eau distillée ─────────────────────────────────────── -->
+    <div class="card" style="grid-column:1/-1">
+      <div class="section-label" style="margin-bottom:8px">
+        <i class="fas fa-droplet" style="color:var(--info)"></i>
+        <span data-i18n="ot.ro_title">Dilution RO / eau distillée</span>
+      </div>
+      <div class="ot-hint" data-i18n="ot.ro_hint">
+        Calcule le ratio eau source / eau osmosée pour approcher la minéralité cible sans ajout de sels.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 130px;gap:12px;align-items:end;margin-bottom:20px">
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.ro_source_lbl">Eau source</label>
+          <select id="ot-ro-source" onchange="calcRoDilution()" style="width:100%"></select>
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.ro_target_lbl">Profil cible</label>
+          <select id="ot-ro-target" onchange="calcRoDilution()" style="width:100%"></select>
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.ro_vol">Volume total (L)</label>
+          <input type="number" id="ot-ro-vol" value="25" min="1" max="500" step="0.5" oninput="calcRoDilution()">
+        </div>
+      </div>
+      <div id="ot-ro-result"></div>
+    </div>
+
+    <!-- ── Calculateur starter de levure ──────────────────────────────────── -->
+    <div class="card" style="grid-column:1/-1">
+      <div class="section-label" style="margin-bottom:16px">
+        <i class="fas fa-vial" style="color:var(--yeast)"></i>
+        <span data-i18n="ot.starter_title">Starter de levure liquide</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.starter_mfg_date">Date de fabrication du paquet</label>
+          <input type="date" id="ot-starter-date" oninput="calcStarter()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.starter_pkg_cells">Cellules initiales (milliards)</label>
+          <input type="number" id="ot-starter-pkg-cells" value="100" min="10" max="500" step="10" oninput="calcStarter()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.starter_pitch">Taux de pitch</label>
+          <select id="ot-starter-pitch" onchange="calcStarter()" style="width:100%">
+            <option value="0.75" data-i18n="ot.starter_pitch_ale">Ale standard (0.75 M/mL/°P)</option>
+            <option value="1.0" data-i18n="ot.starter_pitch_hg">Haute densité (1.0 M/mL/°P)</option>
+            <option value="1.5" data-i18n="ot.starter_pitch_lager">Lager (1.5 M/mL/°P)</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.starter_vol">Volume à brasser (L)</label>
+          <input type="number" id="ot-starter-vol" value="20" min="1" max="300" step="0.5" oninput="calcStarter()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.starter_og">DI cible</label>
+          <input type="number" id="ot-starter-og" value="1.050" min="1.010" max="1.130" step="0.001" oninput="calcStarter()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.starter_steps">Étapes</label>
+          <select id="ot-starter-steps" onchange="calcStarter()" style="width:100%">
+            <option value="1" data-i18n="ot.starter_step1">1 étape</option>
+            <option value="2" data-i18n="ot.starter_step2">2 étapes</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:.88rem">
+          <input type="checkbox" id="ot-starter-stir" onchange="calcStarter()" checked style="cursor:pointer;width:16px;height:16px">
+          <span data-i18n="ot.starter_stir">Stir plate (agitation)</span>
+        </label>
+      </div>
+      <div id="ot-starter-result"></div>
+    </div>
+
+    <!-- ── Comparateur de recettes ──────────────────────────────────────────── -->
+    <div class="card" style="grid-column:1/-1">
+      <div class="section-label" style="margin-bottom:16px">
+        <i class="fas fa-code-compare" style="color:var(--accent)"></i>
+        <span data-i18n="ot.compare_title">Comparateur de recettes</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.compare_rec1">Recette A</label>
+          <div class="cmp-select" id="ot-cmp-wrap1">
+            <i class="fas fa-magnifying-glass cmp-select-icon"></i>
+            <input type="text" id="ot-cmp-filter1" class="cmp-select-input"
+                   data-i18n-placeholder="ot.compare_select" placeholder="— Choisir une recette —"
+                   oninput="filterCmpRecipes(1)" onfocus="openCmpDropdown(1)" autocomplete="off">
+            <i class="fas fa-chevron-down cmp-select-arrow" onmousedown="event.preventDefault();toggleCmpDropdown(1)"></i>
+            <input type="hidden" id="ot-cmp-rec1">
+            <div class="cmp-select-list" id="ot-cmp-dropdown1"></div>
+          </div>
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.compare_rec2">Recette B</label>
+          <div class="cmp-select" id="ot-cmp-wrap2">
+            <i class="fas fa-magnifying-glass cmp-select-icon"></i>
+            <input type="text" id="ot-cmp-filter2" class="cmp-select-input"
+                   data-i18n-placeholder="ot.compare_select" placeholder="— Choisir une recette —"
+                   oninput="filterCmpRecipes(2)" onfocus="openCmpDropdown(2)" autocomplete="off">
+            <i class="fas fa-chevron-down cmp-select-arrow" onmousedown="event.preventDefault();toggleCmpDropdown(2)"></i>
+            <input type="hidden" id="ot-cmp-rec2">
+            <div class="cmp-select-list" id="ot-cmp-dropdown2"></div>
+          </div>
+        </div>
+      </div>
+      <div id="ot-compare-result"></div>
+    </div>
+
+  </div>
+</div>

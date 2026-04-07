@@ -7,19 +7,30 @@
 
       <div class="form-row cols-2">
         <div class="field"><label><span data-i18n="brew.field_recipe">Recette</span> <span class="req">*</span></label>
-          <select id="brew-f-recipe" onchange="onBrewRecipeChange()">
+          <select id="brew-f-recipe" onchange="onBrewRecipeChange()" autocomplete="off">
             <option value="" data-i18n="brew.pick_recipe">— Choisir une recette —</option>
-          </select></div>
-        <div class="field"><label data-i18n="brew.field_name">Nom du brassin</label><input type="text" id="brew-f-name" placeholder="Ex : Brassin #5 – IPA Été"></div>
+          </select>
+          <div id="brew-f-style-hint" style="display:none;font-size:.78rem;color:var(--muted);margin-top:4px"><i class="fas fa-tag"></i> <span id="brew-f-style-val"></span></div>
+        </div>
+        <div class="field">
+          <label data-i18n="brew.field_name">Nom du brassin</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <div style="flex:0 0 auto;display:flex;align-items:center;gap:4px">
+              <span style="font-size:.82rem;color:var(--muted);white-space:nowrap">#</span>
+              <input type="text" inputmode="numeric" pattern="[0-9]*" id="brew-f-number" style="width:62px;text-align:center;font-weight:600" placeholder="" autocomplete="off" data-lpignore="true" data-bwignore="true" data-1p-ignore="true">
+            </div>
+            <input type="text" id="brew-f-name" style="flex:1" placeholder="Nom du brassin" autocomplete="off">
+          </div>
+        </div>
       </div>
       <div class="form-row cols-3">
-        <div class="field"><label data-i18n="common.date">Date</label><input type="date" id="brew-f-date"></div>
-        <div class="field"><label data-i18n="brew.field_volume">Volume brassé (L)</label><input type="number" id="brew-f-vol" step="0.5"></div>
-        <div class="field"><label data-i18n="brew.field_og">Densité initiale (OG)</label><input type="number" id="brew-f-og" step="0.001" placeholder="Ex : 1.058"></div>
+        <div class="field"><label data-i18n="common.date">Date</label><input type="date" id="brew-f-date" autocomplete="off"></div>
+        <div class="field"><label data-i18n="brew.field_volume">Volume brassé (L)</label><input type="number" id="brew-f-vol" step="0.5" autocomplete="off"></div>
+        <div class="field"><label data-i18n="brew.field_og">Densité initiale (OG)</label><input type="number" id="brew-f-og" step="0.001" placeholder="Ex : 1.058" autocomplete="off"></div>
       </div>
       <div class="form-row cols-2">
-        <div class="field"><label data-i18n="brew.field_fg">Densité finale (FG)</label><input type="number" id="brew-f-fg" step="0.001" placeholder="Ex : 1.010"></div>
-        <div class="field"><label data-i18n="brew.field_abv_calc">ABV calculé (%)</label><input type="number" id="brew-f-abv" step="0.1" placeholder="Auto si OG/FG renseignés" readonly style="opacity:.6"></div>
+        <div class="field"><label data-i18n="brew.field_fg">Densité finale (FG)</label><input type="number" id="brew-f-fg" step="0.001" placeholder="Ex : 1.010" autocomplete="off"></div>
+        <div class="field"><label data-i18n="brew.field_abv_calc">ABV calculé (%)</label><input type="number" id="brew-f-abv" step="0.1" placeholder="Auto si OG/FG renseignés" readonly style="opacity:.6" autocomplete="off"></div>
       </div>
 
       <!-- Ingrédients recette + disponibilité stock -->
@@ -27,10 +38,11 @@
         <div class="divider"></div>
         <div class="section-label" data-i18n="brew.ing_avail">Ingrédients de la recette — disponibilité stock</div>
         <div id="brew-ing-list"></div>
+        <div id="brew-cost-estimate"></div>
       </div>
 
       <div class="divider"></div>
-      <div class="field"><label data-i18n="brew.field_notes">Notes de brassage</label><textarea id="brew-f-notes" placeholder="Observations, ajustements, incidents..."></textarea></div>
+      <div class="field"><label data-i18n="brew.field_notes">Notes de brassage</label><textarea id="brew-f-notes" placeholder="Observations, ajustements, incidents..." autocomplete="off"></textarea></div>
 
       <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
         <input type="checkbox" id="brew-deduct" checked style="width:auto">
@@ -39,7 +51,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('brew-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="confirmBrew(false)"><i class="fas fa-fire-burner"></i> <span data-i18n="brew.launch">Lancer le brassin</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, () => confirmBrew(false))"><i class="fas fa-fire-burner"></i> <span data-i18n="brew.launch">Lancer le brassin</span></button>
     </div>
   </div>
 </div>
@@ -55,7 +67,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('stock-warn-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-danger" onclick="confirmBrew(true)"><i class="fas fa-fire-burner"></i> <span data-i18n="brew.launch_anyway">Lancer quand même</span></button>
+      <button class="btn btn-danger" onclick="withBtn(this, () => confirmBrew(true))"><i class="fas fa-fire-burner"></i> <span data-i18n="brew.launch_anyway">Lancer quand même</span></button>
     </div>
   </div>
 </div>
@@ -105,7 +117,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('after-brew-modal')" data-i18n="brew.later">Plus tard</button>
-      <button class="btn btn-primary" onclick="createBeerFromBrew()"><i class="fas fa-plus"></i> <span data-i18n="brew.to_cave">Ajouter à la cave</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, createBeerFromBrew)"><i class="fas fa-plus"></i> <span data-i18n="brew.to_cave">Ajouter à la cave</span></button>
     </div>
   </div>
 </div>
@@ -122,7 +134,7 @@
         <div class="field"><label data-i18n="common.status">Statut</label>
           <select id="bew-status">
             <option value="planned" data-i18n="brew.status_planned">Planifié</option>
-            <option value="in_progress" data-i18n="brew.status_fermenting">En cours</option>
+            <option value="in_progress" data-i18n="brew.status_in_progress">En cours</option>
             <option value="fermenting" data-i18n="brew.status_fermenting">En fermentation</option>
             <option value="completed" data-i18n="brew.status_completed">Terminé</option>
           </select>
@@ -159,12 +171,17 @@
           <span id="bew-eff-badge" style="margin-left:6px;font-size:.75rem"></span>
           <span id="bew-eff-target" style="margin-left:auto;font-size:.75rem;color:var(--muted)"></span>
         </div>
+        <div id="bew-og-analysis" style="display:none"></div>
       </div>
       <div class="field"><label data-i18n="brew.field_notes">Notes de brassage</label><textarea id="bew-notes" placeholder="Observations, ajustements, incidents..."></textarea></div>
+      <div class="field">
+        <label><i class="fas fa-images" style="color:var(--amber);margin-right:4px"></i><span data-i18n="brew.photos_url_label">Album photos (lien)</span></label>
+        <input type="url" id="bew-photos-url" placeholder="https://photos.google.com/…" autocomplete="off">
+      </div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('brew-edit-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveBrewEdit()"><i class="fas fa-save"></i> <span data-i18n="common.save">Enregistrer</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveBrewEdit)"><i class="fas fa-save"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>
@@ -191,9 +208,9 @@
       <input type="hidden" id="bk-prev-keg-id">
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" id="bk-unlink-btn" onclick="unlinkBrewKeg()" style="margin-right:auto;display:none"><i class="fas fa-link-slash"></i> <span data-i18n="brew.keg_unlink">Dissocier</span></button>
+      <button class="btn btn-ghost" id="bk-unlink-btn" onclick="withBtn(this, unlinkBrewKeg)" style="margin-right:auto;display:none"><i class="fas fa-link-slash"></i> <span data-i18n="brew.keg_unlink">Dissocier</span></button>
       <button class="btn btn-ghost" onclick="closeModal('brew-keg-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveBrewKegAssoc()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveBrewKegAssoc)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>
@@ -272,7 +289,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('brew-photo-upload-modal')" data-i18n="common.cancel">Annuler</button>
-      <button class="btn btn-primary" onclick="saveBrewPhoto()"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveBrewPhoto)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
     </div>
   </div>
 </div>
@@ -291,24 +308,152 @@
   </div>
 </div>
 
-<!-- Modal Vue photo brassin -->
+<!-- Modal Vue / Galerie photo brassin -->
 <div class="modal-overlay" id="brew-photo-view-modal" onclick="if(event.target===this)closeModal('brew-photo-view-modal')">
-  <div class="modal" style="max-width:640px">
+  <div class="modal" style="max-width:660px">
     <div class="modal-head">
-      <h3><i class="fas fa-image" style="color:var(--amber)"></i> <span id="bpv-step"></span></h3>
+      <h3><i class="fas fa-images" style="color:var(--amber)"></i> <span data-i18n="brew.photos">Photos</span></h3>
+      <span id="bpv-counter" style="font-size:.8rem;color:var(--muted);margin-left:6px;font-weight:400"></span>
       <button class="modal-close" onclick="closeModal('brew-photo-view-modal')">✕</button>
     </div>
-    <div class="modal-body" style="text-align:center">
+    <div class="modal-body">
       <input type="hidden" id="bpv-brew-id">
-      <img id="bpv-img" src="" alt="" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid var(--border)">
-      <div style="margin-top:10px">
-        <div id="bpv-caption" style="font-size:.88rem;color:var(--text);font-weight:500"></div>
-        <div id="bpv-date" style="font-size:.75rem;color:var(--muted);margin-top:2px"></div>
+      <input type="hidden" id="bpv-photo-id">
+      <!-- Photo + flèches de navigation -->
+      <div style="position:relative;text-align:center;margin-bottom:14px;min-height:80px">
+        <img id="bpv-img" src="" alt="" style="max-width:100%;max-height:380px;border-radius:8px;border:1px solid var(--border);transition:opacity .15s;vertical-align:middle">
+        <button id="bpv-prev" onclick="_bpvNav(-1)"
+          style="position:absolute;left:6px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.5);border:none;color:#fff;border-radius:50%;width:34px;height:34px;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0">&#8249;</button>
+        <button id="bpv-next" onclick="_bpvNav(1)"
+          style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.5);border:none;color:#fff;border-radius:50%;width:34px;height:34px;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0">&#8250;</button>
       </div>
+      <!-- Champs éditables -->
+      <div class="form-row cols-2">
+        <div class="field">
+          <label data-i18n="brew.photo_step">Étape</label>
+          <input type="text" id="bpv-step" list="bpv-step-list" data-no-dirty>
+          <datalist id="bpv-step-list">
+            <option data-i18n="brew.photo_step_mash" value="Empâtage">Empâtage</option>
+            <option data-i18n="brew.photo_step_boil" value="Ébullition">Ébullition</option>
+            <option data-i18n="brew.photo_step_ferm" value="Fermentation">Fermentation</option>
+            <option data-i18n="brew.photo_step_bottle" value="Embouteillage">Embouteillage</option>
+            <option data-i18n="brew.photo_step_tasting" value="Dégustation">Dégustation</option>
+          </datalist>
+        </div>
+        <div class="field">
+          <label data-i18n="brew.photo_caption">Légende</label>
+          <input type="text" id="bpv-caption" data-no-dirty>
+        </div>
+      </div>
+      <div id="bpv-date" style="font-size:.75rem;color:var(--muted);margin-top:2px"></div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-danger btn-sm" id="bpv-del-btn"><i class="fas fa-trash"></i> <span data-i18n="common.delete">Supprimer</span></button>
       <button class="btn btn-ghost" onclick="closeModal('brew-photo-view-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveBrewPhotoEdit)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Journal de brassage horodaté -->
+<div class="modal-overlay" id="brew-log-modal" onclick="if(event.target===this)closeModal('brew-log-modal')">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head">
+      <h3><i class="fas fa-book-open" style="color:var(--amber)"></i> <span id="bbl-title"></span></h3>
+      <button class="modal-close" onclick="closeModal('brew-log-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="bbl-brew-id">
+
+      <!-- Formulaire saisie -->
+      <div style="background:var(--card2);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+        <div class="form-row cols-2">
+          <div class="field">
+            <label data-i18n="brew.blog_time">Heure</label>
+            <input type="datetime-local" id="bbl-f-ts" autocomplete="off">
+          </div>
+          <div class="field">
+            <label data-i18n="brew.blog_step">Étape</label>
+            <select id="bbl-f-step">
+              <option value="" data-i18n="brew.blog_step_none">— aucune —</option>
+              <option value="empatage"     data-i18n="brew.blog_step_mash">Empâtage</option>
+              <option value="ebullition"   data-i18n="brew.blog_step_boil">Ébullition</option>
+              <option value="houblonnage"  data-i18n="brew.blog_step_hop">Houblonnage</option>
+              <option value="refroid"      data-i18n="brew.blog_step_cool">Refroidissement</option>
+              <option value="ensemencement" data-i18n="brew.blog_step_pitch">Ensemencement</option>
+              <option value="transfert"    data-i18n="brew.blog_step_transfer">Transfert</option>
+              <option value="embouteillage" data-i18n="brew.blog_step_bottle">Mise en bouteille</option>
+              <option value="divers"       data-i18n="brew.blog_step_misc">Divers</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label data-i18n="brew.blog_note">Note</label>
+          <input type="text" id="bbl-f-note" placeholder="ex : empâtage à 67 °C, pH 5.4, ajout 5 g de gypse…" autocomplete="off"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();saveBrewLogEntry()}">
+        </div>
+        <div id="bbl-alert" class="alert" style="display:none;margin-top:8px"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px">
+          <button class="btn btn-sm" onclick="withBtn(this, saveBrewLogEntry)">
+            <i class="fas fa-plus"></i> <span data-i18n="brew.blog_add">Ajouter</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Liste des entrées -->
+      <div id="bbl-list"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('brew-log-modal')" data-i18n="common.close">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Journal de fermentation manuel -->
+<div class="modal-overlay" id="brew-ferm-log-modal" onclick="if(event.target===this)closeModal('brew-ferm-log-modal')">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-head">
+      <h3><i class="fas fa-flask" style="color:var(--amber)"></i> <span id="bfl-title"></span></h3>
+      <button class="modal-close" onclick="closeModal('brew-ferm-log-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="bfl-brew-id">
+
+      <!-- Formulaire saisie -->
+      <div style="background:var(--card2);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+        <div class="form-row cols-2">
+          <div class="field">
+            <label data-i18n="common.date">Date</label>
+            <input type="datetime-local" id="bfl-f-date" autocomplete="off">
+          </div>
+          <div class="field">
+            <label data-i18n="brew.field_og">Densité (SG)</label>
+            <input type="number" id="bfl-f-gravity" step="0.001" min="0.990" max="1.200" placeholder="1.020" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-row cols-2">
+          <div class="field">
+            <label><span data-i18n="brew.ferm_log_temp">Température (°C)</span> <span style="font-size:.78rem;color:var(--muted)" data-i18n="common.optional">(optionnel)</span></label>
+            <input type="number" id="bfl-f-temp" step="0.5" min="0" max="50" placeholder="20" autocomplete="off">
+          </div>
+          <div class="field">
+            <label><span data-i18n="brew.field_notes">Notes</span> <span style="font-size:.78rem;color:var(--muted)" data-i18n="common.optional">(optionnel)</span></label>
+            <input type="text" id="bfl-f-notes" placeholder="J+3 stable, refroidissement..." autocomplete="off">
+          </div>
+        </div>
+        <div id="bfl-alert" class="alert" style="display:none;margin-top:8px"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px">
+          <button class="btn btn-sm" onclick="withBtn(this, saveFermEntry)">
+            <i class="fas fa-plus"></i> <span data-i18n="brew.ferm_log_add">Ajouter mesure</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Liste des entrées manuelles -->
+      <div id="bfl-list"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('brew-ferm-log-modal')" data-i18n="common.close">Fermer</button>
     </div>
   </div>
 </div>
