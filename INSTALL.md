@@ -481,6 +481,7 @@ BrewHome peut envoyer des notifications automatiques dans Telegram : résumé qu
 | 🍾 **État de la cave** | Mensuel | Bières avec stock (bouteilles 33cl / 75cl / fût en litres) puis bières épuisées dans une section séparée |
 | 📦 **Inventaire** | Mensuel | Un message par catégorie non vide : 🌾 Malts, 🌿 Houblons, 🧫 Levures, 🔮 Autres — quantités et unités par article |
 | 📅 **Événements calendrier** | Jour J (+ rappel configurable si activé) | Titre, notes et rappel de brassage pour chaque événement personnalisé avec Telegram activé |
+| 📉 **Densité stable** | Automatique (toutes les 4 h) | Notification quand un densimètre lié à un brassin actif affiche une densité stable pendant N jours consécutifs (Δ ≤ 0,002 SG). La fenêtre de stabilité est configurable (défaut : 3 jours). La notification n'est envoyée qu'une fois ; le drapeau se réinitialise si la densité redevient instable (refermentation). |
 
 ### 1. Créer un bot Telegram
 
@@ -502,6 +503,7 @@ BrewHome peut envoyer des notifications automatiques dans Telegram : résumé qu
 4. Activez les notifications souhaitées et configurez les horaires :
    - Brassins : heure d'envoi quotidienne (HH:MM)
    - Cave et Inventaire : jour du mois (1–28) + heure d'envoi
+   - Densité stable : activez et définissez la fenêtre de stabilité (en jours)
 5. Cliquez sur **Tester la connexion** pour valider le bot
 6. Utilisez **Envoyer maintenant** sur chaque ligne pour un envoi immédiat
 7. Enregistrez — les planifications prennent effet immédiatement sans redémarrage

@@ -20,6 +20,7 @@ Hébergée localement (sur un Raspberry Pi, NAS, PC ou serveur Linux), accessibl
 ### Recettes
 - Créateur de recettes complet : volume, efficacité de brasserie, températures et durées d'empâtage et d'ébullition
 - Calculs automatiques : **OG estimée, IBU, EBC, coût matières** (ingrédients + eau + énergie)
+- **IBU en temps réel** : l'IBU estimée (Tinseth) s'affiche instantanément dans l'en-tête de la section houblons pendant la saisie, sans attendre la sauvegarde
 - Comparaison avec les styles **BJCP** (OG, FG, ABV, IBU, EBC min/max)
 - Recherche par autocomplétion dans le catalogue d'ingrédients
 - Gestion des houblons : type (amérisant, aromatique, dual), temps d'addition, ajouts à sec (*dry hop*)
@@ -27,13 +28,16 @@ Hébergée localement (sur un Raspberry Pi, NAS, PC ou serveur Linux), accessibl
 - Paramètre de fermentation (température, durée)
 - Note sur 5 étoiles
 - **Vue lecture** : mode lecture seul avec bouton bascule vers l'édition
+- **Cloner à X litres** : dialog combiné duplication + redimensionnement en une étape — tous les ingrédients sont mis à l'échelle automatiquement au nouveau volume cible
 - **Miniature du brouillon** : si la recette a été créée depuis un brouillon avec image, la miniature s'affiche en haut à droite de la fiche recette, cliquable pour l'afficher en grand
 - **Étiquettes en cave** : section en bas de la fiche recette affichant les photos des bières liées (cave) sous forme de vignettes 90×90 cliquables
 - **Impression** : imprimez la fiche complète (ingrédients, estimations OG/FG/ABV/IBU/EBC, eaux, notes) avec choix du format papier (A4 Portrait, A4 Paysage, A5 Portrait, A5 Paysage)
+- **Import BeerXML** : après import, détection des ingrédients absents du catalogue avec proposition de les créer en un clic
 - Archivage et réorganisation
 
 ### Brassins
 - Enregistrement des sessions de brassage liées à une recette
+- **Lancement depuis une recette** : pré-sélection automatique de la recette dans le modal de création ; **coût estimé du brassin** affiché en temps réel (ingrédients au prix catalogue + eau + énergie)
 - Saisie de la **densité initiale (OG), densité finale (FG), ABV calculé**
 - Suivi de l'état du brassin (en cours / terminé)
 - Association à un **densimètre connecté** pour le suivi de fermentation (graphique densité + température)
@@ -179,6 +183,12 @@ Depuis **Paramètres avancés → Calendrier** :
 - **Événements brassicoles automatiques** : activez/désactivez individuellement chaque événement mondial ; personnalisez le nom, l'emoji, la couleur, la date et la description ; la récurrence calculée est affichée lors de l'édition
 - **Événements personnalisés** : liste et gestion des événements personnalisés
 
+### Calculateurs
+Onglet dédié accessible depuis la navigation principale :
+- **Calculateur ABV** : entrez la densité initiale (OG) et finale (FG) — l'ABV, l'atténuation et un code couleur s'affichent instantanément
+- **Calculateur de primage** : volume, style de carbonatation, température de fermentation → dose de sucre recommandée
+- Également accessible en mini-widget sur le **tableau de bord** (calculateur ABV uniquement)
+
 ### Notifications Telegram
 Recevez des résumés automatiques directement dans Telegram — configurables depuis **Paramètres avancés → Notifications** :
 
@@ -187,6 +197,7 @@ Recevez des résumés automatiques directement dans Telegram — configurables d
 | 🍺 Brassins en cours | Quotidien | Nom, statut, OG/FG, ABV, date de brassage + **dernière densité et température** du densimètre associé (avec ancienneté de la mesure) |
 | 🍾 État de la cave | Mensuel | Bières en stock (bouteilles 33cl / 75cl / fût) séparées des bières **épuisées** |
 | 📦 Inventaire | Mensuel | **Un message par catégorie** : 🌾 Malts, 🌿 Houblons, 🧫 Levures, 🔮 Autres — seules les catégories non vides sont envoyées |
+| 📉 Densité stable | Automatique (toutes les 4 h) | Notification quand un densimètre lié à un brassin actif affiche une densité stable pendant N jours consécutifs (seuil Δ ≤ 0,002 SG) — fenêtre configurable, réinitialisation automatique si la densité redevient instable |
 
 - Heure d'envoi configurable (quotidien) et jour + heure (mensuel)
 - Fuseau horaire configurable (chaîne IANA, ex : `Europe/Paris`)
