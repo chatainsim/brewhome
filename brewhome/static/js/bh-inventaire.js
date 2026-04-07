@@ -1,0 +1,2637 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// ── INVENTAIRE ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function catLabel(c) { return t('cat.' + c, {malt:'Malt',houblon:'Houblon',levure:'Levure',autre:'Autre'}[c] || c); }
+
+function renderDashWidgets() {
+  const el = document.getElementById('dash-widgets');
+  if (!el) return;
+  const brews = S.brews.filter(b => !b.archived);
+  const beers = S.beers.filter(b => !b.archived);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayStr = today.toISOString().slice(0,10);
+  const lang = document.documentElement.lang || 'fr';
+
+  // ── Widget 1: En fermentation ───────────────────────────────────────────────
+  const fermenting = brews.filter(b => b.status === 'fermenting');
+  let wFerm;
+  if (!fermenting.length) {
+    wFerm = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:10px"><i class="fas fa-flask" style="color:var(--hop)"></i> ${t('dash.wgt_ferm')}</div>
+      <div style="color:var(--muted);font-size:.83rem;padding:6px 0">${t('dash.wgt_ferm_empty')}</div>
+    </div>`;
+  } else {
+    const rows = fermenting.slice(0,4).map((b, i) => {
+      const sp = S.spindles?.find(s => s.brew_id === b.id);
+      const brewDate = b.brew_date ? new Date(b.brew_date + 'T00:00:00') : null;
+      const days = brewDate ? Math.floor((today - brewDate) / 86400000) : null;
+      const dayLabel = days != null ? `<span style="font-size:.7rem;color:var(--hop);font-weight:700;white-space:nowrap">${t('dash.wgt_ferm_day').replace('${n}', days)}</span>` : '';
+      const ogStr  = b.og ? `<span>${t('dash.wgt_ferm_og')} <strong>${b.og}</strong></span>` : '';
+      const fgEst  = b.og ? (b.og - 0.75 * (b.og - 1)).toFixed(3) : null;
+      const fgEstStr = fgEst ? `<span>${t('dash.wgt_ferm_fg_est')} ${fgEst}</span>` : '';
+      const gravStr  = sp?.last_gravity ? `<span style="color:var(--info);font-weight:700">${t('dash.wgt_ferm_fg_cur')} ${sp.last_gravity.toFixed(3)}</span>` : '';
+      const stableStr = sp?.gravity_stable
+        ? `<span style="color:var(--success);font-size:.7rem;font-weight:700"><i class="fas fa-circle-check"></i> ${t('spin.ferm_stable')}</span>` : '';
+      let barHtml = '';
+      if (b.og && fgEst && sp?.last_gravity) {
+        const pct = Math.max(0, Math.min(100, (b.og - sp.last_gravity) / (b.og - parseFloat(fgEst)) * 100));
+        barHtml = `<div style="margin-top:5px"><div class="bottle-bar"><div class="bottle-bar-fill" style="width:${pct.toFixed(0)}%;background:var(--hop)"></div></div></div>`;
+      }
+      const sep = i < Math.min(fermenting.length, 4) - 1 ? 'border-bottom:1px solid var(--border)' : '';
+      return `<div style="padding:7px 0;${sep}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:3px">
+          <span style="font-weight:600;font-size:.85rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.name)}</span>
+          ${dayLabel}
+        </div>
+        <div style="display:flex;gap:10px;font-size:.72rem;color:var(--muted);flex-wrap:wrap;align-items:center">${ogStr}${fgEstStr}${gravStr}${stableStr}</div>
+        ${barHtml}
+      </div>`;
+    }).join('');
+    const extra = fermenting.length > 4 ? `<div style="font-size:.72rem;color:var(--muted);margin-top:6px;text-align:right">+${fermenting.length - 4} …</div>` : '';
+    wFerm = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:8px"><i class="fas fa-flask" style="color:var(--hop)"></i> ${t('dash.wgt_ferm')} <span style="font-size:.75rem;font-weight:400;color:var(--muted)">(${fermenting.length})</span></div>
+      ${rows}${extra}
+    </div>`;
+  }
+
+  // ── Widget 2: Cave ─────────────────────────────────────────────────────────
+  const caveBeers = beers
+    .map(b => ({ ...b, liters: (b.stock_33cl||0)*0.33 + (b.stock_75cl||0)*0.75 + (b.keg_liters||0) }))
+    .filter(b => b.liters > 0)
+    .sort((a,b) => b.liters - a.liters);
+  const totalCaveL = caveBeers.reduce((s,b) => s + b.liters, 0);
+  let wCave;
+  if (!caveBeers.length) {
+    wCave = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:10px"><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> ${t('dash.wgt_cave')}</div>
+      <div style="color:var(--muted);font-size:.83rem;padding:6px 0">${t('dash.wgt_cave_empty')}</div>
+    </div>`;
+  } else {
+    const maxL = caveBeers[0].liters;
+    const rows = caveBeers.slice(0,5).map(b => `
+      <div style="margin-bottom:7px">
+        <div style="display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:2px">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(b.name)}</span>
+          <span style="color:var(--muted);margin-left:6px;white-space:nowrap">${b.liters.toFixed(1)} L</span>
+        </div>
+        <div class="bottle-bar"><div class="bottle-bar-fill" style="width:${Math.round(b.liters/maxL*100)}%;background:var(--amber)"></div></div>
+      </div>`).join('');
+    const more = caveBeers.length > 5 ? `<div style="font-size:.72rem;color:var(--muted);margin-top:4px;text-align:right">+${caveBeers.length-5} …</div>` : '';
+    wCave = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:8px"><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> ${t('dash.wgt_cave')} <span style="font-size:.75rem;font-weight:400;color:var(--muted)">${totalCaveL.toFixed(1)} L</span></div>
+      ${rows}${more}
+    </div>`;
+  }
+
+  // ── Widget 3: Prochain événement ──────────────────────────────────────────
+  const upcoming = (S.customEvents || [])
+    .filter(e => e.event_date >= todayStr)
+    .sort((a,b) => a.event_date.localeCompare(b.event_date))
+    .slice(0, 3);
+  let wEvent;
+  if (!upcoming.length) {
+    wEvent = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:10px"><i class="fas fa-calendar-star" style="color:var(--info)"></i> ${t('dash.wgt_event')}</div>
+      <div style="color:var(--muted);font-size:.83rem;padding:6px 0">${t('dash.wgt_event_empty')}</div>
+    </div>`;
+  } else {
+    const rows = upcoming.map((e, i) => {
+      const evDate = new Date(e.event_date + 'T00:00:00');
+      const diff = Math.round((evDate - today) / 86400000);
+      let whenHtml;
+      if (diff === 0)      whenHtml = `<span style="color:var(--info);font-weight:700;font-size:.72rem;white-space:nowrap">${t('dash.wgt_event_today')}</span>`;
+      else if (diff > 0)   whenHtml = `<span style="color:var(--muted);font-size:.72rem;white-space:nowrap">${t('dash.wgt_event_in').replace('${n}', diff)}</span>`;
+      else                 whenHtml = `<span style="color:var(--muted);font-size:.72rem;white-space:nowrap">${t('dash.wgt_event_ago').replace('${n}', -diff)}</span>`;
+      const sep = i < upcoming.length - 1 ? 'border-bottom:1px solid var(--border)' : '';
+      const emoji = e.emoji ? `${e.emoji} ` : '';
+      const sub = e.style || e.recipe_id ? `<div style="font-size:.71rem;color:var(--muted)">${esc(e.style||'')}</div>` : '';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;${sep}">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.85rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${emoji}${esc(e.title||'')}</div>
+          ${sub}
+        </div>
+        ${whenHtml}
+      </div>`;
+    }).join('');
+    wEvent = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:8px"><i class="fas fa-calendar-star" style="color:var(--info)"></i> ${t('dash.wgt_event')}</div>
+      ${rows}
+    </div>`;
+  }
+
+  // ── Widget 4: Dernière sauvegarde ──────────────────────────────────────────
+  const bk = appSettings.github?.backup;
+  let wBackup;
+  if (!bk?.enabled && !bk?.lastBackup) {
+    wBackup = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:10px"><i class="fas fa-cloud-arrow-up" style="color:var(--muted)"></i> ${t('dash.wgt_backup')}</div>
+      <div style="color:var(--muted);font-size:.83rem;padding:6px 0">${t('dash.wgt_backup_none_cfg')}</div>
+    </div>`;
+  } else if (!bk?.lastBackup) {
+    wBackup = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:10px"><i class="fas fa-cloud-arrow-up" style="color:var(--amber)"></i> ${t('dash.wgt_backup')}</div>
+      <div style="color:var(--amber);font-size:.83rem;padding:6px 0">${t('dash.wgt_backup_never')}</div>
+    </div>`;
+  } else {
+    const lastDt    = new Date(bk.lastBackup);
+    const diffDays  = Math.floor((today - lastDt) / 86400000);
+    const bkColor   = diffDays <= 3 ? 'var(--success)' : diffDays <= 10 ? 'var(--amber)' : 'var(--danger)';
+    const bkDateStr = lastDt.toLocaleDateString(lang === 'en' ? 'en-US' : 'fr-FR', { day:'numeric', month:'short' });
+    const bkAgo     = diffDays === 0 ? t('dash.wgt_event_today') : (diffDays === 1 ? '1 j' : `${diffDays} j`);
+    let nextHtml = '';
+    if (bk.enabled && bk.freq) {
+      const h = String(bk.hour   ?? 2).padStart(2,'0');
+      const m = String(bk.minute ?? 0).padStart(2,'0');
+      const WDAYS_FR = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+      const WDAYS_EN = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      const wdays = lang === 'en' ? WDAYS_EN : WDAYS_FR;
+      let whenStr = `${h}:${m}`;
+      if (bk.freq === 'weekly'  && bk.weekday != null) whenStr = `${wdays[bk.weekday]} ${h}:${m}`;
+      else if (bk.freq === 'monthly' && bk.day != null) whenStr = `J${bk.day} ${h}:${m}`;
+      nextHtml = `<div style="font-size:.72rem;color:var(--muted);margin-top:6px">${t('dash.wgt_backup_next').replace('${when}', whenStr)}</div>`;
+    }
+    wBackup = `<div class="card" style="height:100%">
+      <div class="section-label" style="margin-bottom:8px"><i class="fas fa-cloud-arrow-up" style="color:${bkColor}"></i> ${t('dash.wgt_backup')}</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:36px;height:36px;border-radius:50%;background:${bkColor}22;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="fas fa-cloud-arrow-up" style="color:${bkColor};font-size:.9rem"></i>
+        </div>
+        <div>
+          <div style="font-size:.9rem;font-weight:700;color:${bkColor}">${bkDateStr}</div>
+          <div style="font-size:.72rem;color:var(--muted);cursor:default" title="${lastDt.toLocaleString()}">${bkAgo}</div>
+        </div>
+      </div>
+      ${nextHtml}
+    </div>`;
+  }
+
+  el.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${wFerm}${wCave}${wEvent}${wBackup}</div>`;
+}
+
+function _doAbvCalc(pfx) {
+  const og       = parseFloat(document.getElementById(pfx + 'og').value);
+  const fg       = parseFloat(document.getElementById(pfx + 'fg').value);
+  const valEl    = document.getElementById(pfx + 'val');
+  const attEl    = document.getElementById(pfx + 'att');
+  const attBlock = document.getElementById(pfx + 'att-block');
+  if (!og || !fg || og <= 1 || fg <= 0 || fg >= og) {
+    if (valEl) { valEl.textContent = '–'; valEl.style.color = 'var(--amber)'; }
+    if (attBlock) attBlock.style.display = 'none';
+    return;
+  }
+  const abv = (og - fg) * 131.25;
+  const att = (og - fg) / (og - 1) * 100;
+  valEl.textContent = abv.toFixed(1) + ' %';
+  valEl.style.color = abv < 4 ? 'var(--info)' : abv < 7 ? 'var(--amber)' : 'var(--danger)';
+  attEl.textContent = att.toFixed(0) + ' %';
+  attBlock.style.display = '';
+}
+function dashAbvCalc()   { _doAbvCalc('abv-');    }
+function outilsAbvCalc() { _doAbvCalc('ot-abv-'); }
+
+// ── Correction densimètre / température ───────────────────────────────────────
+
+function calcHydroTemp() {
+  const sgEl  = document.getElementById('ot-hydro-sg');
+  const mEl   = document.getElementById('ot-hydro-meas');
+  const cEl   = document.getElementById('ot-hydro-cal');
+  const outEl = document.getElementById('ot-hydro-corrected');
+  const dEl   = document.getElementById('ot-hydro-delta');
+  const dBlk  = document.getElementById('ot-hydro-delta-block');
+  if (!sgEl) return;
+
+  const sg   = parseFloat(sgEl.value);
+  const Tm   = parseFloat(mEl.value);   // mesure °C → °F
+  const Tc   = parseFloat(cEl.value);   // étalonnage °C → °F
+  if (isNaN(sg) || isNaN(Tm) || isNaN(Tc)) { outEl.textContent = '–'; dBlk.style.display = 'none'; return; }
+
+  // Formule standard (Zymurgy / BeerSmith) — entrée en °F
+  const _poly = T => 1.00130346 - 0.000134722124 * T + 0.00000204052596 * T * T - 0.00000000232820948 * T * T * T;
+  const Tf = Tm * 9 / 5 + 32;
+  const Tf_cal = Tc * 9 / 5 + 32;
+  const corrected = sg * (_poly(Tf) / _poly(Tf_cal));
+
+  outEl.textContent = corrected.toFixed(3);
+  const delta = corrected - sg;
+  if (Math.abs(delta) > 0.0001) {
+    dEl.textContent = (delta > 0 ? '+' : '') + delta.toFixed(4);
+    dEl.style.color = Math.abs(delta) < 0.001 ? 'var(--muted)' : 'var(--amber)';
+    dBlk.style.display = '';
+  } else {
+    dBlk.style.display = 'none';
+  }
+}
+
+// ── Correction réfractomètre / alcool (Novotný) ───────────────────────────────
+
+function calcRefractoCorrection() {
+  const ogEl   = document.getElementById('ot-refracto-og');
+  const curEl  = document.getElementById('ot-refracto-current');
+  const wcfEl  = document.getElementById('ot-refracto-wcf');
+  const unitEl = document.getElementById('ot-refracto-og-unit');
+  const fgEl   = document.getElementById('ot-refracto-fg');
+  const abvEl  = document.getElementById('ot-refracto-abv');
+  const abvBlk = document.getElementById('ot-refracto-abv-block');
+  if (!ogEl) return;
+
+  let ogRaw = parseFloat(ogEl.value);
+  const brixCurrent = parseFloat(curEl.value);
+  const wcf = parseFloat(wcfEl.value) || 1.04;
+  if (isNaN(ogRaw) || isNaN(brixCurrent)) { fgEl.textContent = '–'; abvBlk.style.display = 'none'; return; }
+
+  // Convertir OG en Brix si SG saisi
+  let brixOG;
+  if (unitEl.value === 'sg') {
+    // SG → Brix (formule approximative standard)
+    brixOG = (ogRaw - 1) / 0.004;
+  } else {
+    brixOG = ogRaw;
+  }
+
+  // Appliquer le facteur de correction (WCF) sur les lectures Brix
+  const b1 = brixOG / wcf;
+  const b2 = brixCurrent / wcf;
+
+  // Formule Novotný (SG corrigée en fermentation)
+  const fg = 1.0000 - 0.0044993 * b1 + 0.011774 * b2
+           + 0.00027581 * b1 * b1 - 0.0012717 * b2 * b2
+           - 0.0000072800 * b1 * b1 * b1 + 0.000063293 * b2 * b2 * b2;
+
+  if (fg <= 0.98 || fg >= 1.15) { fgEl.textContent = '–'; abvBlk.style.display = 'none'; return; }
+
+  fgEl.textContent = fg.toFixed(4);
+
+  // ABV estimé à partir du OG en SG
+  const ogSG = unitEl.value === 'sg' ? ogRaw : 1 + b1 * 0.004;
+  const abv = (ogSG - fg) * 131.25;
+  if (abv > 0 && abv < 30) {
+    abvEl.textContent = abv.toFixed(1) + ' %';
+    abvEl.style.color = abv < 4 ? 'var(--info)' : abv < 7 ? 'var(--amber)' : 'var(--danger)';
+    abvBlk.style.display = '';
+  } else {
+    abvBlk.style.display = 'none';
+  }
+}
+
+// ── Température d'empâtage (strike water) ────────────────────────────────────
+
+function calcStrikeWater() {
+  const grainEl     = document.getElementById('ot-strike-grain');
+  const grainTmpEl  = document.getElementById('ot-strike-grain-temp');
+  const mashEl      = document.getElementById('ot-strike-mash');
+  const ratioEl     = document.getElementById('ot-strike-ratio');
+  const tempOut     = document.getElementById('ot-strike-temp');
+  const volOut      = document.getElementById('ot-strike-vol');
+  const noteEl      = document.getElementById('ot-strike-note');
+  if (!grainEl) return;
+
+  const grain    = parseFloat(grainEl.value);
+  const tGrain   = parseFloat(grainTmpEl.value);
+  const tMash    = parseFloat(mashEl.value);
+  const ratio    = parseFloat(ratioEl.value);
+
+  if (isNaN(grain) || isNaN(tGrain) || isNaN(tMash) || isNaN(ratio) || grain <= 0 || ratio <= 0) {
+    tempOut.textContent = '–';
+    volOut.textContent  = '–';
+    if (noteEl) noteEl.style.display = 'none';
+    return;
+  }
+
+  // Capacité thermique du malt : ~0.38 cal/g/°C (valeur standard Palmer/BIAB)
+  // Bilan : V_eau × 1 × (T_strike − T_mash) = m_grain × 0.38 × (T_mash − T_grain)
+  // T_strike = T_mash + (0.38 / ratio) × (T_mash − T_grain)
+  const CP_GRAIN = 0.38;
+  const tStrike  = tMash + (CP_GRAIN / ratio) * (tMash - tGrain);
+  const vol      = +(ratio * grain).toFixed(1);
+
+  tempOut.textContent = tStrike.toFixed(1) + ' °C';
+  volOut.textContent  = vol + ' L';
+
+  // Avertissement si T_strike > 100 °C (physiquement impossible) ou < T_mash
+  if (noteEl) {
+    if (tStrike > 100) {
+      noteEl.innerHTML = t('ot.strike_warn_over100');
+      noteEl.style.display = '';
+    } else if (tStrike <= tMash) {
+      noteEl.innerHTML = t('ot.strike_warn_cold');
+      noteEl.style.display = '';
+    } else {
+      // Conseil : ajouter ~2-3°C pour compenser les pertes du mash-tun froid
+      const tPreheat = (tStrike + 2).toFixed(1);
+      noteEl.innerHTML = t('ot.strike_tip').replace('${t}', tPreheat);
+      noteEl.style.display = '';
+    }
+  }
+}
+
+// ── Dilution RO / eau distillée ───────────────────────────────────────────────
+
+const _RO_PRESET_NAMES = {
+  neutre: 'Neutre', pilsen: 'Pilsen', lager: 'Lager / Helles', weizen: 'Weizen',
+  equilibre: 'Équilibré', paleale: 'Pale Ale', amber: 'Amber Ale',
+  saison: 'Saison / Belge', ipa: 'IPA', neipa: 'NEIPA / Hazy', stout: 'Stout',
+};
+const _RO_MINERALS = ['ca','mg','na','so4','cl','hco3'];
+const _RO_LABELS   = { ca:'Ca²⁺', mg:'Mg²⁺', na:'Na⁺', so4:'SO₄²⁻', cl:'Cl⁻', hco3:'HCO₃⁻' };
+
+function renderRoDilutionSelectors() {
+  const srcEl = document.getElementById('ot-ro-source');
+  const tgtEl = document.getElementById('ot-ro-target');
+  if (!srcEl || !tgtEl) return;
+
+  const profiles = appSettings.waterProfiles || [];
+  const sources  = profiles.filter(p => p.isSource);
+  const targets  = profiles.filter(p => !p.isSource);
+
+  srcEl.innerHTML =
+    `<option value="default">${t('ot.ro_source_default')}</option>` +
+    sources.map(p => `<option value="p:${p.id}">${esc(p.name)}</option>`).join('');
+
+  tgtEl.innerHTML =
+    Object.entries(_RO_PRESET_NAMES).map(([k,lbl]) => `<option value="preset:${k}">${lbl}</option>`).join('') +
+    (targets.length ? `<optgroup label="──────────">` +
+      targets.map(p => `<option value="p:${p.id}">${esc(p.name)}</option>`).join('') +
+    `</optgroup>` : '');
+
+  calcRoDilution();
+}
+
+function calcRoDilution() {
+  const srcEl = document.getElementById('ot-ro-source');
+  const tgtEl = document.getElementById('ot-ro-target');
+  const volEl = document.getElementById('ot-ro-vol');
+  const resEl = document.getElementById('ot-ro-result');
+  if (!srcEl || !tgtEl || !resEl) return;
+
+  const totalVol = parseFloat(volEl?.value) || 25;
+  const profiles = appSettings.waterProfiles || [];
+
+  // Résoudre la source
+  let src;
+  if (srcEl.value === 'default') {
+    const w = appSettings.water || {};
+    src = { ca: parseFloat(w.ca)||0, mg: parseFloat(w.mg)||0, na: parseFloat(w.na)||0,
+            so4: parseFloat(w.so4)||0, cl: parseFloat(w.cl)||0, hco3: parseFloat(w.hco3)||0 };
+  } else {
+    const id = srcEl.value.replace('p:', '');
+    const p  = profiles.find(x => String(x.id) === id);
+    if (!p) { resEl.innerHTML = ''; return; }
+    src = { ca: parseFloat(p.ca)||0, mg: parseFloat(p.mg)||0, na: parseFloat(p.na)||0,
+            so4: parseFloat(p.so4)||0, cl: parseFloat(p.cl)||0, hco3: parseFloat(p.hco3)||0 };
+  }
+
+  // Résoudre la cible
+  let tgt;
+  const tv = tgtEl.value;
+  if (tv.startsWith('preset:')) {
+    const preset = WC_PRESETS[tv.replace('preset:', '')];
+    if (!preset) { resEl.innerHTML = ''; return; }
+    tgt = { ...preset };
+  } else {
+    const id = tv.replace('p:', '');
+    const p  = profiles.find(x => String(x.id) === id);
+    if (!p) { resEl.innerHTML = ''; return; }
+    tgt = { ca: parseFloat(p.ca)||0, mg: parseFloat(p.mg)||0, na: parseFloat(p.na)||0,
+            so4: parseFloat(p.so4)||0, cl: parseFloat(p.cl)||0, hco3: parseFloat(p.hco3)||0 };
+  }
+
+  // Ratio optimal (moindres carrés) : R = Σ(s_i × t_i) / Σ(s_i²)
+  let sumST = 0, sumSS = 0;
+  _RO_MINERALS.forEach(k => { sumST += src[k] * tgt[k]; sumSS += src[k] * src[k]; });
+
+  if (sumSS === 0) {
+    resEl.innerHTML = `<div style="color:var(--muted);font-size:.88rem;padding:12px 0">${t('ot.ro_no_source_data')}</div>`;
+    return;
+  }
+
+  const R = Math.min(1, Math.max(0, sumST / sumSS));
+  const volSrc = +(R * totalVol).toFixed(1);
+  const volRO  = +(totalVol - volSrc).toFixed(1);
+  const pct    = Math.round(R * 100);
+
+  // Construire la table de résultats
+  const rows = _RO_MINERALS.map(k => {
+    const s   = src[k];
+    const b   = +(R * s).toFixed(1);
+    const tg  = tgt[k];
+    const d   = +(b - tg).toFixed(1);
+    const ok  = Math.abs(d) <= Math.max(5, tg * 0.15);
+    const dColor = ok ? 'var(--success)' : Math.abs(d) < tg * 0.3 ? 'var(--amber)' : 'var(--danger)';
+    return `<tr>
+      <td style="font-weight:600;color:var(--muted)">${_RO_LABELS[k]}</td>
+      <td style="text-align:right">${s}</td>
+      <td style="text-align:right;font-weight:700;color:var(--info)">${b}</td>
+      <td style="text-align:right">${tg}</td>
+      <td style="text-align:right;color:${dColor}">${d > 0 ? '+' : ''}${d}</td>
+    </tr>`;
+  }).join('');
+
+  const barStyle = `height:20px;border-radius:10px;background:linear-gradient(to right,var(--info) ${pct}%,var(--card2) ${pct}%)`;
+
+  resEl.innerHTML = `
+    <div style="display:flex;align-items:center;gap:20px;padding:16px 20px;background:var(--card2);border-radius:12px;margin-bottom:16px">
+      <div style="flex:1">
+        <div style="${barStyle};margin-bottom:8px"></div>
+        <div style="display:flex;justify-content:space-between;font-size:.82rem;color:var(--muted)">
+          <span>0 % ${t('ot.ro_label_ro')}</span>
+          <span>100 % ${t('ot.ro_label_src')}</span>
+        </div>
+      </div>
+      <div style="text-align:right;min-width:160px">
+        <div style="font-size:2rem;font-weight:800;color:var(--info);line-height:1">${pct} %</div>
+        <div style="font-size:.78rem;color:var(--muted);margin-top:2px">${t('ot.ro_label_src')}</div>
+        <div style="font-size:.88rem;font-weight:600;margin-top:6px">
+          ${volSrc} L ${t('ot.ro_label_src')} + ${volRO} L RO
+        </div>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:.88rem">
+        <thead>
+          <tr style="color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.04em">
+            <th style="text-align:left;padding:4px 8px">${t('ot.ro_col_mineral')}</th>
+            <th style="text-align:right;padding:4px 8px">${t('ot.ro_col_source')} (mg/L)</th>
+            <th style="text-align:right;padding:4px 8px">${t('ot.ro_col_blend')} (mg/L)</th>
+            <th style="text-align:right;padding:4px 8px">${t('ot.ro_col_target')} (mg/L)</th>
+            <th style="text-align:right;padding:4px 8px">Δ</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// ── Comparateur de recettes ───────────────────────────────────────────────────
+
+function _recipeStats(r) {
+  const vol  = parseFloat(r.volume) || 20;
+  const eff  = parseFloat(r.brewhouse_efficiency) || 75;
+  const boil = parseFloat(r.boil_time) || 60;
+  const ings = r.ingredients || [];
+  const ibuFormula = appSettings.energy?.ibu_formula || 'tinseth';
+
+  // OG / FG / ABV
+  let ogPts = 0;
+  ings.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let gu = m.gu ?? (S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase())?.gu ?? null);
+    if (gu == null) return;
+    ogPts += (m.unit === 'kg' ? m.quantity : m.quantity / 1000) * gu * (eff / 100);
+  });
+  const og  = ogPts > 0 ? 1 + ogPts / vol / 1000 : null;
+  const fg  = og != null ? 1 + (og - 1) * 0.25 : null;
+  const abv = og != null ? (og - fg) * 131.25 : null;
+
+  // IBU
+  const wortOG = og || 1.050;
+  let ibuTotal = 0;
+  ings.filter(i => i.category === 'houblon').forEach(h => {
+    if (!h.quantity || !h.alpha) return;
+    const ht   = h.hop_type || 'ebullition';
+    if (ht === 'dryhop') return;
+    const mins = ht === 'whirlpool' ? 15 : (h.hop_time ?? 60);
+    const g    = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
+    if (ibuFormula === 'rager') {
+      const util = 18.11 + 13.86 * Math.tanh((mins - 31.32) / 18.27);
+      const adj  = wortOG > 1.050 ? (wortOG - 1.050) / 0.2 : 0;
+      ibuTotal  += (g * (util / 100) * (h.alpha / 100) * 1000) / (vol * (1 + adj));
+    } else {
+      ibuTotal  += 1.65 * Math.pow(0.000125, wortOG - 1) * (1 - Math.exp(-0.04 * mins)) / 4.15 * (h.alpha / 100) * g * 1000 / vol;
+    }
+  });
+  const ibu = ibuTotal > 0 ? ibuTotal : null;
+
+  // EBC (Morey)
+  let totalMcu = 0;
+  ings.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    const e = m.ebc ?? (S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase())?.ebc ?? null);
+    if (e == null) return;
+    const kg  = m.unit === 'kg' ? m.quantity : m.quantity / 1000;
+    const lov = (e / 1.97 + 0.76) / 1.3546;
+    totalMcu += (kg * 2.20462 * lov) / (vol * 0.264172);
+  });
+  const srm = totalMcu > 0 ? 1.4922 * Math.pow(totalMcu, 0.6859) : null;
+  const ebc = srm != null ? srm * 1.97 : null;
+
+  // Coût
+  const cost = recipeCost(r);
+
+  // Fermentescibles (% grain bill + kg)
+  const totalMaltKg = ings.filter(i => i.category === 'malt')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.quantity / 1000), 0);
+  const malts = ings.filter(i => i.category === 'malt' && i.quantity > 0).map(m => {
+    const kg = m.unit === 'kg' ? m.quantity : m.quantity / 1000;
+    return { name: m.name, kg, pct: totalMaltKg > 0 ? kg / totalMaltKg * 100 : 0 };
+  });
+
+  // Houblons (regroupés par nom)
+  const hopMap = {};
+  ings.filter(i => i.category === 'houblon' && i.quantity > 0).forEach(h => {
+    const g = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
+    hopMap[h.name] = (hopMap[h.name] || 0) + g;
+  });
+  const hops = Object.entries(hopMap).map(([name, g]) => ({ name, g }));
+
+  return { og, fg, abv, ibu, ebc, cost, malts, hops, vol, eff };
+}
+
+let _cmpRecipes = [];
+
+function _renderCmpList(idx, recipes) {
+  const list = document.getElementById('ot-cmp-dropdown' + idx);
+  if (!list) return;
+  const selId = document.getElementById('ot-cmp-rec' + idx)?.value;
+  if (!recipes.length) {
+    list.innerHTML = `<div class="cmp-select-opt cmp-select-empty">${t('common.no_results') || 'Aucun résultat'}</div>`;
+    return;
+  }
+  list.innerHTML = recipes.map(r =>
+    `<div class="cmp-select-opt${r.id == selId ? ' active' : ''}" data-id="${r.id}" data-name="${esc(r.name)}"
+          onmousedown="event.preventDefault();selectCmpRecipe(${idx},this)">
+      ${esc(r.name)}${r.style ? `<span class="cmp-select-style"> — ${esc(r.style)}</span>` : ''}
+    </div>`
+  ).join('');
+}
+
+function initRecipeCompare() {
+  if (!document.getElementById('ot-cmp-wrap1')) return;
+  _cmpRecipes = S.recipes.filter(r => !r.archived)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  _renderCmpList(1, _cmpRecipes);
+  _renderCmpList(2, _cmpRecipes);
+}
+
+function openCmpDropdown(idx) {
+  const wrap = document.getElementById('ot-cmp-wrap' + idx);
+  if (!wrap || wrap.classList.contains('open')) return;
+  // Close the other one
+  const other = idx === 1 ? 2 : 1;
+  document.getElementById('ot-cmp-wrap' + other)?.classList.remove('open');
+  // Re-render with current filter
+  const q = (document.getElementById('ot-cmp-filter' + idx)?.value || '').toLowerCase().trim();
+  _renderCmpList(idx, q ? _cmpRecipes.filter(r =>
+    r.name.toLowerCase().includes(q) || (r.style || '').toLowerCase().includes(q)
+  ) : _cmpRecipes);
+  wrap.classList.add('open');
+  // Scroll active item into view
+  setTimeout(() => wrap.querySelector('.cmp-select-opt.active')?.scrollIntoView({ block: 'nearest' }), 0);
+  // Close on outside click
+  const _closeOnce = e => { if (!wrap.contains(e.target)) { wrap.classList.remove('open'); document.removeEventListener('click', _closeOnce, true); } };
+  document.addEventListener('click', _closeOnce, true);
+}
+
+function toggleCmpDropdown(idx) {
+  const wrap = document.getElementById('ot-cmp-wrap' + idx);
+  if (!wrap) return;
+  if (wrap.classList.contains('open')) wrap.classList.remove('open');
+  else { document.getElementById('ot-cmp-filter' + idx)?.focus(); openCmpDropdown(idx); }
+}
+
+function filterCmpRecipes(idx) {
+  const q = (document.getElementById('ot-cmp-filter' + idx)?.value || '').toLowerCase().trim();
+  // Clear current selection when user types
+  document.getElementById('ot-cmp-rec' + idx).value = '';
+  const filtered = q ? _cmpRecipes.filter(r =>
+    r.name.toLowerCase().includes(q) || (r.style || '').toLowerCase().includes(q)
+  ) : _cmpRecipes;
+  _renderCmpList(idx, filtered);
+  document.getElementById('ot-cmp-wrap' + idx)?.classList.add('open');
+}
+
+function selectCmpRecipe(idx, el) {
+  const id   = el.dataset.id;
+  const name = el.dataset.name;
+  document.getElementById('ot-cmp-rec'    + idx).value = id;
+  document.getElementById('ot-cmp-filter' + idx).value = name;
+  document.getElementById('ot-cmp-wrap'   + idx)?.classList.remove('open');
+  // Mark active
+  el.closest('.cmp-select-list')?.querySelectorAll('.cmp-select-opt').forEach(o => o.classList.remove('active'));
+  el.classList.add('active');
+  calcRecipeCompare();
+}
+
+function calcRecipeCompare() {
+  const id1 = parseInt(document.getElementById('ot-cmp-rec1')?.value);
+  const id2 = parseInt(document.getElementById('ot-cmp-rec2')?.value);
+  const el  = document.getElementById('ot-compare-result');
+  if (!el) return;
+
+  if (!id1 || !id2) { el.innerHTML = ''; return; }
+  if (id1 === id2) {
+    el.innerHTML = `<div style="color:var(--muted);font-size:.85rem;padding:6px 0">${t('ot.compare_same')}</div>`;
+    return;
+  }
+
+  const r1 = S.recipes.find(r => r.id === id1);
+  const r2 = S.recipes.find(r => r.id === id2);
+  if (!r1 || !r2) { el.innerHTML = ''; return; }
+
+  const s1 = _recipeStats(r1);
+  const s2 = _recipeStats(r2);
+
+  const fmtN = (v, dec, unit = '') => v != null ? v.toFixed(dec) + (unit ? '\u00a0' + unit : '') : '–';
+  const fmtD = (a, b, dec, unit = '') => {
+    if (a == null || b == null) return '';
+    const d = a - b;
+    if (Math.abs(d) < Math.pow(10, -dec) / 2) return '';
+    return `${d > 0 ? '+' : ''}${d.toFixed(dec)}${unit}`;
+  };
+
+  const ebc1Color = s1.ebc != null ? ebcToColor(s1.ebc) : null;
+  const ebc2Color = s2.ebc != null ? ebcToColor(s2.ebc) : null;
+  const swatch = c => c ? `<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${c};border:1px solid rgba(0,0,0,.2);vertical-align:middle;margin-right:5px;flex-shrink:0"></span>` : '';
+
+  const thStyle = `padding:10px 14px;font-size:.8rem;font-weight:700;color:var(--muted);text-align:center;border-bottom:2px solid var(--border)`;
+  const tdStyle = `padding:8px 14px;text-align:center;font-size:.88rem;border-bottom:1px solid var(--border)`;
+  const tdLbl   = `padding:8px 14px;font-size:.82rem;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap`;
+  const tdDelta = `padding:8px 10px;text-align:center;font-size:.78rem;color:var(--muted);border-bottom:1px solid var(--border)`;
+
+  const statRows = [
+    ['OG',               fmtN(s1.og,3),       fmtN(s2.og,3),       fmtD(s1.og,s2.og,3)],
+    ['FG',               fmtN(s1.fg,3),       fmtN(s2.fg,3),       fmtD(s1.fg,s2.fg,3)],
+    ['ABV',              fmtN(s1.abv,1,'%'),  fmtN(s2.abv,1,'%'),  fmtD(s1.abv,s2.abv,1,'%')],
+    ['IBU',              fmtN(s1.ibu,0),      fmtN(s2.ibu,0),      fmtD(s1.ibu,s2.ibu,0)],
+    ['EBC',              fmtN(s1.ebc,0),      fmtN(s2.ebc,0),      fmtD(s1.ebc,s2.ebc,0)],
+    [t('ot.compare_vol'),fmtN(s1.vol,0,'L'),  fmtN(s2.vol,0,'L'),  fmtD(s1.vol,s2.vol,0,'L')],
+    [t('ot.compare_eff'),fmtN(s1.eff,0,'%'),  fmtN(s2.eff,0,'%'),  fmtD(s1.eff,s2.eff,0,'%')],
+    [t('ot.compare_cost'),s1.cost!=null?s1.cost.toFixed(2)+'€':'–', s2.cost!=null?s2.cost.toFixed(2)+'€':'–', fmtD(s1.cost,s2.cost,2,'€')],
+  ].map(([lbl,v1,v2,delta]) => `<tr>
+    <td style="${tdLbl}">${lbl}</td>
+    <td style="${tdStyle};color:var(--accent)">${v1}</td>
+    <td style="${tdStyle};color:var(--info)">${v2}</td>
+    <td style="${tdDelta}">${delta}</td>
+  </tr>`).join('');
+
+  // Fermentescibles
+  const allMalts = [...new Map([...s1.malts, ...s2.malts].map(m => [m.name, m.name])).keys()];
+  const maltRows = allMalts.map(name => {
+    const m1 = s1.malts.find(m => m.name === name);
+    const m2 = s2.malts.find(m => m.name === name);
+    const cell = (m) => m
+      ? `<span style="font-weight:600">${m.pct.toFixed(0)}%</span><span style="color:var(--muted);font-size:.75rem;margin-left:5px">${m.kg.toFixed(2)}kg</span>`
+      : '<span style="color:var(--muted)">–</span>';
+    const pctBar = (m, color) => m
+      ? `<div style="height:4px;border-radius:2px;background:var(--border);margin-top:4px;overflow:hidden"><div style="height:100%;width:${m.pct.toFixed(0)}%;background:${color}"></div></div>`
+      : '';
+    return `<tr>
+      <td style="${tdLbl}">${esc(name)}</td>
+      <td style="${tdStyle}">${cell(m1)}${pctBar(m1,'var(--accent)')}</td>
+      <td style="${tdStyle}">${cell(m2)}${pctBar(m2,'var(--info)')}</td>
+    </tr>`;
+  }).join('');
+
+  // Houblons
+  const allHops = [...new Map([...s1.hops, ...s2.hops].map(h => [h.name, h.name])).keys()];
+  const hopRows = allHops.map(name => {
+    const h1 = s1.hops.find(h => h.name === name);
+    const h2 = s2.hops.find(h => h.name === name);
+    const cell = (h) => h ? `${h.g.toFixed(0)}g` : '<span style="color:var(--muted)">–</span>';
+    const dg = h1 && h2 ? fmtD(h1.g, h2.g, 0, 'g') : '';
+    return `<tr>
+      <td style="${tdLbl}">${esc(name)}</td>
+      <td style="${tdStyle};color:var(--accent)">${cell(h1)}</td>
+      <td style="${tdStyle};color:var(--info)">${cell(h2)}</td>
+      <td style="${tdDelta}">${dg}</td>
+    </tr>`;
+  }).join('');
+
+  const secLabel = txt => `<div style="font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">${txt}</div>`;
+
+  el.innerHTML = `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="width:120px;border-bottom:2px solid var(--border)"></th>
+        <th style="${thStyle}">${swatch(ebc1Color)}<span style="color:var(--accent)">${esc(r1.name)}</span>${r1.style?`<div style="font-size:.7rem;font-weight:400;color:var(--muted);margin-top:1px">${esc(r1.style)}</div>`:''}</th>
+        <th style="${thStyle}">${swatch(ebc2Color)}<span style="color:var(--info)">${esc(r2.name)}</span>${r2.style?`<div style="font-size:.7rem;font-weight:400;color:var(--muted);margin-top:1px">${esc(r2.style)}</div>`:''}</th>
+        <th style="${thStyle};width:90px">${t('ot.compare_delta')}</th>
+      </tr></thead>
+      <tbody>${statRows}</tbody>
+    </table>
+  </div>
+  ${allMalts.length ? secLabel(t('ot.compare_fermentables')) + `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+    <thead><tr><th style="border-bottom:1px solid var(--border)"></th>
+      <th style="${thStyle}">${esc(r1.name)}</th>
+      <th style="${thStyle}">${esc(r2.name)}</th>
+    </tr></thead><tbody>${maltRows}</tbody></table></div>` : ''}
+  ${allHops.length ? secLabel(t('ot.compare_hops')) + `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+    <thead><tr><th style="border-bottom:1px solid var(--border)"></th>
+      <th style="${thStyle}">${esc(r1.name)}</th>
+      <th style="${thStyle}">${esc(r2.name)}</th>
+      <th style="${thStyle};width:90px">${t('ot.compare_delta')}</th>
+    </tr></thead><tbody>${hopRows}</tbody></table></div>` : ''}`;
+}
+
+// ── Calculateur starter de levure ─────────────────────────────────────────────
+
+function calcStarter() {
+  const dateVal   = document.getElementById('ot-starter-date')?.value;
+  const pkgCells  = parseFloat(document.getElementById('ot-starter-pkg-cells')?.value) || 100;
+  const vol       = parseFloat(document.getElementById('ot-starter-vol')?.value) || 20;
+  const og        = parseFloat(document.getElementById('ot-starter-og')?.value) || 1.050;
+  const pitchRate = parseFloat(document.getElementById('ot-starter-pitch')?.value) || 0.75;
+  const stir      = document.getElementById('ot-starter-stir')?.checked ?? true;
+  const steps     = parseInt(document.getElementById('ot-starter-steps')?.value) || 1;
+  const el        = document.getElementById('ot-starter-result');
+  if (!el) return;
+
+  // Âge et viabilité (formule Mr. Malty)
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const mfg   = dateVal ? new Date(dateVal) : null;
+  const ageDays   = mfg ? Math.max(0, Math.floor((today - mfg) / 86400000)) : 0;
+  const ageMonths = ageDays / 30;
+  const viability = mfg ? Math.max(0.05, 0.97 * Math.exp(-0.0684 * ageMonths)) : 1.0;
+
+  const viableCells = pkgCells * viability;
+
+  // Cellules requises (milliards)
+  // °Plato ≈ 259 × (1 − 1/OG)
+  const plato = 259 * (1 - 1 / og);
+  const requiredCells = pitchRate * vol * plato;
+
+  // Facteur de croissance (milliards de cellules par gramme de DME)
+  const growthFactor = stir ? 1.4 : 1.0;
+  const dmeRatio = 100;  // g/L → gravité ~1.037
+
+  const viaColor = viability >= 0.75 ? 'var(--success)' : viability >= 0.45 ? 'var(--amber)' : 'var(--danger)';
+  const ageTxt   = mfg ? t('ot.starter_age').replace('${n}', ageDays) : '—';
+
+  let html = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+    <div style="text-align:center;padding:12px 6px;background:var(--card2);border-radius:10px">
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${t('ot.starter_via')}</div>
+      <div style="font-size:1.8rem;font-weight:800;color:${viaColor};line-height:1">${Math.round(viability * 100)}%</div>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:3px">${ageTxt}</div>
+    </div>
+    <div style="text-align:center;padding:12px 6px;background:var(--card2);border-radius:10px">
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${t('ot.starter_viable')}</div>
+      <div style="font-size:1.8rem;font-weight:800;color:var(--yeast);line-height:1">${viableCells.toFixed(0)}<span style="font-size:.85rem;font-weight:600"> B</span></div>
+    </div>
+    <div style="text-align:center;padding:12px 6px;background:var(--card2);border-radius:10px">
+      <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${t('ot.starter_required')}</div>
+      <div style="font-size:1.8rem;font-weight:800;color:var(--accent);line-height:1">${requiredCells.toFixed(0)}<span style="font-size:.85rem;font-weight:600"> B</span></div>
+    </div>
+  </div>`;
+
+  const cellsNeeded = requiredCells - viableCells;
+
+  if (cellsNeeded <= 0) {
+    html += `<div style="padding:12px 16px;background:rgba(34,197,94,.1);border-radius:10px;color:var(--success);font-weight:600;text-align:center;font-size:.9rem">
+      <i class="fas fa-circle-check"></i> ${t('ot.starter_pkg_ok')}
+    </div>`;
+    el.innerHTML = html;
+    return;
+  }
+
+  const dmeTotalG  = cellsNeeded / growthFactor;
+  const volTotalL  = dmeTotalG / dmeRatio;
+  const starterGrav = 1 + dmeRatio * 0.00037;  // ≈ 1.037
+
+  if (steps === 1) {
+    html += _starterStepHtml(null, volTotalL, dmeTotalG, starterGrav);
+  } else {
+    const vol1 = Math.max(0.5, Math.round(volTotalL / 3 * 10) / 10);
+    const dme1 = vol1 * dmeRatio;
+    const vol2 = Math.round((volTotalL - vol1) * 100) / 100;
+    const dme2 = vol2 * dmeRatio;
+
+    if (vol2 < 0.2) {
+      html += _starterStepHtml(null, vol1, dme1, starterGrav);
+      html += `<div style="margin-top:8px;padding:10px 14px;background:rgba(34,197,94,.08);border-radius:8px;color:var(--success);font-size:.85rem">
+        <i class="fas fa-circle-check"></i> ${t('ot.starter_s1_ok')}
+      </div>`;
+    } else {
+      html += _starterStepHtml(1, vol1, dme1, starterGrav);
+      html += `<div style="text-align:center;color:var(--muted);font-size:.82rem;padding:6px 0">
+        <i class="fas fa-arrow-down"></i> ${t('ot.starter_decant')}
+      </div>`;
+      html += _starterStepHtml(2, vol2, dme2, starterGrav);
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+function _starterStepHtml(step, volL, dmeG, grav) {
+  const stepHdr = step != null
+    ? `<div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">${t('ot.starter_step_lbl')} ${step}</div>`
+    : '';
+  const volStr = volL >= 1 ? volL.toFixed(2).replace(/\.?0+$/, '') + ' L'
+               : Math.round(volL * 1000) + ' mL';
+  return `<div style="padding:14px 18px;background:var(--card2);border-radius:10px;margin-top:6px">
+    ${stepHdr}
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center">
+      <div>
+        <div style="font-size:1.6rem;font-weight:800;color:var(--accent);line-height:1">${volStr}</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.04em">${t('ot.starter_vol_lbl')}</div>
+      </div>
+      <div>
+        <div style="font-size:1.6rem;font-weight:800;color:var(--hop);line-height:1">${Math.round(dmeG)} g</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.04em">${t('ot.starter_dme')} DME</div>
+      </div>
+      <div>
+        <div style="font-size:1.6rem;font-weight:800;color:var(--malt);line-height:1">${grav.toFixed(3)}</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.04em">${t('ot.starter_grav')}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDashboard() {
+  const brews   = S.brews.filter(b => !b.archived);
+  const recipes = S.recipes.filter(r => !r.archived);
+  const beers   = S.beers.filter(b => !b.archived);
+  const inv     = S.inventory.filter(i => !i.archived);
+
+  // ── Chiffres clés ──────────────────────────────────────────────────────────
+  const completed   = brews.filter(b => b.status === 'completed');
+  const active      = brews.filter(b => ['planned','in_progress','fermenting'].includes(b.status));
+  const totalVol    = brews.reduce((s,b) => s + (b.volume_brewed||0), 0);
+  const abvBrews    = completed.filter(b => b.abv);
+  const avgAbv      = abvBrews.length ? (abvBrews.reduce((s,b)=>s+b.abv,0)/abvBrews.length) : null;
+  const caveL       = beers.reduce((s,b)=>s+(b.stock_33cl||0)*0.33+(b.stock_75cl||0)*0.75+(b.keg_liters||0),0);
+
+  document.getElementById('dash-big-stats').innerHTML = `
+    <div class="stat"><div class="stat-val" style="color:var(--info)">${totalVol.toFixed(0)} L</div><div class="stat-lbl">${t('dash.stat_vol')}</div></div>
+    <div class="stat"><div class="stat-val">${recipes.length}</div><div class="stat-lbl">${t('dash.stat_recipes')}</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--hop)">${completed.length}<span style="font-size:.9rem;font-weight:400;color:var(--muted)"> / ${brews.length}</span></div><div class="stat-lbl">${t('dash.stat_brews')}</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--amber)">${caveL.toFixed(1)} L</div><div class="stat-lbl">${t('dash.stat_cave')}</div></div>`;
+
+  // ── Brassins actifs ────────────────────────────────────────────────────────
+  const STATUS_COLOR = { planned:'var(--info)', in_progress:'var(--amber)', fermenting:'var(--hop)' };
+  const STATUS_LABEL = { planned: t('dash.status_planned'), in_progress: t('dash.status_in_progress'), fermenting: t('dash.status_fermenting') };
+  const activeEl = document.getElementById('dash-active');
+  const activeList = document.getElementById('dash-active-list');
+  if (active.length) {
+    document.getElementById('dash-active-title').textContent = active.length > 1 ? t('dash.active_title_plural').replace('${n}', active.length) : t('dash.active_title').replace('${n}', active.length);
+    activeList.innerHTML = active.map(b => {
+      const sp = S.spindles?.find(s => s.brew_id === b.id);
+      const grav = sp?.last_gravity ? `<span style="color:var(--info);font-weight:700;font-size:.82rem">${sp.last_gravity.toFixed(3)}</span>` : '';
+      return `<div class="card" style="flex:1;min-width:180px;max-width:260px;padding:14px;cursor:pointer" onclick="navigate('brassins')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+          <div style="font-weight:700;font-size:.9rem">${esc(b.name)}</div>
+          <span style="background:${STATUS_COLOR[b.status]};color:#000;border-radius:20px;padding:2px 8px;font-size:.7rem;white-space:nowrap;font-weight:700">${STATUS_LABEL[b.status]||b.status}</span>
+        </div>
+        ${b.recipe_name ? `<div style="font-size:.75rem;color:var(--muted);margin-bottom:4px"><i class="fas fa-scroll"></i> ${esc(b.recipe_name)}</div>` : ''}
+        <div style="display:flex;gap:10px;font-size:.78rem;color:var(--muted)">
+          ${b.volume_brewed ? `<span><i class="fas fa-droplet"></i> ${b.volume_brewed} L</span>` : ''}
+          ${b.og ? `<span>OG ${b.og}</span>` : ''}
+          ${grav}
+        </div>
+      </div>`;
+    }).join('');
+    activeEl.style.display = '';
+  } else {
+    activeEl.style.display = 'none';
+  }
+
+  // ── Colonne gauche : Top recettes + Top bières + Stats styles ─────────────
+  const rated = [...recipes].filter(r => r.rating).sort((a,b) => b.rating-a.rating).slice(0,5);
+  const ratedBeers = [...beers].filter(b => b.taste_rating).sort((a,b) => b.taste_rating - a.taste_rating).slice(0,5);
+  const styleCounts = {};
+  brews.forEach(b => {
+    const r = S.recipes.find(x => x.id === b.recipe_id);
+    if (r?.style) styleCounts[r.style] = (styleCounts[r.style]||0) + 1;
+  });
+  const topStyles = Object.entries(styleCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  const _stars = (n, of=5) => Array.from({length:of},(_,j)=>`<span style="color:${j<n?'var(--amber)':'var(--border)'}">★</span>`).join('');
+
+  let leftHtml = '';
+  if (rated.length) {
+    leftHtml += `<div class="card" style="margin-bottom:16px">
+      <div class="section-label" style="margin-bottom:12px">${t('dash.top_recipes')}</div>
+      ${rated.map((r,i) => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;${i<rated.length-1?'border-bottom:1px solid var(--border)':''};cursor:pointer" onclick="navigate('recettes')">
+          <div style="font-size:1rem;font-weight:800;color:var(--muted);width:20px;text-align:center">${i+1}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.name)}</div>
+            ${r.style ? `<div style="font-size:.75rem;color:var(--muted)">${esc(r.style)}</div>` : ''}
+          </div>
+          <div style="white-space:nowrap">${_stars(r.rating)}</div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  if (ratedBeers.length) {
+    leftHtml += `<div class="card" style="margin-bottom:16px">
+      <div class="section-label" style="margin-bottom:12px">${t('dash.top_beers')}</div>
+      ${ratedBeers.map((b,i) => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;${i<ratedBeers.length-1?'border-bottom:1px solid var(--border)':''};cursor:pointer" onclick="navigate('cave')">
+          <div style="font-size:1rem;font-weight:800;color:var(--muted);width:20px;text-align:center">${i+1}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(b.name)}</div>
+            ${b.type ? `<div style="font-size:.75rem;color:var(--muted)">${esc(b.type)}</div>` : ''}
+          </div>
+          <div style="white-space:nowrap">${_stars(b.taste_rating)}</div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  if (topStyles.length) {
+    const maxCount = topStyles[0][1];
+    leftHtml += `<div class="card">
+      <div class="section-label" style="margin-bottom:12px">${t('dash.top_styles')}</div>
+      ${topStyles.map(([style, count]) => `
+        <div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
+            <span>${esc(style)}</span>
+            <span style="color:var(--muted)">${count > 1 ? t('dash.brew_count_plural').replace('${n}', count) : t('dash.brew_count').replace('${n}', count)}</span>
+          </div>
+          <div class="bottle-bar"><div class="bottle-bar-fill" style="width:${Math.round(count/maxCount*100)}%;background:var(--amber)"></div></div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  document.getElementById('dash-left').innerHTML = leftHtml || `<div class="card" style="color:var(--muted);font-size:.88rem;padding:20px">${t('dash.no_ratings')}</div>`;
+
+  // ── Colonne droite : Highlights + Alertes inventaire ──────────────────────
+  let rightHtml = '';
+
+  // Highlights
+  const allRatedBeers = beers.filter(b => b.taste_rating);
+  const avgBeerScore = allRatedBeers.length ? allRatedBeers.reduce((s,b) => s + b.taste_rating, 0) / allRatedBeers.length : null;
+  let totalStockValue = 0;
+  beers.forEach(b => { const v = beerStockValue(b); if (v !== null) totalStockValue += v; });
+  const highlights = [];
+  if (avgAbv !== null)
+    highlights.push(`<div style="text-align:center"><div style="font-size:1.8rem;font-weight:800;color:var(--amber)">${avgAbv.toFixed(1)}%</div><div style="font-size:.78rem;color:var(--muted)">${t('dash.avg_abv')}</div></div>`);
+  if (avgBeerScore !== null)
+    highlights.push(`<div style="text-align:center"><div style="font-size:1.8rem;font-weight:800;color:var(--amber)">${avgBeerScore.toFixed(1)}<span style="font-size:1rem;font-weight:400;color:var(--muted)">/5</span></div><div style="font-size:.78rem;color:var(--muted)">${t('dash.avg_score')}</div></div>`);
+  if (totalStockValue > 0)
+    highlights.push(`<div style="text-align:center"><div style="font-size:1.8rem;font-weight:800;color:#a78bfa">${totalStockValue.toFixed(2)}<span style="font-size:1rem;font-weight:400;color:var(--muted)"> €</span></div><div style="font-size:.78rem;color:var(--muted)">${t('dash.stock_value')}</div></div>`);
+  if (completed.length) {
+    const lastBrew = completed.sort((a,b)=>(b.id||0)-(a.id||0))[0];
+    highlights.push(`<div style="text-align:center"><div style="font-size:.88rem;font-weight:700;max-width:120px;margin:0 auto;line-height:1.3">${esc(lastBrew.name)}</div><div style="font-size:.78rem;color:var(--muted)">${t('dash.last_brew')}</div></div>`);
+  }
+  if (topStyles[0])
+    highlights.push(`<div style="text-align:center"><div style="font-size:.88rem;font-weight:700;max-width:120px;margin:0 auto;line-height:1.3">${esc(topStyles[0][0])}</div><div style="font-size:.78rem;color:var(--muted)">${t('dash.top_style')}</div></div>`);
+
+  if (highlights.length) {
+    rightHtml += `<div class="card" style="margin-bottom:16px">
+      <div class="section-label" style="margin-bottom:14px">${t('dash.highlights')}</div>
+      <div style="display:flex;justify-content:space-around;gap:8px;flex-wrap:wrap">${highlights.join('')}</div>
+    </div>`;
+  }
+
+  // Estimations d'épuisement cave
+  const deplSoon = (S.depletion || []).filter(d => d.days_remaining <= 90).slice(0, 6);
+  if (deplSoon.length) {
+    rightHtml += `<div class="card" style="margin-bottom:16px">
+      <div class="section-label" style="margin-bottom:10px;color:var(--amber)"><i class="fas fa-hourglass-half"></i> ${t('cave.depl_title')}</div>
+      ${deplSoon.map((d, i) => {
+        const days = d.days_remaining;
+        const color = days <= 7 ? 'var(--danger)' : days <= 21 ? 'var(--warning)' : 'var(--amber)';
+        const timeStr = _deplFmt(days);
+        const rateStr = d.daily_rate < 0.1 ? (d.daily_rate * 1000).toFixed(0) + ' mL/j' : d.daily_rate.toFixed(2) + ' L/j';
+        const sep = i < deplSoon.length - 1 ? 'border-bottom:1px solid var(--border)' : '';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;${sep}">
+          <i class="fas fa-beer-mug-empty" style="color:var(--muted);width:14px;font-size:.78rem"></i>
+          <span style="flex:1;font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.beer_name)}</span>
+          <span style="font-size:.78rem;font-weight:700;color:${color};white-space:nowrap">${timeStr}</span>
+          <span style="font-size:.7rem;color:var(--muted);white-space:nowrap">${rateStr}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // Alertes inventaire — même logique que la page Stats
+  const lowStock = inv.filter(i => {
+    if (!i.quantity || i.quantity <= 0) return false;
+    if (i.min_stock != null) return i.quantity < i.min_stock;
+    const th = getThresh(i.category);
+    if (i.category === 'autre')  return false;
+    if (i.category === 'levure') return i.quantity < th;
+    return (i.unit === 'kg' ? i.quantity * 1000 : i.unit === 'L' ? i.quantity * 1000 : i.quantity) < th;
+  });
+  if (lowStock.length) {
+    const CAT_ICON = {malt:'fa-wheat-awn',houblon:'fa-seedling',levure:'fa-flask',autre:'fa-box'};
+    rightHtml += `<div class="card">
+      <div class="section-label" style="margin-bottom:12px;color:var(--danger)">${t('dash.low_stock').replace('${n}', lowStock.length)}</div>
+      ${lowStock.slice(0,8).map(i => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;${lowStock.indexOf(i)<lowStock.length-1?'border-bottom:1px solid var(--border)':''}">
+          <i class="fas ${CAT_ICON[i.category]||'fa-box'}" style="color:var(--muted);width:14px"></i>
+          <span style="flex:1;font-size:.83rem">${esc(i.name)}</span>
+          <span style="font-size:.78rem;color:var(--danger);font-weight:600">${i.quantity||0} ${i.unit}</span>
+        </div>`).join('')}
+      ${lowStock.length>8?`<div style="font-size:.75rem;color:var(--muted);margin-top:8px;text-align:center">${t('dash.low_stock_more').replace('${n}', lowStock.length-8)}</div>`:''}
+    </div>`;
+  } else {
+    rightHtml += `<div class="card" style="color:var(--success);font-size:.85rem;padding:16px;text-align:center"><i class="fas fa-check-circle"></i> ${t('dash.inv_ok')}</div>`;
+  }
+
+  document.getElementById('dash-right').innerHTML = rightHtml;
+  renderDashWidgets();
+  renderDashActivity();
+  renderDashBackupLog();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STATS ANNUELLES
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _statsCharts = {};
+
+function _destroyStatsCharts() {
+  Object.values(_statsCharts).forEach(c => { try { c.destroy(); } catch(e) {} });
+  _statsCharts = {};
+  // Fallback : détruit toute instance orpheline (non trackée dans _statsCharts)
+  // sur un canvas du page stats, quelle que soit la raison (exception mi-création, etc.)
+  [
+    'stats-vol-chart','stats-styles-chart','stats-abv-chart','stats-cost-chart',
+    'stats-season-chart','stats-ferm-chart',
+    'stats-malts-chart','stats-hops-chart','stats-yeasts-chart',
+    'stats-costdist-chart','stats-eff-chart','stats-cpl-chart',
+    'stats-conso-chart','stats-score-style-chart','stats-inv-chart',
+    'stats-ibu-abv-chart',
+    'stats-brew-eff-chart','stats-brew-cpl-chart','stats-brew-ferm-chart',
+  ].forEach(id => {
+    const stale = Chart.getChart(id); if (stale) stale.destroy();
+  });
+}
+
+function renderStatsPage() {
+  _destroyStatsCharts();
+  const allCompleted = S.brews.filter(b => !b.archived && b.status === 'completed' && b.brew_date);
+
+  // Build year list
+  const years = [...new Set(allCompleted.map(b => b.brew_date.slice(0,4)))].sort().reverse();
+  const sel = document.getElementById('stats-year-sel');
+  if (sel) {
+    const prevVal = sel.value;
+    sel.innerHTML = `<option value="all">${t('stat.year_all')}</option>`
+      + years.map(y => `<option value="${y}">${y}</option>`).join('');
+    if (prevVal && (prevVal === 'all' || years.includes(prevVal))) sel.value = prevVal;
+  }
+  const yearFilter = sel?.value || 'all';
+  const filtered = yearFilter === 'all' ? allCompleted
+    : allCompleted.filter(b => b.brew_date.startsWith(yearFilter));
+
+  const emptyEl = document.getElementById('stats-empty');
+  if (!allCompleted.length) {
+    if (emptyEl) emptyEl.style.display = '';
+    document.getElementById('stats-big-stats').innerHTML = '';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  // ── Big stats ──
+  const totalVol  = filtered.reduce((s,b) => s + (b.volume_brewed||0), 0);
+  const abvBrews  = filtered.filter(b => b.abv);
+  const avgAbv    = abvBrews.length ? abvBrews.reduce((s,b) => s + b.abv, 0) / abvBrews.length : null;
+  const totalCost = filtered.reduce((s,b) => { const c = brewCost(b); return s + (c?.total||0); }, 0);
+  document.getElementById('stats-big-stats').innerHTML = `
+    <div class="stat"><div class="stat-val" style="color:var(--info)">${filtered.length}</div><div class="stat-lbl">${t('stat.card_brews')}</div></div>
+    <div class="stat"><div class="stat-val">${totalVol.toFixed(0)} L</div><div class="stat-lbl">${t('stat.card_volume')}</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--amber)">${avgAbv != null ? avgAbv.toFixed(1)+'%' : '—'}</div><div class="stat-lbl">${t('stat.card_abv')}</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--success)">${totalCost > 0 ? totalCost.toFixed(0)+' €' : '—'}</div><div class="stat-lbl">${t('stat.card_cost')}</div></div>`;
+
+  const months = t('stat.months');
+  const CHART_OPTS = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#888', font: { size: 11 } }, grid: { color: '#2a2a2a' } },
+      y: { ticks: { color: '#888', font: { size: 11 } }, grid: { color: '#2a2a2a' }, beginAtZero: true },
+    },
+  };
+
+  // ── Volume chart (monthly if year selected, yearly if all) ──
+  const volLabelEl = document.getElementById('stats-vol-label');
+  if (yearFilter !== 'all') {
+    if (volLabelEl) volLabelEl.textContent = t('stat.chart_vol_monthly');
+    const volByMonth = Array(12).fill(0);
+    filtered.forEach(b => {
+      const m = parseInt(b.brew_date.slice(5,7)) - 1;
+      volByMonth[m] += (b.volume_brewed||0);
+    });
+    _statsCharts.vol = new Chart(document.getElementById('stats-vol-chart').getContext('2d'), {
+      type: 'bar',
+      data: { labels: months, datasets: [{ data: volByMonth, backgroundColor: '#3b82f680', borderColor: '#3b82f6', borderWidth: 1.5 }] },
+      options: { ...CHART_OPTS },
+    });
+  } else {
+    if (volLabelEl) volLabelEl.textContent = t('stat.chart_vol_yearly');
+    const volByYear = {};
+    allCompleted.forEach(b => {
+      const y = b.brew_date.slice(0,4);
+      volByYear[y] = (volByYear[y]||0) + (b.volume_brewed||0);
+    });
+    const ys = Object.keys(volByYear).sort();
+    _statsCharts.vol = new Chart(document.getElementById('stats-vol-chart').getContext('2d'), {
+      type: 'bar',
+      data: { labels: ys, datasets: [{ data: ys.map(y => volByYear[y]), backgroundColor: '#3b82f680', borderColor: '#3b82f6', borderWidth: 1.5 }] },
+      options: { ...CHART_OPTS },
+    });
+  }
+
+  // ── Styles chart ──
+  const styleCounts = {};
+  filtered.forEach(b => {
+    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const style = rec?.style || (b.recipe_style) || null;
+    if (style) styleCounts[style] = (styleCounts[style]||0) + 1;
+  });
+  const topStyles = Object.entries(styleCounts).sort((a,b) => b[1]-a[1]).slice(0,8);
+  _statsCharts.styles = new Chart(document.getElementById('stats-styles-chart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: topStyles.map(([s]) => s),
+      datasets: [{ data: topStyles.map(([,n]) => n), backgroundColor: '#f59e0b80', borderColor: '#f59e0b', borderWidth: 1.5 }],
+    },
+    options: { ...CHART_OPTS, indexAxis: 'y',
+      scales: { ...CHART_OPTS.scales, y: { ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#2a2a2a' } } } },
+  });
+
+  // ── ABV trend by year ──
+  const abvByYear = {};
+  allCompleted.filter(b => b.abv).forEach(b => {
+    const y = b.brew_date.slice(0,4);
+    if (!abvByYear[y]) abvByYear[y] = [];
+    abvByYear[y].push(b.abv);
+  });
+  const abvYears = Object.keys(abvByYear).sort();
+  const abvAvgs  = abvYears.map(y => abvByYear[y].reduce((s,v) => s+v, 0) / abvByYear[y].length);
+  _statsCharts.abv = new Chart(document.getElementById('stats-abv-chart').getContext('2d'), {
+    type: 'line',
+    data: { labels: abvYears, datasets: [{ data: abvAvgs, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.12)', tension: 0.35, pointRadius: 4, fill: true }] },
+    options: { ...CHART_OPTS,
+      scales: { ...CHART_OPTS.scales, y: { ...CHART_OPTS.scales.y, ticks: { color: '#f59e0b', font: { size: 11 }, callback: v => v.toFixed(1)+'%' }, grid: { color: '#2a2a2a' } } } },
+  });
+
+  // ── Cost trend by year ──
+  const costByYear = {};
+  allCompleted.forEach(b => {
+    const y = b.brew_date.slice(0,4);
+    const c = brewCost(b);
+    if (c) costByYear[y] = (costByYear[y]||0) + c.total;
+  });
+  const costYears = Object.keys(costByYear).sort();
+  _statsCharts.cost = new Chart(document.getElementById('stats-cost-chart').getContext('2d'), {
+    type: 'bar',
+    data: { labels: costYears, datasets: [{ data: costYears.map(y => costByYear[y]), backgroundColor: '#22c55e80', borderColor: '#22c55e', borderWidth: 1.5 }] },
+    options: { ...CHART_OPTS },
+  });
+
+  // ── Consommation dans le temps ──
+  const consoEl = document.getElementById('stats-conso-section');
+  if (consoEl) {
+    const cdata = S.consumption || {};
+    const byMonth = cdata.by_month || [];
+    const byBeer  = cdata.by_beer  || [];
+    if (!byMonth.length) {
+      consoEl.innerHTML = `<div class="section-label" style="margin-bottom:10px">${t('stat.conso_title')}</div>
+        <div style="color:var(--muted);font-size:.88rem;padding:8px 0">${t('stat.conso_empty')}</div>`;
+    } else {
+      // Fill missing months in range
+      const first = byMonth[0].period, last = byMonth[byMonth.length-1].period;
+      const periods = [];
+      let [y, m] = first.split('-').map(Number);
+      const [ey, em] = last.split('-').map(Number);
+      while (y < ey || (y === ey && m <= em)) {
+        periods.push(`${y}-${String(m).padStart(2,'0')}`);
+        m++; if (m > 12) { m = 1; y++; }
+      }
+      const map = Object.fromEntries(byMonth.map(r => [r.period, r]));
+      const labels   = periods.map(p => { const [yr,mo] = p.split('-'); return `${t('stat.months')[parseInt(mo)-1]} ${yr}`; });
+      const data33   = periods.map(p => ((map[p]?.total_33cl  || 0) * 0.33));
+      const data75   = periods.map(p => ((map[p]?.total_75cl  || 0) * 0.75));
+      const dataKeg  = periods.map(p =>  (map[p]?.total_keg   || 0));
+      const totalL   = periods.map((_,i) => +(data33[i] + data75[i] + dataKeg[i]).toFixed(2));
+      const grandTotal = totalL.reduce((s,v) => s+v, 0).toFixed(1);
+
+      consoEl.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+          <div class="section-label">${t('stat.conso_title')}</div>
+          <div style="background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);border-radius:20px;padding:5px 16px;font-size:.85rem;font-weight:700;color:var(--info)">
+            ${t('stat.conso_liters')} : ${grandTotal} L
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start">
+          <div style="height:220px;position:relative"><canvas id="stats-conso-chart"></canvas></div>
+          <div>
+            <div style="font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">${t('stat.conso_top')}</div>
+            ${byBeer.map((b,i) => `
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+                <div style="font-weight:800;color:var(--muted);width:18px;text-align:right;font-size:.8rem;flex-shrink:0">${i+1}</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.beer_name)}</div>
+                  <div class="bottle-bar" style="margin-top:3px">
+                    <div class="bottle-bar-fill" style="width:${Math.round(b.total_liters/byBeer[0].total_liters*100)}%;background:var(--info)"></div>
+                  </div>
+                </div>
+                <div style="font-size:.78rem;color:var(--muted);flex-shrink:0">${b.total_liters} L</div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+
+      _statsCharts.conso = new Chart(document.getElementById('stats-conso-chart').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            { label: t('stat.conso_33cl'), data: data33.map(v => +v.toFixed(2)), backgroundColor: 'rgba(99,102,241,.7)',  borderColor: '#6366f1', borderWidth: 1, stack: 's' },
+            { label: t('stat.conso_75cl'), data: data75.map(v => +v.toFixed(2)), backgroundColor: 'rgba(245,158,11,.7)', borderColor: '#f59e0b', borderWidth: 1, stack: 's' },
+            { label: t('stat.conso_keg'),  data: dataKeg,                         backgroundColor: 'rgba(34,197,94,.65)', borderColor: '#22c55e', borderWidth: 1, stack: 's' },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { color: '#aaa', boxWidth: 12, font: { size: 11 } } },
+                     tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} L` } } },
+          scales: {
+            x: { stacked: true, ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#2a2a2a' } },
+            y: { stacked: true, ticks: { color: '#888', font: { size: 11 }, callback: v => v+'L' }, grid: { color: '#2a2a2a' }, beginAtZero: true },
+          },
+        },
+      });
+    }
+  }
+
+  // ── Classement des bières ──
+  const rankingEl = document.getElementById('stats-beer-ranking');
+  if (rankingEl) {
+    const allBeers = (S.beers || []).filter(b => !b.archived);
+    const ratedBs  = [...allBeers].filter(b => b.taste_rating).sort((a,b) => b.taste_rating - a.taste_rating || (a.name||'').localeCompare(b.name||''));
+    const avgScore = ratedBs.length ? ratedBs.reduce((s,b) => s + b.taste_rating, 0) / ratedBs.length : null;
+    const stars = (n) => Array.from({length:5},(_,j)=>`<span style="color:${j<n?'var(--amber)':'rgba(255,255,255,.12)'}">★</span>`).join('');
+
+    // Distribution 1-5
+    const dist = [0,0,0,0,0];
+    ratedBs.forEach(b => { if (b.taste_rating >= 1 && b.taste_rating <= 5) dist[b.taste_rating-1]++; });
+    const maxDist = Math.max(...dist, 1);
+
+    rankingEl.innerHTML = ratedBs.length ? `
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:20px">
+        <div class="section-label">${t('stat.ranking_title')}</div>
+        ${avgScore != null ? `<div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:20px;padding:5px 16px;font-size:.85rem;font-weight:700;color:var(--amber)">
+          ${t('stat.ranking_avg')} : ${avgScore.toFixed(2)}/5 &nbsp;${stars(Math.round(avgScore))}
+        </div>` : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+        <div>
+          ${ratedBs.map((b,i) => `
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--card2);border-radius:9px;margin-bottom:6px;cursor:pointer" onclick="navigate('cave')">
+              <div style="font-size:.9rem;font-weight:800;color:var(--muted);width:22px;text-align:center;flex-shrink:0">${i+1}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:600;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.name)}</div>
+                <div style="font-size:.72rem;color:var(--muted);margin-top:1px">
+                  ${[b.type, b.abv ? b.abv+'% ABV' : null, b.taste_date].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+              <div style="white-space:nowrap;flex-shrink:0">${stars(b.taste_rating)}</div>
+            </div>`).join('')}
+        </div>
+        <div>
+          <div style="font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Distribution</div>
+          ${[5,4,3,2,1].map(n => `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <div style="white-space:nowrap;font-size:.8rem;width:18px;text-align:right;color:var(--amber);font-weight:700">${n}★</div>
+              <div style="flex:1;background:rgba(255,255,255,.07);border-radius:4px;height:10px;overflow:hidden">
+                <div style="height:100%;background:var(--amber);border-radius:4px;width:${Math.round(dist[n-1]/maxDist*100)}%;transition:width .4s"></div>
+              </div>
+              <div style="font-size:.78rem;color:var(--muted);width:16px">${dist[n-1]}</div>
+            </div>`).join('')}
+        </div>
+      </div>` : `<div class="section-label" style="margin-bottom:10px">${t('stat.ranking_title')}</div>
+      <div style="color:var(--muted);font-size:.88rem;padding:16px 0">${t('stat.ranking_empty')}</div>`;
+  }
+
+  // ── Extra KPI cards ────────────────────────────────────────────────────────
+  const allBeersForStats = (S.beers || []).filter(b => !b.archived);
+  const bestBeer  = [...allBeersForStats].filter(b => b.taste_rating).sort((a,b) => b.taste_rating - a.taste_rating)[0];
+  const allAbvs   = filtered.filter(b => b.abv).map(b => b.abv);
+  const maxAbv    = allAbvs.length ? Math.max(...allAbvs) : null;
+  const maxAbvBrewName = maxAbv != null ? (filtered.find(b => b.abv === maxAbv)?.name || '') : '';
+  const caveL     = allBeersForStats.reduce((s,b) => s + (b.stock_33cl||0)*0.33 + (b.stock_75cl||0)*0.75 + (b.keg_liters||0), 0);
+  const invValue  = (S.inventory||[]).filter(i => !i.archived && i.price_per_unit).reduce((s,i) => s + i.price_per_unit * i.quantity, 0);
+  const _stars    = n => Array.from({length:5},(_,j) => '<span style="color:'+(j<n?'var(--amber)':'rgba(255,255,255,.12)')+'">★</span>').join('');
+
+  const extraEl = document.getElementById('stats-extra-stats');
+  if (extraEl) {
+    extraEl.innerHTML =
+      '<div class="stat"><div class="stat-val" style="color:var(--amber);font-size:1rem;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        + (bestBeer ? esc(bestBeer.name) : '—') +
+      '</div>' + (bestBeer ? '<div style="margin-top:3px">' + _stars(bestBeer.taste_rating) + '</div>' : '') +
+      '<div class="stat-lbl">' + t('stat.card_best_beer') + '</div></div>' +
+
+      '<div class="stat"><div class="stat-val" style="color:var(--amber)">'
+        + (maxAbv != null ? maxAbv.toFixed(1) + '%' : '—') +
+      '</div>'
+        + (maxAbvBrewName ? '<div style="font-size:.72rem;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">' + esc(maxAbvBrewName) + '</div>' : '') +
+      '<div class="stat-lbl">' + t('stat.card_abv_max') + '</div></div>' +
+
+      '<div class="stat"><div class="stat-val" style="color:var(--info)">'
+        + (caveL > 0 ? caveL.toFixed(1) + ' L' : '—') +
+      '</div><div class="stat-lbl">' + t('stat.card_cave') + '</div></div>' +
+
+      '<div class="stat"><div class="stat-val" style="color:var(--success)">'
+        + (invValue > 0 ? invValue.toFixed(0) + ' €' : '—') +
+      '</div><div class="stat-lbl">' + t('stat.card_inv_value') + '</div></div>';
+  }
+
+  // ── Saisonnalité (brews par mois, toutes années) ───────────────────────────
+  const seasonData = Array(12).fill(0);
+  allCompleted.forEach(b => { seasonData[parseInt(b.brew_date.slice(5,7))-1]++; });
+  const seasonCanvas = document.getElementById('stats-season-chart');
+  if (seasonCanvas) {
+    _statsCharts.season = new Chart(seasonCanvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels: months, datasets: [{ data: seasonData, backgroundColor: '#8b5cf680', borderColor: '#8b5cf6', borderWidth: 1.5 }] },
+      options: { ...CHART_OPTS, plugins: { ...CHART_OPTS.plugins,
+        tooltip: { callbacks: { label: ctx => ' ' + t('stat.brews_count').replace('${n}', ctx.parsed.y) } } } },
+    });
+  }
+
+  // ── Fermentation moyenne par année ─────────────────────────────────────────
+  const fermByYear = {};
+  allCompleted.forEach(b => {
+    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    if (rec?.ferm_time) {
+      const y = b.brew_date.slice(0,4);
+      if (!fermByYear[y]) fermByYear[y] = [];
+      fermByYear[y].push(rec.ferm_time);
+    }
+  });
+  const fermYears = Object.keys(fermByYear).sort();
+  const fermAvgs  = fermYears.map(y => fermByYear[y].reduce((s,v)=>s+v,0)/fermByYear[y].length);
+  const fermCanvas = document.getElementById('stats-ferm-chart');
+  if (fermCanvas) {
+    _statsCharts.ferm = new Chart(fermCanvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: fermYears, datasets: [{ data: fermAvgs, borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,.1)', tension: 0.35, pointRadius: 4, fill: true }] },
+      options: { ...CHART_OPTS,
+        scales: { ...CHART_OPTS.scales, y: { ...CHART_OPTS.scales.y, ticks: { color: '#06b6d4', font: { size: 11 }, callback: v => v.toFixed(0)+'j' }, grid: { color: '#2a2a2a' } } } },
+    });
+  }
+
+  // ── KPIs de performance ───────────────────────────────────────────────────
+  const ogBrews  = filtered.filter(b => b.og);
+  const fgBrews  = filtered.filter(b => b.fg);
+  const avgOg    = ogBrews.length  ? ogBrews.reduce((s,b)  => s + b.og, 0)  / ogBrews.length  : null;
+  const avgFg    = fgBrews.length  ? fgBrews.reduce((s,b)  => s + b.fg, 0)  / fgBrews.length  : null;
+  const effBrews = filtered.filter(b => { const r = S.recipes.find(r => r.id === b.recipe_id); return r?.brewhouse_efficiency; });
+  const avgEff   = effBrews.length ? effBrews.reduce((s,b) => { const r = S.recipes.find(r => r.id === b.recipe_id); return s + r.brewhouse_efficiency; }, 0) / effBrews.length : null;
+  const cplBrews = filtered.filter(b => { const c = brewCost(b); return c?.total > 0 && b.volume_brewed > 0; });
+  const avgCpl   = cplBrews.length ? cplBrews.reduce((s,b) => { const c = brewCost(b); return s + c.total / b.volume_brewed; }, 0) / cplBrews.length : null;
+
+  const perfEl = document.getElementById('stats-perf-stats');
+  if (perfEl) {
+    perfEl.innerHTML =
+      '<div class="stat"><div class="stat-val" style="color:var(--info)">'   + (avgOg  != null ? avgOg.toFixed(3)  : '—') + '</div><div class="stat-lbl">' + t('stat.card_og_avg')  + '</div></div>' +
+      '<div class="stat"><div class="stat-val" style="color:var(--info)">'   + (avgFg  != null ? avgFg.toFixed(3)  : '—') + '</div><div class="stat-lbl">' + t('stat.card_fg_avg')  + '</div></div>' +
+      '<div class="stat"><div class="stat-val" style="color:var(--success)">'+ (avgEff != null ? avgEff.toFixed(1) + '%' : '—') + '</div><div class="stat-lbl">' + t('stat.card_eff_avg') + '</div></div>' +
+      '<div class="stat"><div class="stat-val" style="color:var(--success)">'+ (avgCpl != null ? avgCpl.toFixed(2) + ' €' : '—') + '</div><div class="stat-lbl">' + t('stat.card_cpl_avg') + '</div></div>';
+  }
+
+  // ── Top malts ─────────────────────────────────────────────────────────────
+  const maltUsage = {}, hopUsage = {};
+  filtered.forEach(b => {
+    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    if (!rec?.ingredients) return;
+    rec.ingredients.forEach(ing => {
+      const qg = ing.unit === 'kg' ? ing.quantity * 1000 : (ing.quantity || 0);
+      if (ing.category === 'malt')    maltUsage[ing.name] = (maltUsage[ing.name]||0) + qg;
+      if (ing.category === 'houblon') hopUsage[ing.name]  = (hopUsage[ing.name] ||0) + qg;
+    });
+  });
+  const topMalts = Object.entries(maltUsage).sort((a,b) => b[1]-a[1]).slice(0, 8);
+  const topHops  = Object.entries(hopUsage).sort((a,b)  => b[1]-a[1]).slice(0, 8);
+  const CHART_HORIZ = {
+    ...CHART_OPTS, indexAxis: 'y',
+    scales: {
+      x: { ticks: { color: '#888', font: { size: 10 }, callback: v => v >= 1000 ? (v/1000).toFixed(1)+'kg' : v+'g' }, grid: { color: '#2a2a2a' }, beginAtZero: true },
+      y: { ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#2a2a2a' } },
+    },
+    plugins: { legend: { display: false },
+      tooltip: { callbacks: { label: ctx => ' ' + (ctx.parsed.x >= 1000 ? (ctx.parsed.x/1000).toFixed(2)+'kg' : ctx.parsed.x.toFixed(0)+'g') } } },
+  };
+  const maltsCanvas = document.getElementById('stats-malts-chart');
+  if (maltsCanvas) {
+    _statsCharts.malts = new Chart(maltsCanvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels: topMalts.map(([n])=>n), datasets: [{ data: topMalts.map(([,v])=>v), backgroundColor: '#f59e0b80', borderColor: '#f59e0b', borderWidth: 1.5 }] },
+      options: CHART_HORIZ,
+    });
+  }
+  const hopsCanvas = document.getElementById('stats-hops-chart');
+  if (hopsCanvas) {
+    _statsCharts.hops = new Chart(hopsCanvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels: topHops.map(([n])=>n), datasets: [{ data: topHops.map(([,v])=>v), backgroundColor: '#22c55e80', borderColor: '#22c55e', borderWidth: 1.5 }] },
+      options: CHART_HORIZ,
+    });
+  }
+
+  // ── Efficacité par année ──────────────────────────────────────────────────
+  const effByYear = {};
+  filtered.forEach(b => {
+    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    if (rec?.brewhouse_efficiency) {
+      const y = b.brew_date.slice(0,4);
+      if (!effByYear[y]) effByYear[y] = [];
+      effByYear[y].push(rec.brewhouse_efficiency);
+    }
+  });
+  const effYears = Object.keys(effByYear).sort();
+  const effAvgs  = effYears.map(y => effByYear[y].reduce((s,v)=>s+v,0)/effByYear[y].length);
+  const effCanvas = document.getElementById('stats-eff-chart');
+  if (effCanvas) {
+    _statsCharts.eff = new Chart(effCanvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: effYears, datasets: [{ data: effAvgs, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,.1)', tension: 0.35, pointRadius: 4, fill: true }] },
+      options: { ...CHART_OPTS,
+        scales: { ...CHART_OPTS.scales, y: { ...CHART_OPTS.scales.y,
+          min: effAvgs.length ? Math.max(0, Math.min(...effAvgs) - 10) : 0,
+          ticks: { color: '#22c55e', font: { size: 11 }, callback: v => v.toFixed(0)+'%' }, grid: { color: '#2a2a2a' } } } },
+    });
+  }
+
+  // ── Coût / litre par année ─────────────────────────────────────────────────
+  const cplByYear = {};
+  filtered.forEach(b => {
+    const c = brewCost(b);
+    if (c?.total > 0 && b.volume_brewed > 0) {
+      const y = b.brew_date.slice(0,4);
+      if (!cplByYear[y]) cplByYear[y] = [];
+      cplByYear[y].push(c.total / b.volume_brewed);
+    }
+  });
+  const cplYears = Object.keys(cplByYear).sort();
+  const cplAvgs  = cplYears.map(y => cplByYear[y].reduce((s,v)=>s+v,0)/cplByYear[y].length);
+  const cplCanvas = document.getElementById('stats-cpl-chart');
+  if (cplCanvas) {
+    _statsCharts.cpl = new Chart(cplCanvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: cplYears, datasets: [{ data: cplAvgs, borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,.1)', tension: 0.35, pointRadius: 4, fill: true }] },
+      options: { ...CHART_OPTS,
+        scales: { ...CHART_OPTS.scales, y: { ...CHART_OPTS.scales.y,
+          ticks: { color: '#a78bfa', font: { size: 11 }, callback: v => v.toFixed(2)+'€' }, grid: { color: '#2a2a2a' } } } },
+    });
+  }
+
+  // ── Top levures ───────────────────────────────────────────────────────────
+  const yeastUsage = {};
+  filtered.forEach(b => {
+    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    if (!rec?.ingredients) return;
+    rec.ingredients.filter(i => i.category === 'levure').forEach(i => {
+      yeastUsage[i.name] = (yeastUsage[i.name] || 0) + 1;
+    });
+  });
+  const topYeasts = Object.entries(yeastUsage).sort((a,b) => b[1]-a[1]).slice(0, 8);
+  const yeastsCanvas = document.getElementById('stats-yeasts-chart');
+  if (yeastsCanvas) {
+    _statsCharts.yeasts = new Chart(yeastsCanvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels: topYeasts.map(([n])=>n), datasets: [{ data: topYeasts.map(([,v])=>v), backgroundColor: '#a78bfa80', borderColor: '#a78bfa', borderWidth: 1.5 }] },
+      options: { ...CHART_HORIZ,
+        scales: { ...CHART_HORIZ.scales,
+          x: { ticks: { color: '#888', font: { size: 10 }, callback: v => Number.isInteger(v) ? v : '' }, grid: { color: '#2a2a2a' }, beginAtZero: true } },
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ' ' + t('stat.brews_count').replace('${n}', ctx.parsed.x) } } } },
+    });
+  }
+
+  // ── Répartition coût ingrédients (donut) ─────────────────────────────────
+  const costCats = { malt: 0, houblon: 0, levure: 0, autre: 0 };
+  filtered.forEach(b => { const c = brewCost(b); if (c) Object.keys(costCats).forEach(k => { costCats[k] += c.cats[k] || 0; }); });
+  const costDistCanvas = document.getElementById('stats-costdist-chart');
+  if (costDistCanvas && Object.values(costCats).some(v => v > 0)) {
+    _statsCharts.costDist = new Chart(costDistCanvas.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: [t('stat.cost_dist_malt'), t('stat.cost_dist_hop'), t('stat.cost_dist_yeast'), t('stat.cost_dist_other')],
+        datasets: [{ data: [costCats.malt, costCats.houblon, costCats.levure, costCats.autre],
+          backgroundColor: ['rgba(245,158,11,.75)','rgba(34,197,94,.75)','rgba(167,139,250,.75)','rgba(148,163,184,.75)'],
+          borderColor: ['#f59e0b','#22c55e','#a78bfa','#94a3b8'], borderWidth: 1.5 }],
+      },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '62%',
+        plugins: { legend: { position: 'bottom', labels: { color: '#aaa', boxWidth: 12, font: { size: 11 } } },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(2)} €` } } } },
+    });
+  }
+
+  // ── KPIs brassage avancés ────────────────────────────────────────────────
+  const brewKpisEl = document.getElementById('stats-brew-kpis');
+  if (brewKpisEl) {
+    // Cadence : jours moyens entre brassins consécutifs
+    const dates = filtered.map(b => new Date(b.brew_date)).sort((a,b) => a-b);
+    let cadence = null;
+    if (dates.length >= 2) {
+      const diffs = dates.slice(1).map((d,i) => Math.round((d - dates[i]) / 86400000));
+      cadence = Math.round(diffs.reduce((s,v)=>s+v,0) / diffs.length);
+    }
+    // IBU + EBC moyens
+    let ibuSum = 0, ibuCount = 0, ebcSum = 0, ebcCount = 0;
+    filtered.forEach(b => {
+      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      if (!rec) return;
+      const { ibu, ebc } = _labelIbuEbc(rec);
+      if (ibu != null) { ibuSum += ibu; ibuCount++; }
+      if (ebc != null) { ebcSum += ebc; ebcCount++; }
+    });
+    const avgIbu = ibuCount ? Math.round(ibuSum / ibuCount) : null;
+    const avgEbc = ebcCount ? Math.round(ebcSum / ebcCount) : null;
+    // Styles distincts
+    const stylesSet = new Set(filtered.map(b => { const r = S.recipes.find(r => r.id === b.recipe_id); return r?.style||null; }).filter(Boolean));
+
+    brewKpisEl.innerHTML =
+      `<div class="stat"><div class="stat-val" style="color:var(--info)">${cadence != null ? cadence+'j' : '—'}</div>` +
+      `<div class="stat-lbl">${t('stat.card_cadence')}</div>` +
+      `${cadence != null ? `<div style="font-size:.7rem;color:var(--muted);margin-top:2px">${t('stat.card_cadence_unit')}</div>` : ''}</div>` +
+
+      `<div class="stat"><div class="stat-val" style="color:var(--hop)">${avgIbu != null ? avgIbu : '—'}</div>` +
+      `<div class="stat-lbl">${t('stat.card_ibu_avg')}</div></div>` +
+
+      `<div class="stat"><div class="stat-val" style="color:var(--amber)">${avgEbc != null ? avgEbc : '—'}</div>` +
+      `<div class="stat-lbl">${t('stat.card_ebc_avg')}</div></div>` +
+
+      `<div class="stat"><div class="stat-val" style="color:var(--info)">${stylesSet.size || '—'}</div>` +
+      `<div class="stat-lbl">${t('stat.card_styles_count')}</div></div>`;
+  }
+
+  // ── Score dégustation par type ────────────────────────────────────────────
+  const scoreStyleEl = document.getElementById('stats-score-style');
+  if (scoreStyleEl) {
+    const scoreByType = {};
+    (S.beers || []).filter(b => !b.archived && b.taste_rating && b.type).forEach(b => {
+      if (!scoreByType[b.type]) scoreByType[b.type] = [];
+      scoreByType[b.type].push(b.taste_rating);
+    });
+    const scoreEntries = Object.entries(scoreByType)
+      .map(([type, scores]) => ({ type, avg: scores.reduce((s,v)=>s+v,0)/scores.length, count: scores.length }))
+      .sort((a,b) => b.avg - a.avg).slice(0, 10);
+
+    if (!scoreEntries.length) {
+      scoreStyleEl.innerHTML = `<div class="section-label" style="margin-bottom:10px">${t('stat.chart_score_style')}</div>
+        <div style="color:var(--muted);font-size:.88rem;padding:8px 0">${t('stat.score_style_empty')}</div>`;
+    } else {
+      scoreStyleEl.innerHTML = `
+        <div class="section-label" style="margin-bottom:16px">${t('stat.chart_score_style')}</div>
+        <div style="height:${Math.max(160, scoreEntries.length * 38)}px;position:relative">
+          <canvas id="stats-score-style-chart"></canvas>
+        </div>`;
+      const stars = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
+      _statsCharts.scoreStyle = new Chart(document.getElementById('stats-score-style-chart').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: scoreEntries.map(e => `${e.type} (${e.count})`),
+          datasets: [{ data: scoreEntries.map(e => +e.avg.toFixed(2)),
+            backgroundColor: scoreEntries.map(e => `hsla(${Math.round(e.avg/5*45+20)},80%,55%,.65)`),
+            borderColor:     scoreEntries.map(e => `hsl(${Math.round(e.avg/5*45+20)},80%,55%)`),
+            borderWidth: 1.5 }],
+        },
+        options: { ...CHART_OPTS, indexAxis: 'y',
+          scales: { x: { min: 0, max: 5, ticks: { color: '#888', font: { size: 11 }, stepSize: 1, callback: v => v+'★' }, grid: { color: '#2a2a2a' } },
+            y: { ticks: { color: '#ccc', font: { size: 11 } }, grid: { color: '#2a2a2a' } } },
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.x.toFixed(2)}/5  ${stars(ctx.parsed.x)}` } } } },
+      });
+    }
+  }
+
+  // ── Consommation des batchs ───────────────────────────────────────────────
+  const batchEl = document.getElementById('stats-batch-conso');
+  if (batchEl) {
+    const batchBeers = allBeersForStats
+      .filter(b => (b.initial_33cl > 0 || b.initial_75cl > 0 || b.keg_initial_liters > 0))
+      .map(b => {
+        const initL = (b.initial_33cl||0)*0.33 + (b.initial_75cl||0)*0.75 + (b.keg_initial_liters||0);
+        const currL = (b.stock_33cl||0)*0.33  + (b.stock_75cl||0)*0.75  + (b.keg_liters||0);
+        const pct   = initL > 0 ? Math.min(100, Math.round((1 - currL/initL) * 100)) : 0;
+        return { ...b, initL, currL, pct };
+      })
+      .sort((a,b) => b.pct - a.pct);
+
+    if (!batchBeers.length) {
+      batchEl.innerHTML = '<div class="section-label" style="margin-bottom:10px">' + t('stat.batch_conso_title') + '</div>' +
+        '<div style="color:var(--muted);font-size:.88rem;padding:8px 0">' + t('stat.batch_conso_empty') + '</div>';
+    } else {
+      batchEl.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">' +
+          '<div class="section-label">' + t('stat.batch_conso_title') + '</div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">' +
+        batchBeers.map(b => {
+          const barColor = b.pct >= 90 ? 'var(--danger)' : b.pct >= 60 ? '#f59e0b' : 'var(--info)';
+          return '<div style="background:var(--bg2);border-radius:10px;padding:12px 14px">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
+              '<div style="font-size:.83rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(b.name) + '</div>' +
+              '<div style="font-size:.78rem;font-weight:700;color:' + barColor + ';flex-shrink:0;margin-left:8px">' + b.pct + '%</div>' +
+            '</div>' +
+            '<div style="background:rgba(255,255,255,.08);border-radius:4px;height:7px;overflow:hidden;margin-bottom:5px">' +
+              '<div style="height:100%;border-radius:4px;background:' + barColor + ';width:' + b.pct + '%;transition:width .4s"></div>' +
+            '</div>' +
+            '<div style="font-size:.72rem;color:var(--muted)">' +
+              b.currL.toFixed(1) + ' L / ' + b.initL.toFixed(1) + ' L — ' + t('stat.batch_consumed') +
+            '</div>' +
+          '</div>';
+        }).join('') +
+        '</div>';
+    }
+  }
+
+  // ── Tableau récapitulatif des brassins ────────────────────────────────────
+  const tableEl = document.getElementById('stats-brew-table');
+  if (tableEl) {
+    const tableRows = filtered.slice().sort((a,b) => (b.brew_date||'').localeCompare(a.brew_date||''));
+    const costFmt = b => { const c = brewCost(b); return c && c.total > 0 ? c.total.toFixed(0)+' €' : '—'; };
+    const ratingFmt = b => {
+      const beer = allBeersForStats.find(be => be.recipe_id === b.recipe_id && be.taste_rating);
+      if (!beer) return '<span style="color:var(--muted)">—</span>';
+      return Array.from({length:5},(_,j) => '<span style="color:'+(j<beer.taste_rating?'var(--amber)':'rgba(255,255,255,.15)')+'">★</span>').join('');
+    };
+    tableEl.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
+        '<div class="section-label">' + t('stat.brew_table_title') + '</div>' +
+        '<span style="font-size:.78rem;color:var(--muted)">' + t('stat.brews_count').replace('${n}', filtered.length) + '</span>' +
+      '</div>' +
+      (tableRows.length ?
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.83rem">' +
+        '<thead><tr style="border-bottom:1px solid var(--border)">' +
+          '<th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">' + t('stat.tbl_name') + '</th>' +
+          '<th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600;white-space:nowrap">' + t('stat.tbl_date') + '</th>' +
+          '<th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">' + t('stat.tbl_style') + '</th>' +
+          '<th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">ABV</th>' +
+          '<th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">Vol.</th>' +
+          '<th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">' + t('stat.tbl_cost') + '</th>' +
+          '<th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">' + t('stat.tbl_rating') + '</th>' +
+        '</tr></thead><tbody>' +
+        tableRows.map((b, i) => {
+          const rec = S.recipes.find(r => r.id === b.recipe_id);
+          return '<tr style="border-bottom:1px solid var(--border);' + (i%2===1?'background:rgba(255,255,255,.02)':'') + '">' +
+            '<td style="padding:6px 8px;font-weight:600">' + esc(b.name||'—') + '</td>' +
+            '<td style="padding:6px 8px;color:var(--muted);white-space:nowrap">' + (b.brew_date||'—') + '</td>' +
+            '<td style="padding:6px 8px;color:var(--muted)">' + esc(rec?.style||'—') + '</td>' +
+            '<td style="padding:6px 8px;text-align:right;color:var(--amber)">' + (b.abv ? b.abv.toFixed(1)+'%' : '—') + '</td>' +
+            '<td style="padding:6px 8px;text-align:right">' + (b.volume_brewed ? b.volume_brewed.toFixed(0)+' L' : '—') + '</td>' +
+            '<td style="padding:6px 8px;text-align:right;color:var(--success)">' + costFmt(b) + '</td>' +
+            '<td style="padding:6px 8px;text-align:right">' + ratingFmt(b) + '</td>' +
+          '</tr>';
+        }).join('') +
+        '</tbody></table></div>'
+      : '<div style="color:var(--muted);font-size:.88rem;padding:8px 0">' + t('stat.no_brews') + '</div>');
+  }
+
+  // ── IBU / ABV par brassin ─────────────────────────────────────────────────
+  const ibuAbvEl = document.getElementById('stats-ibu-abv-chart');
+  if (ibuAbvEl) {
+    const ibuAbvData = filtered
+      .filter(b => b.brew_date)
+      .sort((a, b) => a.brew_date.localeCompare(b.brew_date))
+      .map(b => {
+        const rec = S.recipes.find(r => r.id === b.recipe_id);
+        const { ibu } = _labelIbuEbc(rec);
+        const label = b.name.length > 18 ? b.name.slice(0, 16) + '…' : b.name;
+        return { label, abv: b.abv || null, ibu: ibu ?? null };
+      });
+    if (ibuAbvData.some(d => d.abv != null || d.ibu != null)) {
+      _statsCharts.ibuAbv = new Chart(ibuAbvEl.getContext('2d'), {
+        data: {
+          labels: ibuAbvData.map(d => d.label),
+          datasets: [
+            {
+              type: 'line', label: 'ABV (%)',
+              data: ibuAbvData.map(d => d.abv),
+              borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.12)',
+              yAxisID: 'yAbv', tension: 0.3, pointRadius: 4, fill: true, spanGaps: true,
+            },
+            {
+              type: 'bar', label: 'IBU',
+              data: ibuAbvData.map(d => d.ibu),
+              backgroundColor: 'rgba(16,185,129,.45)', borderColor: '#10b981', borderWidth: 1.5,
+              yAxisID: 'yIbu',
+            },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: true, labels: { color: '#ccc', font: { size: 11 } } } },
+          scales: {
+            x: { ticks: { color: '#888', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#2a2a2a' } },
+            yAbv: { type: 'linear', position: 'left', beginAtZero: true,
+              ticks: { color: '#f59e0b', font: { size: 11 }, callback: v => v.toFixed(1) + '%' },
+              grid: { color: '#2a2a2a' } },
+            yIbu: { type: 'linear', position: 'right', beginAtZero: true,
+              ticks: { color: '#10b981', font: { size: 11 } },
+              grid: { drawOnChartArea: false } },
+          },
+        },
+      });
+    }
+  }
+
+  // ── Taux d'utilisation du catalogue ──────────────────────────────────────
+  const catUtilEl = document.getElementById('stats-catalog-util');
+  if (catUtilEl) {
+    const UTIL_CATS = ['malt', 'houblon', 'levure', 'autre'];
+    const UTIL_COLORS = { malt: 'var(--malt)', houblon: 'var(--hop)', levure: 'var(--yeast)', autre: 'var(--other)' };
+    const usedNames = { malt: new Set(), houblon: new Set(), levure: new Set(), autre: new Set() };
+    allCompleted.forEach(b => {
+      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      if (!rec?.ingredients) return;
+      rec.ingredients.forEach(ing => {
+        if (usedNames[ing.category] != null) usedNames[ing.category].add(ing.name.toLowerCase());
+      });
+    });
+    const catItems = {};
+    UTIL_CATS.forEach(c => { catItems[c] = S.catalog.filter(i => i.category === c); });
+    const totalCat  = S.catalog.length;
+    const totalUsed = UTIL_CATS.reduce((s, c) => s + catItems[c].filter(i => usedNames[c].has(i.name.toLowerCase())).length, 0);
+    const globalPct = totalCat ? Math.round(totalUsed / totalCat * 100) : 0;
+    const catLabelFn = c => t(c === 'malt' ? 'cat.malts' : c === 'houblon' ? 'cat.houblons' : c === 'levure' ? 'cat.levures' : 'cat.autres');
+    catUtilEl.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">' +
+        '<div class="section-label">' + t('stat.cat_util_title') + '</div>' +
+        '<div style="font-size:1.4rem;font-weight:800;color:var(--amber)">' + globalPct + '%</div>' +
+      '</div>' +
+      '<div style="font-size:.78rem;color:var(--muted);margin-bottom:14px">' + t('stat.cat_util_hint') + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:12px">' +
+        UTIL_CATS.map(c => {
+          const total = catItems[c].length;
+          if (!total) return '';
+          const used = catItems[c].filter(i => usedNames[c].has(i.name.toLowerCase())).length;
+          const pct  = Math.round(used / total * 100);
+          return '<div>' +
+            '<div style="display:flex;justify-content:space-between;margin-bottom:5px;font-size:.83rem">' +
+              '<span style="color:' + UTIL_COLORS[c] + '">' + catLabelFn(c) + '</span>' +
+              '<span style="color:var(--muted)">' + used + '/' + total + ' — ' + pct + '%</span>' +
+            '</div>' +
+            '<div style="height:7px;background:var(--bg2);border-radius:4px;overflow:hidden">' +
+              '<div style="height:100%;width:' + pct + '%;background:' + UTIL_COLORS[c] + ';border-radius:4px"></div>' +
+            '</div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+  }
+
+  // ── État de l'inventaire ───────────────────────────────────────────────────
+  const invHealthEl = document.getElementById('stats-inv-health');
+  if (invHealthEl) {
+    const todayD = new Date(); todayD.setHours(0,0,0,0);
+    const soonD  = new Date(todayD); soonD.setDate(soonD.getDate() + 30);
+    const invActive = (S.inventory||[]).filter(i => !i.archived);
+    const lowItems  = invActive.filter(i => {
+      if (i.quantity <= 0) return false;
+      if (i.min_stock != null) return i.quantity < i.min_stock;
+      const th = getThresh(i.category);
+      if (i.category === 'levure') return i.quantity < th;
+      if (i.category === 'autre')  return false;
+      return (i.unit === 'kg' ? i.quantity * 1000 : i.quantity) < th;
+    });
+    const expiringItems = invActive.filter(i => {
+      if (!i.expiry_date) return false;
+      const exp = new Date(i.expiry_date); exp.setHours(0,0,0,0);
+      return exp <= soonD;
+    });
+    const catCounts = {};
+    invActive.forEach(i => { catCounts[i.category] = (catCounts[i.category]||0) + 1; });
+    const catColors = { malt:'#f59e0b', houblon:'#22c55e', levure:'#3b82f6', autre:'#8b5cf6' };
+    const catOrder  = ['malt','houblon','levure','autre'];
+    const catsPresent = catOrder.filter(c => catCounts[c]);
+
+    const alertsHtml = [
+      ...lowItems.map(i =>
+        '<div style="font-size:.78rem;margin-bottom:4px;display:flex;align-items:center;gap:6px">' +
+        '<i class="fas fa-triangle-exclamation" style="color:#f59e0b;font-size:.65rem;flex-shrink:0"></i>' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(i.name) + '</span>' +
+        '<span style="color:var(--muted);flex-shrink:0">' + i.quantity + ' ' + i.unit + '</span></div>'),
+      ...expiringItems.map(i => {
+        const exp = new Date(i.expiry_date); exp.setHours(0,0,0,0);
+        const d   = Math.round((exp - todayD) / 86400000);
+        const lbl = d < 0 ? t('inv.expiry_expired') : t('inv.expiry_soon').replace('${d}', d);
+        return '<div style="font-size:.78rem;margin-bottom:4px;display:flex;align-items:center;gap:6px">' +
+          '<i class="fas fa-clock" style="color:var(--danger);font-size:.65rem;flex-shrink:0"></i>' +
+          '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(i.name) + '</span>' +
+          '<span style="color:var(--danger);flex-shrink:0">' + lbl + '</span></div>';
+      }),
+    ].slice(0, 8);
+
+    invHealthEl.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">' +
+        '<div class="section-label">' + t('stat.inv_health_title') + '</div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">' +
+        '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800">' + invActive.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_items') + '</div></div>' +
+        '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800;color:' + (lowItems.length?'#f59e0b':'var(--text)') + '">' + lowItems.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_low') + '</div></div>' +
+        '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800;color:' + (expiringItems.length?'var(--danger)':'var(--text)') + '">' + expiringItems.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_expiring') + '</div></div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">' +
+        '<div style="height:180px;position:relative"><canvas id="stats-inv-chart"></canvas></div>' +
+        '<div>' +
+          catsPresent.map(c =>
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+            '<span style="width:10px;height:10px;border-radius:50%;background:' + catColors[c] + ';flex-shrink:0;display:inline-block"></span>' +
+            '<span style="font-size:.83rem;flex:1">' + catLabel(c) + '</span>' +
+            '<span style="font-size:.83rem;font-weight:700">' + catCounts[c] + '</span>' +
+            '</div>'
+          ).join('') +
+          (alertsHtml.length ?
+            '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">' +
+              '<div style="font-size:.72rem;font-weight:600;color:var(--muted);margin-bottom:7px;text-transform:uppercase;letter-spacing:.04em">⚠ Alertes</div>' +
+              alertsHtml.join('') +
+            '</div>'
+          : '') +
+        '</div>' +
+      '</div>';
+
+    const invCanvas = document.getElementById('stats-inv-chart');
+    if (invCanvas && catsPresent.length) {
+      _statsCharts.inv = new Chart(invCanvas.getContext('2d'), {
+        type: 'doughnut',
+        data: {
+          labels: catsPresent.map(c => catLabel(c)),
+          datasets: [{ data: catsPresent.map(c => catCounts[c]), backgroundColor: catsPresent.map(c => catColors[c]), borderWidth: 0, hoverOffset: 6 }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ' : ' + ctx.parsed } },
+          },
+          cutout: '62%',
+        },
+      });
+    }
+  }
+
+  // ── Analytics avancées par brassin ─────────────────────────────────────────
+  const advSection = document.getElementById('stats-advanced-section');
+  if (advSection) {
+    const advBrews = filtered
+      .filter(b => b.brew_date)
+      .sort((a, b) => a.brew_date.localeCompare(b.brew_date))
+      .slice(-20);
+
+    const shortName = n => n.length > 20 ? n.slice(0, 18) + '…' : n;
+    const advLabels = advBrews.map(b => shortName(b.name));
+    const advH      = Math.max(200, advBrews.length * 24);
+
+    // ── Efficacité réelle vs prévue ──────────────────────────────────────────
+    const effActual  = advBrews.map(b => {
+      const rec    = S.recipes.find(r => r.id === b.recipe_id);
+      if (!rec || !b.og || !(b.volume_brewed > 0)) return null;
+      const maxPts = typeof _recMaxExtract === 'function' ? _recMaxExtract(rec) : 0;
+      if (!maxPts) return null;
+      return +((b.og - 1) * 1000 * b.volume_brewed / maxPts * 100).toFixed(1);
+    });
+    const effPlanned = advBrews.map(b => {
+      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      return rec?.brewhouse_efficiency ?? null;
+    });
+    const brewEffCanvas = document.getElementById('stats-brew-eff-chart');
+    const brewEffWrap   = document.getElementById('stats-brew-eff-wrap');
+    const brewEffEmpty  = document.getElementById('stats-brew-eff-empty');
+    if (brewEffCanvas && effActual.some(v => v != null)) {
+      if (brewEffWrap) brewEffWrap.style.height = advH + 'px';
+      _statsCharts.brewEff = new Chart(brewEffCanvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels: advLabels, datasets: [
+          { label: t('stat.adv_actual'),  data: effActual,  backgroundColor: 'rgba(34,197,94,.75)',  borderColor: '#22c55e', borderWidth: 1.5, borderRadius: 3 },
+          { label: t('stat.adv_planned'), data: effPlanned, backgroundColor: 'rgba(99,102,241,.35)', borderColor: '#6366f1', borderWidth: 1.5, borderRadius: 3 },
+        ]},
+        options: { ...CHART_OPTS, indexAxis: 'y',
+          plugins: { legend: { display: true, labels: { color: '#aaa', boxWidth: 12, font: { size: 11 } } } },
+          scales: {
+            x: { ticks: { color: '#888', font: { size: 11 }, callback: v => v + '%' }, grid: { color: '#2a2a2a' }, beginAtZero: true, max: 105 },
+            y: { ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#2a2a2a' } },
+          },
+        },
+      });
+    } else if (brewEffEmpty) {
+      if (brewEffCanvas) brewEffCanvas.style.display = 'none';
+      brewEffEmpty.style.display = '';
+    }
+
+    // ── Coût / litre par brassin ─────────────────────────────────────────────
+    const cplData = advBrews.map(b => {
+      const c = brewCost(b);
+      return (c?.total > 0 && b.volume_brewed > 0) ? +(c.total / b.volume_brewed).toFixed(2) : null;
+    });
+    const brewCplCanvas = document.getElementById('stats-brew-cpl-chart');
+    const brewCplWrap   = document.getElementById('stats-brew-cpl-wrap');
+    const brewCplEmpty  = document.getElementById('stats-brew-cpl-empty');
+    if (brewCplCanvas && cplData.some(v => v != null)) {
+      if (brewCplWrap) brewCplWrap.style.height = advH + 'px';
+      _statsCharts.brewCpl = new Chart(brewCplCanvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels: advLabels, datasets: [{
+          data: cplData, backgroundColor: 'rgba(167,139,250,.75)', borderColor: '#a78bfa', borderWidth: 1.5, borderRadius: 3,
+        }]},
+        options: { ...CHART_OPTS, indexAxis: 'y',
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + (ctx.parsed.x ?? '–').toFixed(2) + ' €/L' } } },
+          scales: {
+            x: { ticks: { color: '#888', font: { size: 11 }, callback: v => v.toFixed(2) + '€' }, grid: { color: '#2a2a2a' }, beginAtZero: true },
+            y: { ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#2a2a2a' } },
+          },
+        },
+      });
+    } else if (brewCplEmpty) {
+      if (brewCplCanvas) brewCplCanvas.style.display = 'none';
+      brewCplEmpty.style.display = '';
+    }
+
+    // ── Durée de fermentation par brassin ────────────────────────────────────
+    const fermData = advBrews.map(b => b.ferm_time || null);
+    const brewFermCanvas = document.getElementById('stats-brew-ferm-chart');
+    const brewFermWrap   = document.getElementById('stats-brew-ferm-wrap');
+    const brewFermEmpty  = document.getElementById('stats-brew-ferm-empty');
+    if (brewFermCanvas && fermData.some(v => v != null)) {
+      if (brewFermWrap) brewFermWrap.style.height = advH + 'px';
+      _statsCharts.brewFerm = new Chart(brewFermCanvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels: advLabels, datasets: [{
+          data: fermData, backgroundColor: 'rgba(6,182,212,.65)', borderColor: '#06b6d4', borderWidth: 1.5, borderRadius: 3,
+        }]},
+        options: { ...CHART_OPTS, indexAxis: 'y',
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + ctx.parsed.x + ' j' } } },
+          scales: {
+            x: { ticks: { color: '#888', font: { size: 11 }, callback: v => v + ' j' }, grid: { color: '#2a2a2a' }, beginAtZero: true },
+            y: { ticks: { color: '#ccc', font: { size: 10 } }, grid: { color: '#2a2a2a' } },
+          },
+        },
+      });
+    } else if (brewFermEmpty) {
+      if (brewFermCanvas) brewFermCanvas.style.display = 'none';
+      brewFermEmpty.style.display = '';
+    }
+
+    // ── Tableau récapitulatif avancé ─────────────────────────────────────────
+    const advTableEl = document.getElementById('stats-adv-table');
+    if (advTableEl) {
+      const rows = advBrews.slice().reverse().map(b => {
+        const rec    = S.recipes.find(r => r.id === b.recipe_id);
+        const maxPts = (rec && typeof _recMaxExtract === 'function') ? _recMaxExtract(rec) : 0;
+        const theo   = (rec && typeof _recTheoretical === 'function') ? _recTheoretical(rec) : null;
+        const actEff = maxPts && b.og && b.volume_brewed
+          ? +((b.og - 1) * 1000 * b.volume_brewed / maxPts * 100).toFixed(1) : null;
+        const planEff = rec?.brewhouse_efficiency ?? null;
+        const effDelta = actEff != null && planEff != null ? actEff - planEff : null;
+        const effColor = effDelta == null ? '' : effDelta >= -3 ? 'var(--success)' : effDelta >= -8 ? 'var(--amber)' : 'var(--danger)';
+
+        const ogActual = b.og    ? b.og.toFixed(3)    : '–';
+        const ogTheo   = theo    ? theo.og.toFixed(3)  : '–';
+        const ogDelta  = theo && b.og ? (b.og - theo.og) * 1000 : null;
+        const ogColor  = ogDelta == null ? '' : ogDelta >= -5 ? 'var(--success)' : ogDelta >= -15 ? 'var(--amber)' : 'var(--danger)';
+
+        const c   = brewCost(b);
+        const cpl = c?.total > 0 && b.volume_brewed > 0 ? (c.total / b.volume_brewed).toFixed(2) + '\u00a0€' : '–';
+
+        return `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:7px 10px;font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.name)}</td>
+          <td style="padding:7px 10px;color:var(--muted);white-space:nowrap">${b.brew_date || '–'}</td>
+          <td style="padding:7px 10px;white-space:nowrap">
+            <span style="color:${ogColor||'var(--text)'}">${ogActual}</span>
+            <span style="color:var(--muted);font-size:.8rem"> / ${ogTheo}</span>
+            ${ogDelta != null ? `<span style="color:${ogColor};font-size:.75rem;margin-left:3px">(${ogDelta >= 0 ? '+' : ''}${ogDelta.toFixed(0)}pts)</span>` : ''}
+          </td>
+          <td style="padding:7px 10px;white-space:nowrap">
+            <span style="color:${effColor||'var(--text)'}">${actEff != null ? actEff + '%' : '–'}</span>
+            <span style="color:var(--muted);font-size:.8rem"> / ${planEff != null ? planEff + '%' : '–'}</span>
+            ${effDelta != null ? `<span style="color:${effColor};font-size:.75rem;margin-left:3px">(${effDelta >= 0 ? '+' : ''}${effDelta.toFixed(1)}%)</span>` : ''}
+          </td>
+          <td style="padding:7px 10px;color:var(--info)">${cpl}</td>
+          <td style="padding:7px 10px">${b.ferm_time ? b.ferm_time + '\u00a0j' : '–'}</td>
+        </tr>`;
+      }).join('') || `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">${t('stat.adv_no_og')}</td></tr>`;
+
+      advTableEl.innerHTML = `
+        <div class="section-label" style="margin-bottom:14px" data-i18n="stat.adv_table_title">${t('stat.adv_table_title')}</div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:.85rem">
+            <thead><tr style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid var(--border)">
+              <th style="text-align:left;padding:6px 10px">${t('stat.tbl_name')}</th>
+              <th style="text-align:left;padding:6px 10px">${t('stat.tbl_date')}</th>
+              <th style="text-align:left;padding:6px 10px">OG ${t('stat.adv_actual')} / ${t('stat.adv_planned')}</th>
+              <th style="text-align:left;padding:6px 10px">${t('stat.chart_eff').replace(' (%)', '')} réelle / prévue</th>
+              <th style="text-align:left;padding:6px 10px">€/L</th>
+              <th style="text-align:left;padding:6px 10px">${t('stat.adv_brew_ferm').replace(' (jours)', '').replace(' (days)', '')}</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+  }
+}
+
+// ── Journal d'activité ────────────────────────────────────────────────────────
+const _ACT_META = {
+  recipe: { icon: 'fa-scroll',            color: 'var(--amber)'   },
+  brew:   { icon: 'fa-fire-flame-curved', color: 'var(--info)'    },
+  beer:   { icon: 'fa-beer-mug-empty',    color: 'var(--success)' },
+  backup: { icon: 'fa-cloud-arrow-up',    color: 'var(--hop)'     },
+  import: { icon: 'fa-file-import',       color: 'var(--muted)'   },
+  system: { icon: 'fa-gear',              color: 'var(--muted)'   },
+};
+
+function _actRows(items) {
+  return items.map(a => {
+    const m        = _ACT_META[a.category] || _ACT_META.system;
+    const dt       = a.ts ? new Date(a.ts.replace(' ', 'T') + 'Z') : null;
+    const ago      = dt ? _actAgo(dt) : '';
+    const hasErr   = _actHasErrors(a.label);
+    const errs     = _actErrorDetails(a.label);
+    const lblColor = hasErr ? 'var(--danger)' : 'inherit';
+    const errBlock = errs ? `
+      <div style="margin-top:4px">
+        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('i').classList.toggle('fa-chevron-down');this.querySelector('i').classList.toggle('fa-chevron-up')"
+          style="background:none;border:none;cursor:pointer;font-size:.72rem;color:var(--danger);padding:0;display:flex;align-items:center;gap:4px">
+          <i class="fas fa-chevron-down" style="font-size:.6rem"></i> ${errs.length} erreur(s)
+        </button>
+        <div style="display:none;margin-top:4px;padding:6px 8px;background:rgba(239,68,68,.08);border-radius:6px;border:1px solid rgba(239,68,68,.2)">
+          ${errs.map(e => `<div style="font-size:.72rem;color:var(--danger);font-family:monospace;word-break:break-all;padding:1px 0">${esc(e)}</div>`).join('')}
+        </div>
+      </div>` : '';
+    return `<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div style="width:28px;height:28px;border-radius:50%;background:${m.color}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">
+        <i class="fas ${m.icon}" style="font-size:.72rem;color:${m.color}"></i>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.83rem;word-break:break-word;color:${lblColor}">${esc(_actLabel(a.label))}</div>
+        ${errBlock}
+      </div>
+      <div style="font-size:.72rem;color:var(--muted);white-space:nowrap;flex-shrink:0;margin-top:2px;cursor:default" title="${dt ? dt.toLocaleString() : ''}">${ago}</div>
+    </div>`;
+  }).join('');
+}
+
+async function renderDashActivity() {
+  const el = document.getElementById('dash-activity');
+  if (!el) return;
+  try {
+    const { items, total } = await api('GET', '/api/activity?limit=20&exclude=backup');
+    if (!items.length) {
+      el.innerHTML = `<div class="section-label" style="margin-bottom:10px">${t('dash.activity_title')}</div>
+        <div class="card" style="color:var(--muted);font-size:.85rem;padding:16px;text-align:center">
+          <i class="fas fa-clock-rotate-left" style="margin-right:6px"></i>${t('dash.activity_empty')}
+        </div>`;
+      return;
+    }
+    const clearBtn = `<button class="btn btn-ghost btn-sm" style="font-size:.72rem;padding:2px 8px;margin-left:auto"
+      onclick="clearActivityLog()" title="${t('dash.activity_clear')}">
+      <i class="fas fa-trash-can" style="font-size:.65rem"></i></button>`;
+    el.innerHTML = `
+      <div class="section-label" style="margin-bottom:10px;display:flex;align-items:center">
+        <span>${t('dash.activity_title')}</span>
+        ${total > 20 ? `<span style="font-size:.72rem;color:var(--muted);margin-left:6px">(${total})</span>` : ''}
+        ${clearBtn}
+      </div>
+      <div class="card" style="padding:4px 14px">${_actRows(items)}</div>`;
+  } catch(e) { el.innerHTML = ''; }
+}
+
+async function renderDashBackupLog() {
+  const el = document.getElementById('dash-backup-log');
+  if (!el) return;
+  try {
+    const { items, total } = await api('GET', '/api/activity?limit=20&category=backup');
+    if (!items.length) {
+      el.innerHTML = `<div class="section-label" style="margin-bottom:10px">${t('dash.backup_log_title')}</div>
+        <div class="card" style="color:var(--muted);font-size:.85rem;padding:16px;text-align:center">
+          <i class="fas fa-cloud-arrow-up" style="margin-right:6px"></i>${t('dash.backup_log_empty')}
+        </div>`;
+      return;
+    }
+    const clearBtn = `<button class="btn btn-ghost btn-sm" style="font-size:.72rem;padding:2px 8px;margin-left:auto"
+      onclick="clearBackupLog()" title="${t('dash.backup_log_clear')}">
+      <i class="fas fa-trash-can" style="font-size:.65rem"></i></button>`;
+    el.innerHTML = `
+      <div class="section-label" style="margin-bottom:10px;display:flex;align-items:center">
+        <span>${t('dash.backup_log_title')}</span>
+        ${total > 20 ? `<span style="font-size:.72rem;color:var(--muted);margin-left:6px">(${total})</span>` : ''}
+        ${clearBtn}
+      </div>
+      <div class="card" style="padding:4px 14px">${_actRows(items)}</div>`;
+  } catch(e) { el.innerHTML = ''; }
+}
+
+function _actLabel(raw) {
+  try {
+    const d = JSON.parse(raw);
+    if (!d._i18n) return raw;
+    let s = t(d._i18n);
+    Object.entries(d).forEach(([k, v]) => { if (k !== '_i18n') s = s.replaceAll('${' + k + '}', v ?? ''); });
+    return s;
+  } catch { return raw; }
+}
+
+function _actHasErrors(raw) {
+  try { const d = JSON.parse(raw); return d._i18n?.includes('_err') || (d.e && d.e > 0); }
+  catch { return /erreur\(s\)|error\(s\)|\berreur\b|\berror\b/i.test(raw); }
+}
+
+function _actErrorDetails(raw) {
+  try { const d = JSON.parse(raw); return (d.errors && d.errors.length) ? d.errors : null; }
+  catch { return null; }
+}
+
+function _actAgo(dt) {
+  const diff = Math.floor((Date.now() - dt.getTime()) / 1000);
+  const _a = (k, n) => t('dash.' + k).replace('${n}', n);
+  if (diff < 60)    return _a('ago_sec',  diff);
+  if (diff < 3600)  return _a('ago_min',  Math.floor(diff / 60));
+  if (diff < 86400) return _a('ago_hour', Math.floor(diff / 3600));
+  return _a('ago_day', Math.floor(diff / 86400));
+}
+
+async function clearActivityLog() {
+  if (!await confirmModal(t('dash.activity_clear_confirm'), { danger: true })) return;
+  await api('DELETE', '/api/activity?exclude=backup');
+  renderDashActivity();
+}
+
+async function clearBackupLog() {
+  if (!await confirmModal(t('dash.backup_log_clear_confirm'), { danger: true })) return;
+  await api('DELETE', '/api/activity?category=backup');
+  renderDashBackupLog();
+}
+
+async function _logActivity(category, action, label) {
+  try { await api('POST', '/api/activity', { category, action, label }); } catch(_) {}
+}
+
+function _invRowHtml(item) {
+  const specs = [];
+  if (item.ebc != null) specs.push(`<span class="badge badge-malt" style="font-size:.7rem">EBC ${item.ebc}</span>`);
+  if (item.alpha != null) specs.push(`<span class="badge badge-houblon" style="font-size:.7rem">α ${item.alpha}%</span>`);
+  if (item.price_per_unit != null) specs.push(`<span class="badge" style="font-size:.7rem;background:rgba(34,197,94,.12);color:var(--success)"><i class="fas fa-euro-sign" style="font-size:.6rem"></i> ${item.price_per_unit.toFixed(2)}/${INV_PRICE_LABELS()[item.category]||t('inv.unit_unite')}</span>`);
+  const thresh  = getThresh(item.category);
+  const isEmpty = item.quantity <= 0;
+  let isLow = false;
+  if (!isEmpty) {
+    if (item.min_stock != null) {
+      isLow = item.quantity < item.min_stock;
+    } else if (item.category === 'levure') {
+      isLow = item.quantity < thresh;
+    } else if (item.category === 'autre') {
+      const autreUnits = (appSettings.thresholds || {}).autre_units || { g: 100 };
+      const unitThresh = autreUnits[item.unit];
+      isLow = unitThresh != null && item.quantity < unitThresh;
+    } else {
+      const qtyG = item.unit === 'kg' ? item.quantity * 1000 : item.quantity;
+      isLow = qtyG < thresh;
+    }
+  }
+  const qtyColor = isEmpty ? 'var(--danger)' : isLow ? '#f59e0b' : 'var(--text)';
+  const archIcon = item.archived ? 'box-open' : 'box-archive';
+  let expiryBadge = '';
+  if (item.expiry_date) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const exp   = new Date(item.expiry_date); exp.setHours(0,0,0,0);
+    const days  = Math.round((exp - today) / 86400000);
+    if (days < 0) {
+      expiryBadge = '<div style="margin-top:2px"><span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:rgba(239,68,68,.15);color:var(--danger);font-weight:600"><i class="fas fa-skull-crossbones" style="font-size:.6rem;margin-right:2px"></i>' + t('inv.expiry_expired') + '</span></div>';
+    } else if (days <= 30) {
+      expiryBadge = '<div style="margin-top:2px"><span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:rgba(245,158,11,.15);color:#f59e0b;font-weight:600"><i class="fas fa-clock" style="font-size:.6rem;margin-right:2px"></i>' + t('inv.expiry_soon').replace('${d}', days) + '</span></div>';
+    }
+  }
+  const houbCi = item.category === 'houblon' ? (S.catalog||[]).find(c=>c.category==='houblon'&&c.name===item.name) : null;
+  const aromaHtml = (houbCi && houbCi.aroma_spec) ? `<div style="font-size:.72rem;color:var(--muted);font-style:italic;line-height:1.3;margin-top:1px">${esc(houbCi.aroma_spec)}</div>` : '';
+  const viabHtml = (() => {
+    if (item.category !== 'levure') return '';
+    const r = _yeastViability(item.yeast_mfg_date, item.yeast_open_date, item.yeast_generation);
+    if (!r) return '';
+    const c = r.pct >= 75 ? 'var(--hop)' : r.pct >= 50 ? 'var(--amber)' : r.pct >= 25 ? 'var(--warning)' : 'var(--danger)';
+    const gen = r.gen > 1 ? ` · G${r.gen}` : '';
+    return `<div style="margin-top:3px"><span style="font-size:.7rem;padding:1px 6px;border-radius:8px;background:${c}18;color:${c};border:1px solid ${c}44;font-weight:600"><i class="fas fa-flask" style="font-size:.6rem;margin-right:2px"></i>${r.pct}%${gen}</span></div>`;
+  })();
+  return `<tr class="inv-row ${item.archived ? 'archived-item' : ''}" draggable="true" data-id="${item.id}">
+        <td style="padding:2px 4px;width:18px"><span class="inv-drag-handle" onmousedown="_invDragFromHandle=true" onmouseup="_invDragFromHandle=false"><i class="fas fa-grip-vertical"></i></span></td>
+        <td style="padding:0;width:44px"><label class="inv-cb-label" onclick="event.stopPropagation()"><input type="checkbox" class="inv-cb" data-id="${item.id}" onchange="_invSelToggle(${item.id},this.checked)"></label></td>
+        <td><strong>${esc(item.name)}</strong>${aromaHtml}${item.notes ? `<div style="font-size:.78rem;color:var(--muted)">${esc(item.notes)}</div>` : ''}${expiryBadge}${viabHtml}</td>
+        <td><span class="badge badge-${item.category}">${catLabel(item.category)}</span></td>
+        <td class="col-hide-sm" style="color:var(--muted);font-size:.85rem">${esc(item.origin||'')}</td>
+        <td class="col-hide-sm">${specs.join(' ')}</td>
+        <td style="text-align:right">
+          <div style="display:inline-flex;align-items:center;gap:6px">
+            <div class="qty-ctrl">
+              <button class="qty-btn" onclick="adjustQty(${item.id},-1)">−</button>
+              <input class="qty-inp" type="number" value="${item.quantity}" min="0" step="0.001"
+                     onchange="setQty(${item.id},parseFloat(this.value))" style="color:${qtyColor}">
+              <span class="qty-unit">${esc(item.unit)}</span>
+              <button class="qty-btn" onclick="adjustQty(${item.id},1)">+</button>
+            </div>
+          </div>
+        </td>
+        <td style="text-align:right">
+          <div style="display:flex;gap:4px;justify-content:flex-end">
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="withBtn(this,()=>archiveItem('inv',${item.id},${item.archived?0:1}))" title="${item.archived?t('common.restore'):t('common.archive')}"><i class="fas fa-${archIcon}"></i></button>
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="editInventoryItem(${item.id})" title="${t('common.edit')}"><i class="fas fa-pen"></i></button>
+            <button class="btn btn-icon btn-danger btn-sm" onclick="deleteInventoryItem(${item.id})" title="${t('common.delete')}"><i class="fas fa-trash"></i></button>
+          </div>
+        </td>
+      </tr>`;
+}
+
+let _invSel = new Set();
+let _invDragFromHandle = false;
+let _invAC = null;
+
+function renderInventaire() {
+  const q = (document.getElementById('inv-search')?.value || '').toLowerCase().trim();
+  const catFiltered = S.inventory.filter(i => invFilter === 'all' || i.category === invFilter);
+  const catActive = catFiltered.filter(i => !i.archived);
+  const catArch   = catFiltered.filter(i => i.archived);
+  const all    = showArchivedInv ? [...catActive, ...catArch] : catActive;
+  const shown  = q ? all.filter(i => {
+    const hay = (i.name + ' ' + (i.origin || '') + ' ' + (i.notes || '')).toLowerCase();
+    return hay.includes(q);
+  }) : all;
+
+  const tbody = document.getElementById('inv-body');
+  const emptyEl = document.getElementById('inv-empty');
+  emptyEl.style.display = shown.length ? 'none' : 'block';
+  if (!shown.length) emptyEl.querySelector('p').textContent = q ? t('inv.search_empty').replace('${q}', q) : t('inv.empty_all');
+  const invCount = document.getElementById('inv-search-count');
+  if (invCount) invCount.textContent = q
+    ? t('common.n_results_of').replace('${n}', shown.length).replace('${total}', all.length)
+    : t('common.n_results').replace('${n}', shown.length);
+
+  _patchList(tbody, shown, item => item.id, _invRowHtml);
+
+  // Restore checkbox states after patch
+  tbody.querySelectorAll('.inv-cb').forEach(cb => {
+    cb.checked = _invSel.has(parseInt(cb.dataset.id));
+  });
+  _invUpdateBulkBar();
+
+  // Drag-and-drop reorder
+  if (_invAC) _invAC.abort();
+  _invAC = new AbortController();
+  const { signal: invSig } = _invAC;
+  let invDragSrcIdx = null;
+  tbody.querySelectorAll('tr.inv-row').forEach((row, idx) => {
+    row.addEventListener('dragstart', e => {
+      if (!_invDragFromHandle) { e.preventDefault(); return; }
+      _invDragFromHandle = false;
+      invDragSrcIdx = idx;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(idx));
+    }, { signal: invSig });
+    row.addEventListener('dragend', () => { row.classList.remove('dragging'); invDragSrcIdx = null; }, { signal: invSig });
+    row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('drag-over'); }, { signal: invSig });
+    row.addEventListener('dragleave', e => { if (!row.contains(e.relatedTarget)) row.classList.remove('drag-over'); }, { signal: invSig });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      if (invDragSrcIdx === null || invDragSrcIdx === idx) return;
+      const srcIdx = invDragSrcIdx;
+      const [moved] = shown.splice(srcIdx, 1);
+      shown.splice(idx, 0, moved);
+      // Mettre à jour sort_order dans S.inventory ET retrier le tableau
+      shown.forEach((item, i) => {
+        const si = S.inventory.findIndex(x => x.id === item.id);
+        if (si !== -1) S.inventory[si].sort_order = i;
+      });
+      S.inventory.sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+      saveInvOrder();
+      renderInventaire();
+    }, { signal: invSig });
+  });
+
+  // Stats (active only)
+  const activeAll = S.inventory.filter(i => !i.archived);
+  const counts = { malt:0, houblon:0, levure:0, autre:0 };
+  activeAll.forEach(i => counts[i.category] = (counts[i.category]||0)+1);
+
+  const maltKgTotal = activeAll.filter(i => i.category === 'malt')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.unit === 'g' ? i.quantity / 1000 : 0), 0);
+  const hopGTotal = activeAll.filter(i => i.category === 'houblon')
+    .reduce((s, i) => s + (i.unit === 'g' ? i.quantity : i.unit === 'kg' ? i.quantity * 1000 : 0), 0);
+  const maltQtyLabel = maltKgTotal > 0 ? (maltKgTotal >= 1 ? maltKgTotal.toFixed(2) + ' kg' : (maltKgTotal * 1000).toFixed(0) + ' g') : '';
+  const hopQtyLabel  = hopGTotal  > 0 ? (hopGTotal >= 1000 ? (hopGTotal / 1000).toFixed(2) + ' kg' : hopGTotal.toFixed(0) + ' g') : '';
+
+  document.getElementById('inv-stats').innerHTML = `
+    <div class="stat"><div class="stat-val" style="color:var(--text)">${activeAll.length}</div><div class="stat-lbl">${t('inv.total_articles')}</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--malt)">${counts.malt}</div><div class="stat-lbl">${t('cat.malts')}</div>${maltQtyLabel ? `<div style="font-size:.78rem;color:var(--malt);opacity:.75;margin-top:3px">${maltQtyLabel}</div>` : ''}</div>
+    <div class="stat"><div class="stat-val" style="color:var(--hop)">${counts.houblon}</div><div class="stat-lbl">${t('cat.houblons')}</div>${hopQtyLabel ? `<div style="font-size:.78rem;color:var(--hop);opacity:.75;margin-top:3px">${hopQtyLabel}</div>` : ''}</div>
+    <div class="stat"><div class="stat-val" style="color:var(--yeast)">${counts.levure}</div><div class="stat-lbl">${t('cat.levures')}</div></div>
+    <div class="stat"><div class="stat-val" style="color:var(--other)">${counts.autre}</div><div class="stat-lbl">${t('cat.autres')}</div></div>`;
+
+  // Archive button
+  const archBtn = document.getElementById('inv-arch-btn');
+  if (archBtn) {
+    const archCount = S.inventory.filter(i => i.archived).length;
+    archBtn.textContent = showArchivedInv ? t('inv.show_archives') : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
+  }
+}
+
+let _saveInvOrderTimer = null;
+function saveInvOrder() {
+  clearTimeout(_saveInvOrderTimer);
+  _saveInvOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/inventory/reorder',
+        S.inventory.map(item => ({ id: item.id, sort_order: item.sort_order ?? 9999 })));
+    } catch(e) { toast(t('inv.err_save_order'), 'error'); }
+  }, 600);
+}
+
+function setInvFilter(cat, btn) {
+  invFilter = cat;
+  document.querySelectorAll('#inv-filters .filter-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderInventaire();
+}
+
+const INV_PRICE_LABELS = () => ({ malt:'€/kg', houblon:'€/g', levure: t('inv.price_per_sachet'), autre: t('inv.price_per_unite') });
+function invCatChange() {
+  const cat = document.getElementById('inv-f-cat').value;
+  document.getElementById('inv-f-ebc-wrap').style.display    = cat === 'malt'    ? '' : 'none';
+  document.getElementById('inv-f-alpha-wrap').style.display  = cat === 'houblon' ? '' : 'none';
+  document.getElementById('inv-f-aroma-wrap').style.display  = cat === 'houblon' ? '' : 'none';
+  document.getElementById('inv-yeast-section').style.display = cat === 'levure'  ? '' : 'none';
+  const priceLabel = document.getElementById('inv-f-price-lbl');
+  if (priceLabel) priceLabel.textContent = `${t('inv.field_price_label')} (${INV_PRICE_LABELS()[cat] || '€/'+t('inv.unit_unite')})`;
+  const nameInput = document.getElementById('inv-f-name');
+  if (nameInput && document.activeElement === nameInput) invNameSuggest(nameInput);
+  if (cat === 'levure') invCalcViability();
+}
+
+// ── Yeast viability calculator ─────────────────────────────────────────────
+// Formula: viability% = 97 × e^(-0.008 × days_since_ref)
+// Generation penalty: ×0.85 per generation beyond G1
+// Source: Beersmith / Mr. Malty standard model
+function _yeastViability(mfgDate, openDate, generation) {
+  const refStr = openDate || mfgDate;
+  if (!refStr) return null;
+  const days = Math.max(0, Math.floor((Date.now() - new Date(refStr + 'T00:00:00')) / 86400000));
+  let v = 97 * Math.exp(-0.008 * days);
+  v = Math.max(1, Math.min(97, v));
+  const gen = Math.max(1, parseInt(generation) || 1);
+  if (gen > 1) v *= Math.pow(0.85, gen - 1);
+  return { pct: Math.round(v), days, gen };
+}
+
+function _yeastViaHtml(pct, days, gen) {
+  const color  = pct >= 90 ? 'var(--hop)' : pct >= 75 ? 'var(--success)' : pct >= 50 ? 'var(--amber)' : pct >= 25 ? 'var(--warning)' : 'var(--danger)';
+  const key    = pct >= 90 ? 'excel' : pct >= 75 ? 'good' : pct >= 50 ? 'ok' : pct >= 25 ? 'low' : 'poor';
+  const label  = t(`inv.yeast_via_${key}`);
+  const ageStr = days < 14
+    ? t('inv.yeast_age_days').replace('${n}', days)
+    : days < 60
+      ? t('inv.yeast_age_weeks').replace('${n}', Math.round(days / 7))
+      : t('inv.yeast_age_months').replace('${n}', Math.round(days / 30));
+  const genBadge = gen > 1
+    ? `<span style="margin-left:8px;font-size:.72rem;padding:1px 6px;border-radius:8px;background:rgba(251,191,36,.18);color:var(--amber)">G${gen}</span>` : '';
+  return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:${color}14;border:1px solid ${color}44;border-radius:8px">
+    <div style="font-size:1.6rem;font-weight:800;color:${color};min-width:48px;text-align:center">${pct}%</div>
+    <div>
+      <div style="font-size:.83rem;font-weight:600;color:${color}">${label}${genBadge}</div>
+      <div style="font-size:.74rem;color:var(--muted);margin-top:2px">${t('inv.yeast_viability')} · ${ageStr}</div>
+    </div>
+    <div style="margin-left:auto">
+      <div style="width:48px;height:48px;border-radius:50%;background:conic-gradient(${color} ${pct * 3.6}deg, var(--border) 0deg);display:flex;align-items:center;justify-content:center">
+        <div style="width:34px;height:34px;border-radius:50%;background:var(--card2)"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function invCalcViability() {
+  const el = document.getElementById('inv-yeast-via');
+  if (!el) return;
+  const mfg  = document.getElementById('inv-f-ymfg')?.value;
+  const open = document.getElementById('inv-f-yopen')?.value;
+  const gen  = document.getElementById('inv-f-ygen')?.value;
+  if (!mfg && !open) {
+    el.innerHTML = `<div style="font-size:.78rem;color:var(--muted);padding:6px 0">${t('inv.yeast_via_nodate')}</div>`;
+    return;
+  }
+  const r = _yeastViability(mfg, open, gen);
+  el.innerHTML = _yeastViaHtml(r.pct, r.days, r.gen);
+}
+
+async function adjustQty(id, delta) {
+  const item = S.inventory.find(i => i.id === id);
+  if (!item) return;
+  const step = item.unit === 'g' || item.unit === 'mL' ? 100 : 0.1;
+  const newQty = Math.max(0, parseFloat((item.quantity + delta * step).toFixed(3)));
+  await setQty(id, newQty);
+}
+async function setQty(id, qty) {
+  try {
+    const updated = await api('PATCH', `/api/inventory/${id}/qty`, { quantity: qty });
+    const idx = S.inventory.findIndex(i => i.id === id);
+    if (idx !== -1) S.inventory[idx] = updated;
+    renderInventaire();
+  } catch(e) { toast(t('inv.err_update_qty'), 'error'); }
+}
+
+function openInvModal(item = null) {
+  document.getElementById('inv-f-id').value    = item ? item.id : '';
+  document.getElementById('inv-f-name').value  = item ? item.name : '';
+  document.getElementById('inv-f-cat').value   = item ? item.category : 'malt';
+  document.getElementById('inv-f-qty').value   = item ? item.quantity : 0;
+  document.getElementById('inv-f-unit').value  = item ? item.unit : 'kg';
+  document.getElementById('inv-f-ebc').value   = item ? (item.ebc||'') : '';
+  document.getElementById('inv-f-alpha').value = item ? (item.alpha||'') : '';
+  document.getElementById('inv-f-origin').value= item ? (item.origin||'') : '';
+  const _ci = item && item.category === 'houblon' ? (S.catalog||[]).find(c => c.category === 'houblon' && c.name === item.name) : null;
+  document.getElementById('inv-f-aroma').value = _ci ? (_ci.aroma_spec||'') : '';
+  document.getElementById('inv-f-notes').value     = item ? (item.notes||'') : '';
+  document.getElementById('inv-f-price').value     = item ? (item.price_per_unit ?? '') : '';
+  document.getElementById('inv-f-min-stock').value = item ? (item.min_stock ?? '') : '';
+  document.getElementById('inv-f-expiry').value    = item ? (item.expiry_date || '') : '';
+  document.getElementById('inv-f-ytype').value     = item ? (item.yeast_type || '') : '';
+  document.getElementById('inv-f-ymfg').value      = item ? (item.yeast_mfg_date || '') : '';
+  document.getElementById('inv-f-yopen').value     = item ? (item.yeast_open_date || '') : '';
+  document.getElementById('inv-f-ygen').value      = item ? (item.yeast_generation || 1) : 1;
+  document.getElementById('inv-modal-title').textContent = item ? t('inv.modal_title_edit') : t('inv.modal_title_add');
+  invCatChange();
+  openModal('inv-modal');
+}
+
+function editInventoryItem(id) { openInvModal(S.inventory.find(i => i.id === id)); }
+
+function invNameSuggest(input) {
+  const q   = input.value.toLowerCase();
+  if (!q) { closeInvSuggest(); return; }
+  const cat = document.getElementById('inv-f-cat').value;
+  const sug = document.getElementById('inv-name-sug');
+  _invSugItems = [];
+  closeInvSuggest();
+  const matches = S.catalog.filter(c =>
+    c.category === cat && c.name.toLowerCase().includes(q)
+  ).slice(0, 30);
+  if (!matches.length) return;
+  const groups = {};
+  matches.forEach(c => {
+    const g = c.subcategory || t('cat.autres');
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(c);
+  });
+  let html = '';
+  Object.entries(groups).forEach(([grp, items]) => {
+    html += `<div class="ing-suggest-cat">${esc(grp)}</div>`;
+    items.forEach(item => {
+      const specs = [];
+      if (item.ebc   != null) specs.push(`EBC ${item.ebc}`);
+      if (item.alpha != null) specs.push(`α ${item.alpha}%`);
+      const specTxt = specs.length ? ` <span style="color:var(--muted);font-size:.72rem">${specs.join(' · ')}</span>` : '';
+      const _ii = _invSugItems.push(item) - 1;
+      html += `<div class="ing-suggest-item" onmousedown="applyInvCatalog(_invSugItems[${_ii}])">
+        <span>${esc(item.name)}${specTxt}</span>
+      </div>`;
+    });
+  });
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+
+function closeInvSuggest() {
+  document.getElementById('inv-name-sug').classList.remove('open');
+}
+
+function applyInvCatalog(item) {
+  document.getElementById('inv-f-name').value  = item.name;
+  document.getElementById('inv-f-cat').value   = item.category;
+  if (item.ebc   != null) document.getElementById('inv-f-ebc').value   = item.ebc;
+  if (item.alpha != null) document.getElementById('inv-f-alpha').value = item.alpha;
+  if (item.aroma_spec != null) document.getElementById('inv-f-aroma').value = item.aroma_spec;
+  if (item.default_unit && !document.getElementById('inv-f-id').value)
+    document.getElementById('inv-f-unit').value = item.default_unit;
+  invCatChange();
+  closeInvSuggest();
+}
+
+async function saveInventoryItem() {
+  const name = document.getElementById('inv-f-name').value.trim();
+  if (!name) { toast(t('inv.name_required'), 'error'); return; }
+  const id  = document.getElementById('inv-f-id').value;
+  const cat = document.getElementById('inv-f-cat').value;
+  const payload = {
+    name, category: cat,
+    quantity: parseFloat(document.getElementById('inv-f-qty').value) || 0,
+    unit:     document.getElementById('inv-f-unit').value,
+    origin:   document.getElementById('inv-f-origin').value.trim() || null,
+    ebc:           document.getElementById('inv-f-ebc').value   ? parseFloat(document.getElementById('inv-f-ebc').value)   : null,
+    alpha:         document.getElementById('inv-f-alpha').value ? parseFloat(document.getElementById('inv-f-alpha').value) : null,
+    notes:         document.getElementById('inv-f-notes').value.trim() || null,
+    price_per_unit:document.getElementById('inv-f-price').value ? parseFloat(document.getElementById('inv-f-price').value) : null,
+    min_stock:        document.getElementById('inv-f-min-stock').value ? parseFloat(document.getElementById('inv-f-min-stock').value) : null,
+    expiry_date:      document.getElementById('inv-f-expiry').value || null,
+    yeast_type:       cat === 'levure' ? (document.getElementById('inv-f-ytype').value.trim() || null) : null,
+    yeast_mfg_date:   cat === 'levure' ? (document.getElementById('inv-f-ymfg').value || null) : null,
+    yeast_open_date:  cat === 'levure' ? (document.getElementById('inv-f-yopen').value || null) : null,
+    yeast_generation: cat === 'levure' ? (parseInt(document.getElementById('inv-f-ygen').value) || 1) : null,
+  };
+  try {
+    if (id) {
+      const updated = await api('PUT', `/api/inventory/${id}`, payload);
+      const idx = S.inventory.findIndex(i => i.id === parseInt(id));
+      if (idx !== -1) S.inventory[idx] = updated;
+    } else {
+      let created;
+      try {
+        created = await api('POST', '/api/inventory', payload);
+      } catch(e) {
+        if (e.error === 'duplicate') {
+          if (!await confirmModal(t('inv.duplicate_confirm').replace('${name}', e.name))) return;
+          created = await api('POST', '/api/inventory?force=1', payload);
+        } else throw e;
+      }
+      S.inventory.push(created);
+    }
+    // Mettre à jour aroma_spec dans le catalogue si houblon
+    if (cat === 'houblon') {
+      const aromaVal = document.getElementById('inv-f-aroma').value.trim() || null;
+      const catItem = (S.catalog||[]).find(c => c.category === 'houblon' && c.name === payload.name);
+      if (catItem) {
+        const updated = await api('PUT', `/api/catalog/${catItem.id}`, { ...catItem, aroma_spec: aromaVal });
+        const ci = S.catalog.findIndex(c => c.id === catItem.id);
+        if (ci !== -1) S.catalog[ci] = updated;
+      }
+    }
+    closeModal('inv-modal');
+    renderInventaire();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast(id ? t('inv.updated') : t('inv.added'), 'success');
+  } catch(e) { toast(t('inv.err_save'), 'error'); }
+}
+
+async function deleteInventoryItem(id) {
+  if (!await confirmModal(t('common.confirm_delete'), { danger: true })) return;
+  try {
+    await api('DELETE', `/api/inventory/${id}`);
+    S.inventory = S.inventory.filter(i => i.id !== id);
+    renderInventaire();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast(t('inv.deleted'), 'success');
+  } catch(e) { toast(t('common.delete') + ' — ' + t('common.error'), 'error'); }
+}
+
+function _invSelToggle(id, checked) {
+  if (checked) _invSel.add(id); else _invSel.delete(id);
+  _invUpdateBulkBar();
+}
+
+function _invSelAll(checked) {
+  const tbody = document.getElementById('inv-body');
+  tbody.querySelectorAll('.inv-cb').forEach(cb => {
+    const id = parseInt(cb.dataset.id);
+    cb.checked = checked;
+    if (checked) _invSel.add(id); else _invSel.delete(id);
+  });
+  _invUpdateBulkBar();
+}
+
+function _invUpdateBulkBar() {
+  const bar = document.getElementById('inv-bulk-bar');
+  const allCb = document.getElementById('inv-sel-all');
+  const n = _invSel.size;
+  if (bar) {
+    bar.style.display = n > 0 ? 'flex' : 'none';
+    const lbl = document.getElementById('inv-bulk-count');
+    if (lbl) lbl.textContent = t('inv.bulk_selected').replace('${n}', n);
+  }
+  if (allCb) {
+    const total = document.getElementById('inv-body')?.querySelectorAll('.inv-cb').length ?? 0;
+    allCb.checked = total > 0 && n === total;
+    allCb.indeterminate = n > 0 && n < total;
+  }
+}
+
+function clearInvSel() {
+  _invSel.clear();
+  document.querySelectorAll('.inv-cb').forEach(cb => cb.checked = false);
+  const allCb = document.getElementById('inv-sel-all');
+  if (allCb) { allCb.checked = false; allCb.indeterminate = false; }
+  _invUpdateBulkBar();
+}
+
+async function deleteInvSelection() {
+  if (!_invSel.size) return;
+  const n = _invSel.size;
+  if (!await confirmModal(t('inv.bulk_delete_confirm').replace('${n}', n), { danger: true })) return;
+  const ids = [..._invSel];
+  for (const id of ids) {
+    try { await api('DELETE', `/api/inventory/${id}`); } catch(_) {}
+  }
+  S.inventory = await api('GET', '/api/inventory');
+  _invSel.clear();
+  renderInventaire();
+  const stats = await api('GET', '/api/stats');
+  updateNavBadges(stats);
+  toast(t('inv.bulk_deleted').replace('${n}', ids.length), 'success');
+}
+
+async function applyInvSelectionStock() {
+  if (!_invSel.size) return;
+  const qty = parseFloat(document.getElementById('inv-bulk-qty')?.value);
+  if (isNaN(qty) || qty < 0) return;
+  const ids = [..._invSel];
+  for (const id of ids) {
+    const item = S.inventory.find(i => i.id === id);
+    if (!item) continue;
+    try { await api('PUT', `/api/inventory/${id}`, { ...item, quantity: qty }); } catch(_) {}
+  }
+  S.inventory = await api('GET', '/api/inventory');
+  clearInvSel();
+  renderInventaire();
+  toast(t('inv.bulk_stock_applied').replace('${n}', ids.length), 'success');
+}
+

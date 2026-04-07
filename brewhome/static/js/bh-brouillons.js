@@ -1,0 +1,994 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// BROUILLONS
+// ══════════════════════════════════════════════════════════════════════════════
+let _currentDraftId        = null;
+let _currentDraftTargetDate = null;
+let _currentDraftEventLabel = null;
+let _draftSaveTimer        = null;
+let _draftIngredients      = [];   // [{_rid, category, name, quantity, unit}]
+let _draftIngSugItems      = [];   // cache for suggest clicks
+let _draftIngRowId         = 0;
+let _pendingDraftId        = null; // draft_id à lier à la prochaine recette créée
+let _draftMode             = 'view';
+
+// ── Mode vue / édition ────────────────────────────────────────────────────────
+function setDraftMode(mode) {
+  _draftMode = mode;
+  const formPanel = document.getElementById('draft-form-panel');
+  const viewPanel = document.getElementById('draft-view-panel');
+  const actions   = document.getElementById('draft-actions');
+  if (!formPanel || !viewPanel || !actions) return;
+
+  if (mode === 'view') {
+    formPanel.style.display = 'none';
+    viewPanel.style.display = '';
+    renderDraftView();
+    actions.innerHTML = `
+      <button class="btn btn-ghost btn-sm draft-back-btn" onclick="_showEditor(false)" title="${t('common.back')}"><i class="fas fa-arrow-left"></i></button>
+      <button class="btn btn-primary" onclick="setDraftMode('edit')"><i class="fas fa-pen"></i> ${t('draft.mode_edit')}</button>
+      <button class="btn btn-ghost" onclick="draftToRecipe()"><i class="fas fa-scroll"></i> ${t('draft.to_recipe')}</button>
+      <button class="btn btn-ghost" id="draft-ai-btn" onclick="askGeminiForDraft()"
+        style="color:#8b5cf6;border-color:rgba(139,92,246,.4)">
+        <i class="fas fa-wand-magic-sparkles"></i> ${t('draft.ai_suggest')}
+      </button>
+      <label title="${t('draft.ai_use_stock_hint')}" style="display:flex;align-items:center;gap:5px;font-size:.82rem;cursor:pointer;user-select:none;color:var(--muted)">
+        <input type="checkbox" id="draft-ai-use-stock"
+          onchange="localStorage.setItem('draft-ai-use-stock',this.checked)"
+          ${localStorage.getItem('draft-ai-use-stock')==='true'?'checked':''}>
+        ${t('draft.ai_use_stock')}
+      </label>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--danger)"
+        onclick="deleteDraft(_currentDraftId)"><i class="fas fa-trash"></i> ${t('common.delete')}</button>`;
+  } else {
+    formPanel.style.display = '';
+    viewPanel.style.display = 'none';
+    actions.innerHTML = `
+      <button class="btn btn-ghost btn-sm draft-back-btn" onclick="_showEditor(false)" title="${t('common.back')}"><i class="fas fa-arrow-left"></i></button>
+      <button class="btn btn-ghost" onclick="setDraftMode('view')"><i class="fas fa-eye"></i> ${t('draft.mode_view')}</button>
+      <button class="btn btn-ghost" id="draft-ai-btn" onclick="askGeminiForDraft()"
+        style="color:#8b5cf6;border-color:rgba(139,92,246,.4)">
+        <i class="fas fa-wand-magic-sparkles"></i> ${t('draft.ai_suggest')}
+      </button>
+      <label title="${t('draft.ai_use_stock_hint')}" style="display:flex;align-items:center;gap:5px;font-size:.82rem;cursor:pointer;user-select:none;color:var(--muted)">
+        <input type="checkbox" id="draft-ai-use-stock"
+          onchange="localStorage.setItem('draft-ai-use-stock',this.checked)"
+          ${localStorage.getItem('draft-ai-use-stock')==='true'?'checked':''}>
+        ${t('draft.ai_use_stock')}
+      </label>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--danger)"
+        onclick="deleteDraft(_currentDraftId)"><i class="fas fa-trash"></i> ${t('common.delete')}</button>`;
+  }
+}
+
+function renderDraftView() {
+  const panel = document.getElementById('draft-view-panel');
+  const d = S.drafts.find(x => x.id === _currentDraftId);
+  if (!panel || !d) return;
+
+  const color = d.color || '#ff9500';
+  const ings  = _draftIngredients;
+
+  // Dates
+  let bannerHtml = '';
+  if (d.target_date) {
+    const td      = new Date(d.target_date + 'T00:00:00');
+    const today   = new Date(); today.setHours(0,0,0,0);
+    const brew    = new Date(td); brew.setDate(brew.getDate() - 30);
+    const diffEv  = Math.round((td   - today) / 86400000);
+    const diffBr  = Math.round((brew - today) / 86400000);
+    const fmtEv   = td.toLocaleDateString(_lang || 'fr',   { day:'numeric', month:'long', year:'numeric' });
+    const fmtBrew = brew.toLocaleDateString(_lang || 'fr', { day:'numeric', month:'long', year:'numeric' });
+    const cdBrew  = diffBr < 0 ? 'var(--danger)' : diffBr <= 7 ? 'var(--amber)' : 'var(--muted)';
+    const cdEvent = diffEv < 0 ? 'var(--danger)' : diffEv <= 14 ? 'var(--amber)' : '#10b981';
+    const cntBrew = diffBr === 0 ? t('cal.countdown_today') : diffBr > 0 ? t('cal.countdown_in').replace('${diff}', diffBr) : t('cal.countdown_ago').replace('${diff}', -diffBr);
+    bannerHtml = `<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:16px;
+      padding:10px 14px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.22);border-radius:10px;font-size:.82rem">
+      <div style="display:flex;align-items:center;gap:8px">
+        <i class="fas fa-fire-burner" style="color:var(--amber);width:14px;text-align:center"></i>
+        <span style="color:var(--muted)">${t('draft.brew_on')}</span>
+        <span style="font-weight:700;color:var(--amber)">${fmtBrew}</span>
+        <span style="font-size:.75rem;font-weight:700;color:${cdBrew};margin-left:auto">(${cntBrew})</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <i class="fas fa-calendar-star" style="color:#8b5cf6;width:14px;text-align:center"></i>
+        <span style="font-weight:600;color:#8b5cf6;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.event_label || '')}</span>
+        <span style="color:var(--muted);flex-shrink:0">${fmtEv}</span>
+        <span style="font-size:.75rem;font-weight:700;color:${cdEvent};flex-shrink:0">(${diffEv >= 0 ? t('cal.countdown_in').replace('${diff}', diffEv) : t('cal.countdown_past')})</span>
+      </div>
+    </div>`;
+  }
+
+  // Ingrédients par catégorie
+  const catDef = [
+    { key:'malt',    icon:'fa-wheat-awn',    color:'var(--malt)',  label:t('cat.malts') },
+    { key:'houblon', icon:'fa-seedling',     color:'var(--hop)',   label:t('cat.houblons') },
+    { key:'levure',  icon:'fa-circle-nodes', color:'var(--yeast)', label:t('cat.levures') },
+    { key:'autre',   icon:'fa-plus',         color:'var(--other)', label:t('cat.autres') },
+  ];
+  let ingHtml = '';
+  catDef.forEach(({ key, icon, color: col, label }) => {
+    const rows = ings.filter(i => i.category === key && i.name);
+    if (!rows.length) return;
+    ingHtml += `<div style="margin-bottom:8px">
+      <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${col};margin-bottom:4px">
+        <i class="fas ${icon}"></i> ${label}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        ${rows.map(i => `<div style="display:flex;justify-content:space-between;font-size:.85rem;padding:3px 8px;background:var(--card2);border-radius:6px">
+          <span>${esc(i.name)}</span>
+          <span style="color:var(--muted)">${i.quantity != null ? i.quantity : ''} ${esc(i.unit || '')}</span>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  });
+
+  // Image
+  const imgHtml = d.image
+    ? `<img src="${d.image}" style="width:100%;max-width:320px;border-radius:12px;object-fit:cover;display:block;margin-bottom:16px">`
+    : '';
+
+  panel.innerHTML = `
+    <!-- En-tête -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+      <span style="width:14px;height:14px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      <h3 style="margin:0;font-size:1.25rem;font-weight:700">${esc(d.title || 'Sans titre')}</h3>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      ${d.style  ? `<span class="badge" style="background:rgba(245,158,11,.15);color:var(--amber)">${esc(d.style)}</span>` : ''}
+      ${d.volume ? `<span class="badge" style="background:var(--card2);color:var(--muted)">${d.volume} L</span>` : ''}
+    </div>
+
+    ${bannerHtml}
+    ${imgHtml}
+
+    ${ings.some(i => i.name) ? `
+    <div style="margin-bottom:16px">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">Ingrédients</div>
+      ${ingHtml}
+    </div>` : ''}
+
+    ${d.notes ? `
+    <div style="margin-bottom:8px">
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px">Notes & idées</div>
+      <div style="font-size:.88rem;line-height:1.6;white-space:pre-wrap;color:var(--text)">${esc(d.notes)}</div>
+    </div>` : ''}
+  `;
+}
+
+// ── Liste ─────────────────────────────────────────────────────────────────────
+function renderBrouillons() {
+  const list  = document.getElementById('draft-list');
+  const empty = document.getElementById('draft-list-empty');
+  if (!list) return;
+
+  const q = (document.getElementById('draft-search')?.value || '').toLowerCase();
+  const total = S.drafts.length;
+  const shown = q
+    ? S.drafts.filter(d =>
+        (d.title || '').toLowerCase().includes(q) ||
+        (d.style  || '').toLowerCase().includes(q))
+    : S.drafts;
+
+  const draftCount = document.getElementById('draft-search-count');
+  if (draftCount) draftCount.textContent = q
+    ? t('common.n_results_of').replace('${n}', shown.length).replace('${total}', total)
+    : t('common.n_results').replace('${n}', shown.length);
+
+  if (!shown.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    empty.innerHTML = q
+      ? `<i class="fas fa-magnifying-glass" style="font-size:2rem;display:block;margin-bottom:8px;opacity:.4"></i><p style="margin:0">${t('common.no_results')}</p>`
+      : `<i class="fas fa-book-open" style="font-size:2rem;display:block;margin-bottom:8px;opacity:.4"></i><p data-i18n="draft.empty" style="margin:0">${t('draft.empty')}</p>`;
+  } else {
+    empty.style.display = 'none';
+    list.innerHTML = shown.map(d => {
+      const color  = d.color || '#ff9500';
+      const modDate = d.updated_at ? new Date(d.updated_at).toLocaleDateString(_lang || 'fr', { day:'2-digit', month:'short' }) : '';
+      const active = d.id === _currentDraftId ? 'border-color:var(--accent)' : '';
+      let ingCount = 0;
+      try { ingCount = JSON.parse(d.ingredients || '[]').length; } catch(e) {}
+
+      // Date cible + date de brassage (J-30) + countdown
+      let dateLine = '';
+      if (d.target_date) {
+        const td      = new Date(d.target_date + 'T00:00:00');
+        const today   = new Date(); today.setHours(0,0,0,0);
+        const brew    = new Date(td); brew.setDate(brew.getDate() - 30);
+        const diffEv  = Math.round((td   - today) / 86400000);
+        const diffBr  = Math.round((brew - today) / 86400000);
+        const fmtEv   = td.toLocaleDateString(_lang || 'fr',   { day:'numeric', month:'short', year:'numeric' });
+        const fmtBrew = brew.toLocaleDateString(_lang || 'fr', { day:'numeric', month:'short', year:'numeric' });
+        const cdBrew  = diffBr < 0 ? 'var(--danger)' : diffBr <= 7 ? 'var(--amber)' : 'var(--muted)';
+        const cdEvent = diffEv < 0 ? 'var(--danger)' : diffEv <= 14 ? 'var(--amber)' : '#10b981';
+        const cntBrew = diffBr === 0 ? t('cal.countdown_today') : diffBr > 0 ? t('cal.countdown_in').replace('${diff}', diffBr) : t('cal.countdown_ago').replace('${diff}', -diffBr);
+        dateLine = `<div style="display:flex;flex-direction:column;gap:3px;margin-top:5px;padding-left:26px">
+          <div style="display:flex;align-items:center;gap:5px">
+            <i class="fas fa-fire-burner" style="color:var(--amber);font-size:.62rem;flex-shrink:0;width:10px;text-align:center"></i>
+            <span style="font-size:.71rem;color:var(--muted);flex-shrink:0">${t('draft.brew_on')}</span>
+            <span style="font-size:.71rem;font-weight:600;color:var(--amber)">${fmtBrew}</span>
+            <span style="font-size:.68rem;font-weight:700;color:${cdBrew}">(${cntBrew})</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <i class="fas fa-calendar-star" style="color:#8b5cf6;font-size:.62rem;flex-shrink:0;width:10px;text-align:center"></i>
+            <span style="font-size:.71rem;color:var(--muted);flex-shrink:0">${esc(d.event_label || t('cal.add_event'))}</span>
+            <span style="font-size:.71rem;color:#8b5cf6">${fmtEv}</span>
+            <span style="font-size:.68rem;font-weight:700;color:${cdEvent}">(${diffEv >= 0 ? t('cal.countdown_in').replace('${diff}', diffEv) : t('cal.countdown_past')})</span>
+          </div>
+        </div>`;
+      }
+
+      const sub = [d.style ? `<em>${esc(d.style)}</em>` : '', ingCount ? `${ingCount} ing.` : '', !d.target_date ? modDate : ''].filter(Boolean).join(' · ');
+      return `<div class="card draft-list-item" draggable="true" data-id="${d.id}"
+                style="padding:10px 14px;cursor:pointer;border:2px solid transparent;${active}"
+                onclick="openDraft(${d.id})">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+          <span class="draft-drag-handle" onclick="event.stopPropagation()" title="${t('rec.drag_to_reorder')}"
+            style="color:var(--muted);cursor:grab;flex-shrink:0;padding:0 2px">
+            <i class="fas fa-grip-vertical"></i>
+          </span>
+          <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+          <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.title || t('draft.untitled'))}</span>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;color:var(--danger);flex-shrink:0"
+            onclick="event.stopPropagation();deleteDraft(${d.id})" title="${t('common.delete')}">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+        ${sub ? `<div style="font-size:.75rem;color:var(--muted);padding-left:26px">${sub}</div>` : ''}
+        ${dateLine}
+      </div>`;
+    }).join('');
+  }
+
+  // ── Drag & drop reorder ──────────────────────────────────────────────────
+  let _draftDragSrcIdx = null;
+  document.querySelectorAll('.draft-list-item').forEach((item, idx) => {
+    item.addEventListener('dragstart', e => {
+      _draftDragSrcIdx = idx;
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      document.querySelectorAll('.draft-list-item').forEach(el => el.classList.remove('drag-over'));
+    });
+    item.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      document.querySelectorAll('.draft-list-item').forEach(el => el.classList.remove('drag-over'));
+      if (_draftDragSrcIdx !== idx) item.classList.add('drag-over');
+    });
+    item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+    item.addEventListener('drop', e => {
+      e.preventDefault();
+      item.classList.remove('drag-over');
+      if (_draftDragSrcIdx === null || _draftDragSrcIdx === idx) return;
+      const movedId  = parseInt(document.querySelectorAll('.draft-list-item')[_draftDragSrcIdx].dataset.id);
+      const targetId = parseInt(item.dataset.id);
+      const mi = S.drafts.findIndex(d => d.id === movedId);
+      const ti = S.drafts.findIndex(d => d.id === targetId);
+      if (mi === -1 || ti === -1) return;
+      const [moved] = S.drafts.splice(mi, 1);
+      S.drafts.splice(ti, 0, moved);
+      _draftDragSrcIdx = null;
+      saveDraftOrder();
+      renderBrouillons();
+    });
+  });
+
+  if (_currentDraftId && S.drafts.find(d => d.id === _currentDraftId)) {
+    _showEditor(true);
+  } else {
+    _showEditor(false);
+  }
+  updateBrouillonsBadge();
+}
+
+let _saveDraftOrderTimer = null;
+function saveDraftOrder() {
+  clearTimeout(_saveDraftOrderTimer);
+  _saveDraftOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/drafts/reorder',
+        S.drafts.map((d, i) => ({ id: d.id, sort_order: i })));
+    } catch(e) { toast(t('inv.err_save_order'), 'error'); }
+  }, 600);
+}
+
+function _showEditor(show) {
+  const ed     = document.getElementById('draft-editor');
+  const ph     = document.getElementById('draft-editor-placeholder');
+  const layout = document.getElementById('brouillons-layout');
+  if (ed)     ed.style.display = show ? 'block' : 'none';
+  if (ph)     ph.style.display = show ? 'none'  : 'flex';
+  if (layout) layout.classList.toggle('draft-editor-open', !!show);
+}
+
+async function openDraft(id) {
+  _currentDraftId = id;
+  const d = S.drafts.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById('draft-title').value  = d.title  || '';
+  document.getElementById('draft-style').value  = d.style  || '';
+  document.getElementById('draft-volume').value = d.volume || '';
+  document.getElementById('draft-notes').value  = d.notes  || '';
+  document.getElementById('draft-color').value  = d.color  || '#ff9500';
+  document.getElementById('draft-save-status').textContent = '';
+  _renderDraftEventLink(d.target_date || null, d.event_label || null);
+  // Image : affiche ce qui est en cache (null si pas encore chargé)
+  _setDraftImage(d.image || null, false);
+  // Deserialize ingredients
+  try { _draftIngredients = JSON.parse(d.ingredients || '[]'); } catch(e) { _draftIngredients = []; }
+  _draftIngredients.forEach((ing, i) => { ing._rid = ing._rid || ++_draftIngRowId; });
+  renderDraftIngRows();
+  _showEditor(true);
+  setDraftMode('view');
+  renderBrouillons(); // highlight selected card
+  // Lazy-load image si pas encore en cache (image exclue de la liste API)
+  if (!('image' in d)) {
+    try {
+      const full = await api('GET', `/api/drafts/${id}`);
+      d.image = full.image ?? null;
+      if (_currentDraftId === id) {
+        _setDraftImage(d.image || null, false);
+        if (_draftMode === 'view') renderDraftView();
+      }
+    } catch(e) { d.image = null; }
+  }
+}
+
+async function newDraft() {
+  try {
+    const d = await api('POST', '/api/drafts', { title: t('draft.new') });
+    S.drafts.unshift(d);
+    _currentDraftId = d.id;
+    _currentDraftTargetDate = null;
+    _currentDraftEventLabel = null;
+    _draftIngredients = [];
+    renderBrouillons();
+    openDraft(d.id);
+    setDraftMode('edit');
+    document.getElementById('draft-title').focus();
+    document.getElementById('draft-title').select();
+  } catch(e) { toast(t('draft.err_create'), 'error'); }
+}
+
+function scheduleDraftSave() {
+  clearTimeout(_draftSaveTimer);
+  const el = document.getElementById('draft-save-status');
+  if (el) el.textContent = '…';
+  _draftSaveTimer = setTimeout(saveDraft, 1000);
+}
+
+async function saveDraft() {
+  if (!_currentDraftId) return;
+  const imgEl  = document.getElementById('draft-img-preview');
+  const imgVal = (imgEl && imgEl.style.display !== 'none') ? (imgEl.src || null) : null;
+  const payload = {
+    title:       document.getElementById('draft-title').value.trim() || t('draft.new'),
+    style:       document.getElementById('draft-style').value.trim() || null,
+    volume:      parseFloat(document.getElementById('draft-volume').value) || null,
+    ingredients: _draftIngredients.length
+      ? JSON.stringify(_draftIngredients.map(({ _rid, ...rest }) => rest))
+      : null,
+    notes:       document.getElementById('draft-notes').value || null,
+    color:       document.getElementById('draft-color').value || null,
+    target_date: _currentDraftTargetDate  || null,
+    event_label: _currentDraftEventLabel  || null,
+    image:       imgVal,
+  };
+  try {
+    const updated = await api('PUT', `/api/drafts/${_currentDraftId}`, payload);
+    const idx = S.drafts.findIndex(d => d.id === _currentDraftId);
+    if (idx !== -1) S.drafts[idx] = updated;
+    S.drafts.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    const el = document.getElementById('draft-save-status');
+    if (el) el.textContent = t('draft.auto_saved') + ' ✓';
+    setTimeout(() => { const e = document.getElementById('draft-save-status'); if (e) e.textContent = ''; }, 2000);
+    if (_draftMode === 'view') renderDraftView();
+    renderBrouillons();
+  } catch(e) {
+    const el = document.getElementById('draft-save-status');
+    if (el) el.textContent = t('common.error');
+  }
+}
+
+async function deleteDraft(id) {
+  if (!id) return;
+  if (!await confirmModal(t('draft.confirm_delete'), { danger: true })) return;
+  try {
+    await api('DELETE', `/api/drafts/${id}`);
+    S.drafts = S.drafts.filter(d => d.id !== id);
+    if (_currentDraftId === id) { _currentDraftId = null; _currentDraftTargetDate = null; _currentDraftEventLabel = null; _draftIngredients = []; _showEditor(false); }
+    renderBrouillons();
+    toast(t('draft.deleted'), 'success');
+  } catch(e) { toast(t('draft.err_delete'), 'error'); }
+}
+
+// ── Événement cible ───────────────────────────────────────────────────────────
+function _renderDraftEventLink(date, label) {
+  _currentDraftTargetDate = date || null;
+  _currentDraftEventLabel = label || null;
+  const linked  = document.getElementById('draft-event-linked');
+  const btnPick = document.getElementById('draft-event-pick-btn');
+  const lblEl   = document.getElementById('draft-event-label');
+  const dateEl  = document.getElementById('draft-event-date');
+  const banner  = document.getElementById('draft-date-banner');
+  if (!linked) return;
+  if (date) {
+    const td   = new Date(date + 'T00:00:00');
+    const fmt  = td.toLocaleDateString(_lang || 'fr', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+    const diff = Math.round((td - new Date().setHours(0,0,0,0)) / 86400000);
+    const countdown = diff === 0 ? t('cal.countdown_today') : diff > 0 ? t('cal.countdown_in').replace('${diff}', diff) : t('cal.countdown_ago').replace('${diff}', -diff);
+    const cdColor   = diff < 0 ? 'var(--danger)' : diff <= 14 ? 'var(--amber)' : '#10b981';
+
+    linked.style.display = 'flex';
+    if (btnPick) btnPick.style.display = 'none';
+    if (lblEl)   lblEl.textContent  = label || date;
+    if (dateEl)  dateEl.textContent = fmt;
+
+    // Bannière avec date de brassage (J-30) + date événement
+    if (banner) {
+      const brew      = new Date(td); brew.setDate(brew.getDate() - 30);
+      const today     = new Date(); today.setHours(0,0,0,0);
+      const diffBr    = Math.round((brew - today) / 86400000);
+      const fmtBrew   = brew.toLocaleDateString(_lang || 'fr', { day:'numeric', month:'long', year:'numeric' });
+      const cntBrew   = diffBr === 0 ? t('cal.countdown_today') : diffBr > 0 ? t('cal.countdown_in').replace('${diff}', diffBr) : t('cal.countdown_ago').replace('${diff}', -diffBr);
+      const cdBrew    = diffBr < 0 ? 'var(--danger)' : diffBr <= 7 ? 'var(--amber)' : 'var(--muted)';
+
+      banner.style.display = 'flex';
+      const el = id => document.getElementById(id);
+      if (el('draft-banner-brew'))    el('draft-banner-brew').textContent    = fmtBrew;
+      if (el('draft-banner-brew-cd')) { el('draft-banner-brew-cd').textContent = cntBrew; el('draft-banner-brew-cd').style.color = cdBrew; }
+      if (el('draft-banner-label'))   el('draft-banner-label').textContent   = label || '';
+      if (el('draft-banner-date'))    el('draft-banner-date').textContent    = td.toLocaleDateString(_lang || 'fr', { day:'numeric', month:'long', year:'numeric' });
+      if (el('draft-banner-countdown')) { el('draft-banner-countdown').textContent = countdown; el('draft-banner-countdown').style.color = cdColor; }
+    }
+  } else {
+    linked.style.display = 'none';
+    if (btnPick) btnPick.style.display = '';
+    if (lblEl)   lblEl.textContent  = '';
+    if (dateEl)  dateEl.textContent = '';
+    if (banner)  banner.style.display = 'none';
+  }
+  const picker = document.getElementById('draft-event-picker');
+  if (picker) picker.style.display = 'none';
+}
+
+function unlinkDraftEvent() {
+  _renderDraftEventLink(null, null);
+  scheduleDraftSave();
+}
+
+function toggleDraftEventPicker() {
+  const picker = document.getElementById('draft-event-picker');
+  if (!picker) return;
+  if (picker.style.display !== 'none') { picker.style.display = 'none'; return; }
+  _populateDraftEventPicker();
+  picker.style.display = 'block';
+}
+
+function _populateDraftEventPicker() {
+  const list = document.getElementById('draft-event-picker-list');
+  if (!list) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  // Collect events for next 18 months
+  const evs = [];
+  for (let dy = 0; dy <= 1; dy++) {
+    _brewingEvents(today.getFullYear() + dy).forEach(e => {
+      const d = new Date(e.date + 'T00:00:00');
+      if (d >= today) evs.push(e);
+    });
+  }
+  evs.sort((a, b) => a.date.localeCompare(b.date));
+  // Group by month
+  const groups = {};
+  evs.forEach(e => {
+    const m = e.date.slice(0, 7);
+    if (!groups[m]) groups[m] = [];
+    groups[m].push(e);
+  });
+  const MONTHS = t('cal.months');
+  let html = '';
+  Object.entries(groups).forEach(([ym, items]) => {
+    const [y, m] = ym.split('-');
+    html += `<div class="ing-suggest-cat">${MONTHS[parseInt(m)-1]} ${y}</div>`;
+    items.forEach(e => {
+      const dayStr = new Date(e.date + 'T00:00:00').toLocaleDateString(_lang || 'fr', { day:'numeric' });
+      const linked = _currentDraftTargetDate === e.date;
+      html += `<div class="ing-suggest-item" style="${linked?'background:rgba(139,92,246,.15)':''}"
+        onclick="linkDraftToEvent('${e.date}','${e.label.replace(/'/g,"\\'")}')">
+        <span style="display:flex;align-items:center;gap:8px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${e.color};flex-shrink:0"></span>
+          <span>${e.emoji} ${esc(e.label)}</span>
+        </span>
+        <span style="font-size:.75rem;color:var(--muted);flex-shrink:0">${dayStr}</span>
+      </div>`;
+    });
+  });
+  list.innerHTML = html || `<div style="padding:14px;color:var(--muted);font-size:.82rem">${t('draft.no_events')}</div>`;
+}
+
+function linkDraftToEvent(date, rawLabel) {
+  // rawLabel may still have emoji — strip it for event_label
+  const label = rawLabel.replace(/^\S+\s/, '');
+  _renderDraftEventLink(date, label);
+  scheduleDraftSave();
+}
+
+// Créer un brouillon pré-lié à un événement (depuis le calendrier)
+async function newDraftForEvent(date, label) {
+  await newDraft();
+  if (_currentDraftId) {
+    _renderDraftEventLink(date, label);
+    // Suggest style from _BREW_EV_DETAILS if available
+    const details = _BREW_EV_DETAILS[label] || {};
+    if (details.style) {
+      document.getElementById('draft-style').value = details.style;
+    }
+    scheduleDraftSave();
+  }
+}
+
+// ── Style BJCP suggest (pour brouillon) ───────────────────────────────────────
+function draftStyleSearch(input) {
+  const q   = input.value.toLowerCase().trim();
+  const sug = document.getElementById('draft-style-sug');
+  closeDraftStyleSuggest();
+  let html = '', count = 0;
+
+  const commonMatches = [];
+  for (const types of Object.values(BEER_TYPES)) {
+    types.forEach(t => { if (!q || t.toLowerCase().includes(q)) commonMatches.push(t); });
+  }
+  if (commonMatches.length) {
+    html += `<div class="ing-suggest-cat">Styles courants</div>`;
+    commonMatches.slice(0, q ? 30 : 10).forEach(t => {
+      html += `<div class="ing-suggest-item" onmousedown="selectDraftStyle(${JSON.stringify(t).replace(/"/g,'&quot;')})"><span>${esc(t)}</span></div>`;
+      count++;
+    });
+  }
+
+  const bycat = _bjcpByCategory(s => !q || s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q));
+  for (const [cat, styles] of Object.entries(bycat)) {
+    html += `<div class="ing-suggest-cat" style="color:var(--gold)">BJCP — ${esc(cat)}</div>`;
+    styles.forEach(s => {
+      html += `<div class="ing-suggest-item" onmousedown="selectDraftStyle(${JSON.stringify(s.name).replace(/"/g,'&quot;')})"><span style="font-size:.83rem">${esc(s.name)}</span></div>`;
+      count++;
+    });
+    if (!q && count > 50) break;
+  }
+  if (!html) return;
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+
+function closeDraftStyleSuggest() {
+  const sug = document.getElementById('draft-style-sug');
+  if (sug) sug.classList.remove('open');
+}
+
+function selectDraftStyle(name) {
+  document.getElementById('draft-style').value = name;
+  closeDraftStyleSuggest();
+  scheduleDraftSave();
+}
+
+// ── Ingrédients structurés ────────────────────────────────────────────────────
+function addDraftIngRow(cat) {
+  const rid = ++_draftIngRowId;
+  const defaultUnit = cat === 'malt' ? 'kg' : cat === 'houblon' ? 'g' : cat === 'levure' ? 'sachet' : 'g';
+  _draftIngredients.push({ _rid: rid, category: cat, name: '', quantity: null, unit: defaultUnit });
+  renderDraftIngRows();
+  scheduleDraftSave();
+  // Focus the new name input
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('#draft-ing-rows .draft-ing-name-input');
+    if (inputs.length) inputs[inputs.length - 1].focus();
+  }, 50);
+}
+
+function deleteDraftIngRow(rid) {
+  _draftIngredients = _draftIngredients.filter(i => i._rid !== rid);
+  renderDraftIngRows();
+  scheduleDraftSave();
+}
+
+function renderDraftIngRows() {
+  const container = document.getElementById('draft-ing-rows');
+  const empty     = document.getElementById('draft-ing-empty');
+  if (!container) return;
+
+  if (!_draftIngredients.length) {
+    container.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const catColors = { malt:'var(--malt)', houblon:'var(--hop)', levure:'var(--yeast)', autre:'var(--other)' };
+  const catIcons  = { malt:'fa-wheat-awn', houblon:'fa-seedling', levure:'fa-circle-nodes', autre:'fa-flask' };
+  const UNITS = { malt: ['kg','g'], houblon: ['g','kg'], levure: ['sachet','g','kg'], autre: ['g','kg','mL','L','pièce','sachet'] };
+
+  container.innerHTML = _draftIngredients.map((ing, idx) => {
+    const color = catColors[ing.category] || 'var(--muted)';
+    const icon  = catIcons[ing.category] || 'fa-flask';
+    const units = UNITS[ing.category] || ['g','kg'];
+    const unitOpts = units.map(u => `<option value="${u}" ${ing.unit===u?'selected':''}>${u}</option>`).join('');
+    return `<div class="ing-row" style="padding:8px 10px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+        <i class="fas ${icon}" style="color:${color};font-size:.75rem;width:14px;text-align:center"></i>
+      </div>
+      <div class="ing-name" style="position:relative;flex:2;min-width:0">
+        <input type="text" class="draft-ing-name-input" placeholder="${t('rec.ing_name')}" value="${esc(ing.name)}"
+          autocomplete="off"
+          oninput="_draftIngredients[${idx}].name=this.value;draftIngSearch(this,${idx},'${ing.category}');scheduleDraftSave()"
+          onfocus="draftIngSearch(this,${idx},'${ing.category}')"
+          onblur="setTimeout(()=>{document.querySelectorAll('#draft-ing-rows .ing-suggest').forEach(s=>s.classList.remove('open'))},200)"
+          style="width:100%;font-size:.875rem">
+        <div class="ing-suggest" id="draft-sug-${ing._rid}"></div>
+      </div>
+      <div class="ing-qty" style="max-width:90px">
+        <input type="number" placeholder="${t('inv.field_qty')}" min="0" step="0.1"
+          value="${ing.quantity != null ? ing.quantity : ''}"
+          onchange="_draftIngredients[${idx}].quantity=parseFloat(this.value)||null;scheduleDraftSave()"
+          style="font-size:.875rem">
+      </div>
+      <div class="ing-unit" style="max-width:80px">
+        <select onchange="_draftIngredients[${idx}].unit=this.value;scheduleDraftSave()" style="font-size:.875rem">
+          ${unitOpts}
+        </select>
+      </div>
+      <div class="ing-remove">
+        <button class="btn btn-ghost btn-sm" style="padding:4px 8px;color:var(--danger)"
+          onclick="deleteDraftIngRow(${ing._rid})" title="${t('common.delete')}">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function draftIngSearch(input, idx, cat) {
+  const q   = input.value.toLowerCase();
+  const rid = _draftIngredients[idx]?._rid;
+  const sug = document.getElementById(`draft-sug-${rid}`);
+  if (!sug) return;
+  _draftIngSugItems = [];
+  document.querySelectorAll('#draft-ing-rows .ing-suggest').forEach(s => s.classList.remove('open'));
+
+  const catItems = S.catalog.filter(c =>
+    c.category === cat && (q.length < 1 || c.name.toLowerCase().includes(q))
+  );
+  const invExtra = S.inventory.filter(i =>
+    i.category === cat &&
+    (q.length < 1 || i.name.toLowerCase().includes(q)) &&
+    !catItems.some(c => c.name.toLowerCase() === i.name.toLowerCase())
+  );
+
+  if (!catItems.length && !invExtra.length) return;
+
+  const groups = {};
+  catItems.forEach(c => {
+    const g = c.subcategory || 'Catalogue';
+    if (!groups[g]) groups[g] = [];
+    const invMatch = S.inventory.find(i => i.name.toLowerCase() === c.name.toLowerCase() && i.category === cat);
+    groups[g].push({ ...c, _inv: invMatch || null });
+  });
+  if (invExtra.length) {
+    const _gKey = t('cave.group_in_stock');
+    if (!groups[_gKey]) groups[_gKey] = [];
+    invExtra.forEach(i => groups[_gKey].push({ name: i.name, _inv: i, id: null }));
+  }
+
+  let html = '';
+  Object.entries(groups).forEach(([grp, items]) => {
+    html += `<div class="ing-suggest-cat">${esc(grp)}</div>`;
+    items.slice(0, 30).forEach(item => {
+      const inv      = item._inv;
+      const stockTxt = inv ? `<span style="color:${inv.quantity>0?'var(--success)':'var(--danger)'};">${inv.quantity} ${inv.unit}</span>` : '';
+      const specs    = [];
+      if (item.ebc   != null) specs.push(`EBC ${item.ebc}`);
+      if (item.alpha != null) specs.push(`α ${item.alpha}%`);
+      const specTxt = specs.length ? `<span style="color:var(--muted);font-size:.72rem">${specs.join(' · ')}</span>` : '';
+      const _di = _draftIngSugItems.push({ name: item.name, unit: item.default_unit || (inv?.unit) || null }) - 1;
+      html += `<div class="ing-suggest-item" onmousedown="selectDraftIngSuggest(${idx},${_di})">
+        <span>${esc(item.name)} ${specTxt}</span>${stockTxt}
+      </div>`;
+    });
+  });
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+
+function selectDraftIngSuggest(idx, si) {
+  const { name, unit } = _draftIngSugItems[si];
+  _draftIngredients[idx].name = name;
+  if (unit && !_draftIngredients[idx].quantity) _draftIngredients[idx].unit = unit;
+  renderDraftIngRows();
+  scheduleDraftSave();
+}
+
+// ── Créer la recette ──────────────────────────────────────────────────────────
+async function draftToRecipe() {
+  if (!_currentDraftId) return;
+  clearTimeout(_draftSaveTimer);
+  await saveDraft();
+  _pendingDraftId = _currentDraftId; // sera lié à la recette lors de la sauvegarde
+
+  const title = document.getElementById('draft-title').value.trim();
+  const style = document.getElementById('draft-style').value.trim();
+  const notes = document.getElementById('draft-notes').value.trim();
+  const vol   = parseFloat(document.getElementById('draft-volume').value) || null;
+
+  // Build event badge line
+  let eventLine = '';
+  if (_currentDraftEventLabel && _currentDraftTargetDate) {
+    const evDateStr = new Date(_currentDraftTargetDate + 'T00:00:00')
+      .toLocaleDateString(_lang || 'fr', { day:'numeric', month:'long', year:'numeric' });
+    eventLine = `📅 Objectif : ${_currentDraftEventLabel} — ${evDateStr}`;
+  }
+
+  navigate('recettes');
+  setTimeout(async () => {
+    exitRecipeListOnly();
+    clearRecipeForm();
+    if (title) document.getElementById('rec-name').value  = title;
+    if (style) document.getElementById('rec-style').value = style;
+    // Notes = event line + draft notes
+    const fullNotes = [eventLine, notes].filter(Boolean).join('\n\n');
+    if (fullNotes) document.getElementById('rec-notes').value = fullNotes;
+    if (vol)   document.getElementById('rec-volume').value = vol;
+    // Pre-fill brew date with the event target date
+    if (_currentDraftTargetDate)
+      document.getElementById('rec-brew-date').value = _currentDraftTargetDate;
+    // Import ingredients
+    _draftIngredients.filter(ing => ing.name).forEach(ing => {
+      recIngredients.push({
+        _rid:              ++ingRowId,
+        category:          ing.category,
+        name:              ing.name,
+        quantity:          ing.quantity || 0,
+        unit:              ing.unit,
+        hop_type:          ing.category === 'houblon' ? 'ebullition' : null,
+        other_type:        ing.category === 'autre'   ? 'ebullition' : null,
+        inventory_item_id: null,
+      });
+    });
+    renderIngredientRows();
+    if (_draftIngredients.length) recCalc();
+    // Sauvegarde immédiate de la recette
+    await saveRecipe(true);
+    toast(t('draft.to_recipe_done'), 'success');
+  }, 300);
+}
+
+// ── Image brouillon ───────────────────────────────────────────────────────────
+function _setDraftImage(dataUrl, save = true) {
+  const preview  = document.getElementById('draft-img-preview');
+  const empty    = document.getElementById('draft-img-empty');
+  const removeBtn = document.getElementById('draft-img-remove-btn');
+  if (!preview) return;
+  if (dataUrl) {
+    preview.src          = dataUrl;
+    preview.style.display = 'block';
+    if (empty)     empty.style.display     = 'none';
+    if (removeBtn) removeBtn.style.display = '';
+  } else {
+    preview.src          = '';
+    preview.style.display = 'none';
+    if (empty)     empty.style.display     = 'flex';
+    if (removeBtn) removeBtn.style.display = 'none';
+  }
+  if (save) scheduleDraftSave();
+}
+
+function loadDraftImageFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => _setDraftImage(e.target.result);
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+function removeDraftImage() {
+  _setDraftImage(null);
+}
+
+async function generateDraftImage() {
+  if (!_currentDraftId) return;
+  const ai = appSettings.ai || {};
+  const imgApiKey = ai.provider === 'gemini'
+    ? (ai.geminiApiKey || ai.apiKey || '')
+    : (ai.openaiApiKey || ai.apiKey || '');
+  if (!imgApiKey) {
+    toast(t('settings.ai.key_required'), 'error');
+    return;
+  }
+
+  const title  = document.getElementById('draft-title').value.trim() || 'bière artisanale';
+  const style  = document.getElementById('draft-style').value.trim();
+  const extra  = (document.getElementById('draft-img-extra')?.value || '').trim();
+
+  const prompt = `A craft beer label artwork for a homebrew beer named "${title}"` +
+    (style ? `, style: ${style}` : '') +
+    (extra ? `. ${extra}` : '') +
+    '. Flat rectangular label, illustrated decorative border, ingredients-inspired background art, beer name prominently displayed. No bottle, no glass, no hands, no ABV, no volume. Print-ready flat lay label only.';
+
+  const btn = document.getElementById('draft-img-ai-btn');
+  btn.disabled = true;
+  btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${t('settings.ai.generating')}`;
+
+  try {
+    let b64, mime = 'image/png';
+    if (ai.provider === 'gemini') {
+      const res = await _aiGenerateGemini(imgApiKey, ai.model || 'gemini-3.1-flash-image-preview', prompt);
+      b64 = res.b64; mime = res.mime;
+    } else {
+      b64 = await _aiGenerateOpenAI(imgApiKey, ai.model || 'gpt-image-1', '1024x1024', ai.quality || 'auto', prompt);
+    }
+    _setDraftImage(`data:${mime};base64,${b64}`);
+    toast(t('settings.ai.img_generated'), 'success');
+  } catch(e) {
+    toast(t('settings.ai.img_err') + ' ' + (e.message || String(e)), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<i class="fas fa-wand-magic-sparkles"></i> ${t('settings.ai.generate_btn')}`;
+  }
+}
+
+// ── Suggestion IA (Gemini ou OpenAI — appel direct depuis le navigateur) ─────
+async function askGeminiForDraft() {
+  if (!_currentDraftId) return;
+
+  const ai       = appSettings.ai || {};
+  const provider = ai.textProvider || 'gemini';
+  const apiKey   = provider === 'openai' ? (ai.openaiApiKey || '') : (ai.geminiApiKey || ai.apiKey || '');
+  const provLabel = provider === 'openai' ? 'OpenAI' : 'Gemini';
+
+  if (!apiKey) {
+    toast(t('settings.ai.key_required_prov').replace('${prov}', provLabel), 'error');
+    return;
+  }
+
+  const btn     = document.getElementById('draft-ai-btn');
+  const style   = document.getElementById('draft-style').value.trim();
+  const notes   = document.getElementById('draft-notes').value.trim();
+  const volEl   = document.getElementById('draft-volume');
+  const volume  = parseFloat(volEl.value) || 10;
+  if (!volEl.value) { volEl.value = 10; scheduleDraftSave(); }
+  const event_label = _currentDraftEventLabel || '';
+  const event_desc  = (_BREW_EV_DETAILS[event_label] || {}).desc || '';
+
+  // Stock context
+  const useStock = document.getElementById('draft-ai-use-stock')?.checked || false;
+  let stockContext = '';
+  if (useStock && S.inventory && S.inventory.length) {
+    const available = S.inventory.filter(i => !i.archived && parseFloat(i.quantity) > 0);
+    if (available.length) {
+      const byCategory = {};
+      available.forEach(i => {
+        const cat = i.category || 'autre';
+        if (!byCategory[cat]) byCategory[cat] = [];
+        byCategory[cat].push(`${i.name} (${i.quantity} ${i.unit})`);
+      });
+      const lines = Object.entries(byCategory).map(([cat, items]) => `${cat}: ${items.join(', ')}`);
+      stockContext = `\nStock disponible (priorise ces ingrédients dans la recette) :\n${lines.join('\n')}`;
+    }
+  }
+
+  // Prompt
+  const contextParts = [];
+  if (style)       contextParts.push(`Style BJCP : ${style}`);
+  if (event_label) contextParts.push(`Objectif de brassage : ${event_label}`);
+  if (event_desc)  contextParts.push(`Description : ${event_desc}`);
+  if (notes)       contextParts.push(`Notes du brasseur : ${notes}`);
+  const context = contextParts.length ? contextParts.join('\n') : 'Bière de dégustation générique';
+
+  const prompt = `Tu es un expert en brassage amateur. Génère une recette de bière pour un brassin de ${volume} litres.
+
+${context}${stockContext}
+
+Retourne UNIQUEMENT un objet JSON valide (sans markdown, sans backticks) avec cette structure :
+{
+  "title": "Nom suggéré",
+  "ingredients": [
+    {"type": "malt",    "name": "Pale Ale Malt",  "qty": 2.5, "unit": "kg"},
+    {"type": "houblon", "name": "Cascade",         "qty": 25,  "unit": "g"},
+    {"type": "levure",  "name": "Safale US-05",    "qty": 1,   "unit": "sachet"}
+  ],
+  "notes": "OG cible, FG cible, température de fermentation, durée, conseils..."
+}
+Types autorisés : "malt", "houblon", "levure", "autre". Adapte les quantités pour exactement ${volume}L.`;
+
+  btn.disabled = true;
+  btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${t('settings.ai.thinking').replace('${prov}', provLabel)}`;
+
+  try {
+    const model = ai.textModel || (provider === 'openai' ? 'gpt-4o-mini' : 'gemini-2.5-flash');
+    let recipe;
+
+    if (provider === 'openai') {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body:    JSON.stringify({
+          model,
+          messages:        [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' }
+        })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error?.message || `HTTP ${resp.status}`);
+      }
+      const result = await resp.json();
+      recipe = JSON.parse(result.choices[0].message.content);
+    } else {
+      const url  = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const resp = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          contents:         [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error?.message || `HTTP ${resp.status}`);
+      }
+      const result = await resp.json();
+      if (!result.candidates?.length) {
+        throw new Error(result.promptFeedback?.blockReason || 'Réponse vide');
+      }
+      recipe = JSON.parse(result.candidates[0].content.parts[0].text);
+    }
+
+    // Titre — si vide ou générique
+    const titleEl = document.getElementById('draft-title');
+    if (recipe.title && (!titleEl.value.trim() || titleEl.value.trim() === t('draft.new'))) {
+      titleEl.value = recipe.title;
+    }
+
+    // Ingrédients
+    if (_draftIngredients.length > 0) {
+      const ok = await confirmModal(t('draft.ai_replace_confirm').replace('${prov}', provLabel).replace('${n}', recipe.ingredients?.length || 0));
+      if (ok) { _draftIngredients = []; _mergeGeminiIngredients(recipe.ingredients || []); }
+      else    { _mergeGeminiIngredients(recipe.ingredients || []); }
+    } else {
+      _mergeGeminiIngredients(recipe.ingredients || []);
+    }
+    renderDraftIngRows();
+
+    // Notes
+    if (recipe.notes) {
+      const notesEl  = document.getElementById('draft-notes');
+      const existing = notesEl.value.trim();
+      notesEl.value  = existing ? `${existing}\n\n— Suggestion IA (${provLabel}) —\n${recipe.notes}` : recipe.notes;
+    }
+
+    scheduleDraftSave();
+    toast(t('draft.ai_recipe_done').replace('${provider}', provLabel), 'success');
+  } catch(e) {
+    toast(t('draft.ai_recipe_err').replace('${provider}', provLabel) + ' ' + (e.message || String(e)), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<i class="fas fa-wand-magic-sparkles"></i> ${t('draft.ai_suggest')}`;
+  }
+}
+
+function _mergeGeminiIngredients(items) {
+  items.forEach(item => {
+    const cat = ['malt','houblon','levure','autre'].includes(item.type) ? item.type : 'autre';
+    const defaultUnit = cat === 'malt' ? 'kg' : cat === 'houblon' ? 'g' : cat === 'levure' ? 'sachet' : 'g';
+    _draftIngredients.push({
+      _rid:     ++_draftIngRowId,
+      category: cat,
+      name:     item.name  || '',
+      quantity: parseFloat(item.qty) || null,
+      unit:     item.unit  || defaultUnit,
+    });
+  });
+}

@@ -1,0 +1,2969 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// ── BEERXML IMPORT / EXPORT ───────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+function exportSingleBeerXML(recipeId) {
+  const r = S.recipes.find(x => x.id === recipeId);
+  if (!r) return;
+
+  const xmlEsc = s => (s||'').toString()
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const tag  = (n, v) => `<${n}>${xmlEsc(v)}</${n}>`;
+  const tagN = (n, v, d=0) => `<${n}>${(parseFloat(v)||d).toFixed(3).replace(/\.?0+$/,'')}</${n}>`;
+
+  const ings = r.ingredients || [];
+
+  // Unit → kg conversion (BeerXML uses kg for all solid/liquid amounts)
+  const toKg = (qty, unit) => {
+    const q = parseFloat(qty) || 0;
+    if (unit === 'g')  return q / 1000;
+    if (unit === 'kg') return q;
+    if (unit === 'mg') return q / 1_000_000;
+    return q / 1000; // fallback assume g
+  };
+  const toL = (qty, unit) => {
+    const q = parseFloat(qty) || 0;
+    if (unit === 'ml' || unit === 'mL') return q / 1000;
+    if (unit === 'L')  return q;
+    return q / 1000;
+  };
+
+  const fermentables = ings.filter(i => i.category === 'malt').map(m => `    <FERMENTABLE>
+      ${tag('NAME', m.name)}<VERSION>1</VERSION>
+      <TYPE>Grain</TYPE>
+      ${tagN('AMOUNT', toKg(m.quantity, m.unit))}
+      ${tagN('COLOR', m.ebc ? (parseFloat(m.ebc)/1.97) : 0)}
+      <YIELD>75</YIELD>
+      ${m.origin ? tag('ORIGIN', m.origin) : ''}
+    </FERMENTABLE>`).join('\n');
+
+  const hopUseMap = h => {
+    if (h.hop_type === 'dryhop')    return 'Dry Hop';
+    if (h.hop_type === 'whirlpool') return 'Aroma';
+    return 'Boil';
+  };
+  const hopTime = h => {
+    if (h.hop_type === 'dryhop')    return parseFloat(h.hop_days)  || 0;
+    if (h.hop_type === 'whirlpool') return parseFloat(h.hop_time)  || 0;
+    return h.hop_time != null ? parseFloat(h.hop_time) : (parseFloat(r.boil_time)||60);
+  };
+  const hops = ings.filter(i => i.category === 'houblon').map(h => `    <HOP>
+      ${tag('NAME', h.name)}<VERSION>1</VERSION>
+      ${tagN('ALPHA', h.alpha || 0)}
+      ${tagN('AMOUNT', toKg(h.quantity, h.unit))}
+      ${tag('USE', hopUseMap(h))}
+      ${tag('TIME', hopTime(h))}
+      <FORM>Pellet</FORM>
+    </HOP>`).join('\n');
+
+  const yeasts = ings.filter(i => i.category === 'levure').map(y => `    <YEAST>
+      ${tag('NAME', y.name)}<VERSION>1</VERSION>
+      <TYPE>Ale</TYPE><FORM>Dry</FORM>
+      ${tagN('AMOUNT', (y.unit==='sachet') ? (parseFloat(y.quantity)||1)*0.011 : (toKg(y.quantity, y.unit)||0.011))}
+      <AMOUNT_IS_WEIGHT>TRUE</AMOUNT_IS_WEIGHT>
+    </YEAST>`).join('\n');
+
+  const miscs = ings.filter(i => i.category === 'autre').map(m => {
+    const isLiquid = ['ml','mL','L','l'].includes(m.unit);
+    const amt = isLiquid ? toL(m.quantity, m.unit) : toKg(m.quantity, m.unit);
+    return `    <MISC>
+      ${tag('NAME', m.name)}<VERSION>1</VERSION>
+      <TYPE>Other</TYPE><USE>Boil</USE><TIME>0</TIME>
+      ${tagN('AMOUNT', amt)}
+      ${tag('AMOUNT_IS_WEIGHT', isLiquid ? 'FALSE' : 'TRUE')}
+    </MISC>`;
+  }).join('\n');
+
+  const totalMaltKg = ings.filter(i=>i.category==='malt').reduce((s,m)=>s+toKg(m.quantity,m.unit),0);
+  const infuseAmt = ((parseFloat(r.mash_ratio)||3) * totalMaltKg).toFixed(1);
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<RECIPES>
+  <RECIPE>
+    ${tag('NAME', r.name)}<VERSION>1</VERSION>
+    <TYPE>All Grain</TYPE>
+    <STYLE>
+      ${tag('NAME', r.style||'')}<VERSION>1</VERSION>
+      <CATEGORY></CATEGORY><CATEGORY_NUMBER>0</CATEGORY_NUMBER>
+      <STYLE_LETTER>A</STYLE_LETTER><STYLE_GUIDE>BJCP</STYLE_GUIDE><TYPE>Ale</TYPE>
+    </STYLE>
+    <BREWER>BrewHome</BREWER>
+    ${tagN('BATCH_SIZE', r.volume||20)}
+    ${tagN('BOIL_SIZE',  (parseFloat(r.volume)||20)*1.2)}
+    ${tagN('BOIL_TIME',  r.boil_time||60)}
+    ${tagN('EFFICIENCY', r.brewhouse_efficiency||75)}
+    ${r.notes ? tag('NOTES', r.notes) : ''}
+    <FERMENTABLES>
+${fermentables}
+    </FERMENTABLES>
+    <HOPS>
+${hops}
+    </HOPS>
+    <YEASTS>
+${yeasts}
+    </YEASTS>
+    <MISCS>
+${miscs}
+    </MISCS>
+    <MASH>
+      <NAME>Single Infusion</NAME><VERSION>1</VERSION><GRAIN_TEMP>20</GRAIN_TEMP>
+      <MASH_STEPS>
+        <MASH_STEP>
+          <NAME>Mash</NAME><VERSION>1</VERSION><TYPE>Infusion</TYPE>
+          ${tagN('STEP_TEMP', r.mash_temp||66)}
+          ${tagN('STEP_TIME', r.mash_time||60)}
+          <INFUSE_AMOUNT>${infuseAmt}</INFUSE_AMOUNT>
+        </MASH_STEP>
+      </MASH_STEPS>
+    </MASH>
+  </RECIPE>
+</RECIPES>`;
+
+  const blob = new Blob([xml], { type: 'application/xml' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: `${r.name.replace(/[^a-z0-9]/gi,'_')}.xml` });
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(t('rec.beerxml_exported'), 'success');
+}
+
+function importBeerXMLFile() {
+  const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.xml,.beerxml' });
+  input.onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      await _parseBeerXML(await file.text());
+    } catch(err) {
+      toast(t('rec.beerxml_import_error'), 'error');
+      console.error('BeerXML import error:', err);
+    }
+  };
+  input.click();
+}
+
+function _matchBeerXMLStyle(xmlStyle) {
+  if (!xmlStyle) return '';
+  const q = xmlStyle.toLowerCase().trim();
+  // 1. BJCP exact match (priorité maximale)
+  const bjcpExact = (S.bjcp || []).find(s => s.name.toLowerCase() === q);
+  if (bjcpExact) return bjcpExact.name;
+  // 2. BJCP partial match (le nom BJCP contient le style XML)
+  const bjcpPartial = (S.bjcp || []).find(s => s.name.toLowerCase().includes(q));
+  if (bjcpPartial) return bjcpPartial.name;
+  // 3. Exact match in BEER_TYPES
+  for (const types of Object.values(BEER_TYPES)) {
+    const exact = types.find(s => s.toLowerCase() === q);
+    if (exact) return exact;
+  }
+  // 4. Partial match in BEER_TYPES
+  for (const types of Object.values(BEER_TYPES)) {
+    const partial = types.find(s => q.includes(s.toLowerCase()) || s.toLowerCase().includes(q));
+    if (partial) return partial;
+  }
+  // 5. Keep original
+  return xmlStyle;
+}
+
+async function _parseBeerXML(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if (doc.querySelector('parsererror')) { toast(t('rec.beerxml_parse_error'), 'error'); return; }
+
+  // Helper: first direct child with given tag (case-insensitive fallback)
+  const gv = (el, tag) => {
+    if (!el) return '';
+    const found = el.getElementsByTagName(tag)[0];
+    return found ? found.textContent.trim() : '';
+  };
+  const gn = (el, tag, def=0) => parseFloat(gv(el, tag)) || def;
+
+  const recipeEls = Array.from(doc.getElementsByTagName('RECIPE'));
+  if (!recipeEls.length) { toast(t('rec.beerxml_no_recipes'), 'error'); return; }
+
+  const _recBatchNos = (S.recipes || []).map(r => parseInt(r.batch_no) || 0).filter(n => n > 0);
+  let _nextBatchNo = _recBatchNos.length > 0 ? Math.max(..._recBatchNos) + 1 : 1;
+
+  let imported = 0;
+  const _allParsedIngs = []; // accumulate for missing-catalog check
+  for (const rec of recipeEls) {
+    const styleEl = rec.getElementsByTagName('STYLE')[0];
+    const mashEl  = rec.getElementsByTagName('MASH')[0];
+    const stepEl  = mashEl ? mashEl.getElementsByTagName('MASH_STEP')[0] : null;
+
+    const name     = gv(rec, 'NAME');
+    const style    = _matchBeerXMLStyle(styleEl ? gv(styleEl, 'NAME') : '');
+    const volume   = gn(rec, 'BATCH_SIZE', 20);
+    const boilTime = gn(rec, 'BOIL_TIME', 60);
+    const eff      = gn(rec, 'EFFICIENCY', 75);
+    const notes    = gv(rec, 'NOTES');
+    const mashTemp = gn(stepEl||{}, 'STEP_TEMP', 66);
+    const mashTime = gn(stepEl||{}, 'STEP_TIME', 60);
+
+    const ingredients = [];
+
+    // Fermentables → malt ou autre selon le TYPE BeerXML
+    const _maltTypes = new Set(['grain', 'adjunct', 'roasted']);
+    for (const f of rec.getElementsByTagName('FERMENTABLE')) {
+      const amtKg    = gn(f, 'AMOUNT');
+      const colorSrm = gn(f, 'COLOR');
+      const ftype    = gv(f, 'TYPE').toLowerCase();
+      const isMalt   = _maltTypes.has(ftype);
+      ingredients.push({
+        name:     gv(f, 'NAME'),
+        category: isMalt ? 'malt' : 'autre',
+        quantity: amtKg >= 1 ? amtKg : +(amtKg * 1000).toFixed(0),
+        unit:     amtKg >= 1 ? 'kg' : 'g',
+        ...(isMalt ? { ebc: colorSrm > 0 ? +(colorSrm * 1.97).toFixed(1) : null,
+                       origin: gv(f, 'ORIGIN') || null } : {}),
+      });
+    }
+
+    // Hops → houblon
+    for (const h of rec.getElementsByTagName('HOP')) {
+      const amtKg = gn(h, 'AMOUNT');
+      const use   = gv(h, 'USE').toLowerCase();
+      const time  = gn(h, 'TIME');
+      let hop_type = null, hop_time = null, hop_days = null;
+      if (use === 'dry hop')                        { hop_type = 'dryhop';    hop_days = time; }
+      else if (use === 'aroma' || use === 'whirlpool') { hop_type = 'whirlpool'; hop_time = time; }
+      else                                          { hop_time = time; }
+      const amtG = +(amtKg * 1000).toFixed(1);
+      ingredients.push({
+        name: gv(h, 'NAME'), category: 'houblon',
+        quantity: amtG, unit: 'g',
+        alpha:    gn(h, 'ALPHA') || null,
+        hop_type, hop_time, hop_days,
+      });
+    }
+
+    // Yeasts → levure
+    for (const y of rec.getElementsByTagName('YEAST')) {
+      ingredients.push({ name: gv(y,'NAME'), category: 'levure', quantity: 1, unit: 'sachet' });
+    }
+
+    // Miscs → autre
+    for (const m of rec.getElementsByTagName('MISC')) {
+      const amt         = gn(m, 'AMOUNT');
+      const isWeight    = gv(m, 'AMOUNT_IS_WEIGHT').toUpperCase() !== 'FALSE';
+      const qty         = isWeight ? +(amt * 1000).toFixed(1) : +(amt * 1000).toFixed(1); // kg→g or L→ml
+      ingredients.push({ name: gv(m,'NAME'), category: 'autre', quantity: qty, unit: isWeight ? 'g' : 'ml' });
+    }
+
+    ingredients.forEach(i => _allParsedIngs.push(i));
+
+    try {
+      const created = await api('POST', '/api/recipes', {
+        name, style, volume, boil_time: boilTime,
+        brewhouse_efficiency: eff, mash_temp: mashTemp, mash_time: mashTime,
+        mash_ratio: 3.0, notes, ingredients, batch_no: _nextBatchNo++,
+      });
+      S.recipes.push(created);
+      imported++;
+    } catch(e) { console.error('Failed to import recipe:', name, e); }
+  }
+
+  if (imported > 0) {
+    renderRecipeList();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast(t('rec.beerxml_imported').replace('${n}', imported), 'success');
+    _checkImportMissingCatalog(_allParsedIngs);
+  } else {
+    toast(t('rec.beerxml_import_error'), 'error');
+  }
+}
+
+function _checkImportMissingCatalog(ings) {
+  const seen = new Set();
+  const missing = [];
+  for (const ing of ings) {
+    if (!ing.name) continue;
+    const key = ing.category + '|' + ing.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const inCatalog = (S.catalog || []).some(c =>
+      c.category === ing.category && c.name.toLowerCase() === ing.name.toLowerCase()
+    );
+    if (!inCatalog) missing.push({ name: ing.name, category: ing.category, ebc: ing.ebc ?? null, alpha: ing.alpha ?? null });
+  }
+  if (!missing.length) return;
+
+  const CAT_ORDER = ['malt', 'houblon', 'levure', 'autre'];
+  const CAT_COLOR = { malt: 'var(--malt)', houblon: 'var(--hop)', levure: 'var(--yeast)', autre: 'var(--other)' };
+  let html = '';
+  CAT_ORDER.forEach(cat => {
+    const items = missing.filter(i => i.category === cat);
+    if (!items.length) return;
+    html += `<div style="margin-bottom:12px">
+      <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:${CAT_COLOR[cat]};margin-bottom:6px;letter-spacing:.06em">${catLabel(cat)}</div>
+      ${items.map((item, idx) => {
+        const id = `imm-${cat}-${idx}`;
+        const meta = [
+          item.ebc   != null ? `EBC\u00a0${item.ebc}` : null,
+          item.alpha != null ? `Alpha\u00a0${item.alpha}%` : null,
+        ].filter(Boolean).join(' · ');
+        return `<label for="${id}" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer;transition:background .12s" onmouseover="this.style.background='var(--card2)'" onmouseout="this.style.background=''">
+          <input type="checkbox" id="${id}" checked data-name="${esc(item.name)}" data-category="${item.category}" data-ebc="${item.ebc ?? ''}" data-alpha="${item.alpha ?? ''}" style="width:auto;flex-shrink:0">
+          <span style="flex:1;font-size:.88rem;font-weight:500">${esc(item.name)}</span>
+          ${meta ? `<span style="font-size:.72rem;color:var(--muted)">${meta}</span>` : ''}
+        </label>`;
+      }).join('')}
+    </div>`;
+  });
+
+  document.getElementById('import-missing-list').innerHTML = html;
+  document.getElementById('modal-import-missing').classList.add('open');
+}
+
+function closeImportMissing() {
+  document.getElementById('modal-import-missing').classList.remove('open');
+}
+
+async function createMissingCatalogItems() {
+  const checks = document.querySelectorAll('#import-missing-list input[type=checkbox]:checked');
+  if (!checks.length) { closeImportMissing(); return; }
+  let created = 0, failed = 0;
+  for (const cb of checks) {
+    const payload = {
+      name:     cb.dataset.name,
+      category: cb.dataset.category,
+      ebc:      cb.dataset.ebc   !== '' ? parseFloat(cb.dataset.ebc)   : null,
+      alpha:    cb.dataset.alpha !== '' ? parseFloat(cb.dataset.alpha) : null,
+    };
+    try {
+      const item = await api('POST', '/api/catalog', payload);
+      S.catalog.push(item);
+      created++;
+    } catch(e) { failed++; }
+  }
+  closeImportMissing();
+  if (created > 0) toast(t('rec.import_missing_done').replace('${n}', created), 'success');
+  if (failed  > 0) toast(t('rec.import_missing_err').replace('${n}', failed), 'error');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── RECETTES ─────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function showRecipeListOnly() {
+  recEditingId = null;
+  document.getElementById('recipe-layout').classList.add('recipe-list-only');
+  document.getElementById('rec-actions').innerHTML =
+    `<button class="btn btn-ghost" onclick="importBeerXMLFile()" title="${t('rec.beerxml_import_btn')}"><i class="fas fa-file-import"></i> BeerXML</button>
+     <button class="btn btn-primary" onclick="newRecipeFromList()"><i class="fas fa-plus"></i> ${t('rec.new')}</button>`;
+  renderRecipeList();
+}
+
+function exitRecipeListOnly() {
+  document.getElementById('recipe-layout').classList.remove('recipe-list-only');
+}
+
+function newRecipeFromList() {
+  exitRecipeListOnly();
+  clearRecipeForm();
+}
+
+function goToCaveFromRecipe(recipeId) {
+  const r = S.recipes.find(x => x.id === recipeId);
+  const el = document.getElementById('cave-search');
+  if (el) el.value = r ? r.name : '';
+  navigate('cave');
+}
+
+function setRecRating(v) {
+  const current = parseInt(document.getElementById('rec-rating').value) || 0;
+  const newVal = current === v ? 0 : v; // click same star = remove rating
+  document.getElementById('rec-rating').value = newVal || '';
+  renderRecStars(newVal);
+}
+
+function renderRecStars(n) {
+  document.querySelectorAll('#rec-star-input .star').forEach((el, i) => {
+    el.classList.toggle('on', i < n);
+  });
+  const lbl = document.getElementById('rec-rating-label');
+  if (lbl) lbl.textContent = STAR_LABELS()[n] || t('rec.star_0');
+}
+
+async function rateRecipe(id, n) {
+  const r = S.recipes.find(x => x.id === id);
+  if (!r) return;
+  const newRating = r.rating === n ? null : n; // toggle
+  try {
+    await api('PATCH', `/api/recipes/${id}`, { rating: newRating });
+    r.rating = newRating;
+    renderRecipeView();
+    renderRecipeList();
+  } catch(e) { toast(t('rec.err_notation'), 'error'); }
+}
+
+function recipeCost(r) {
+  let total = 0, has = false;
+  (r.ingredients || []).forEach(ing => {
+    const c = ingCost(ing);
+    if (c !== null) { total += c; has = true; }
+  });
+  const gas  = parseFloat(appSettings.energy?.gas_per_brew)  || 0;
+  const elec = parseFloat(appSettings.energy?.elec_per_brew) || 0;
+  if (gas  > 0) { total += gas;  has = true; }
+  if (elec > 0) { total += elec; has = true; }
+  return has ? total : null;
+}
+
+function brewCost(b) {
+  const rec = b.recipe_id ? S.recipes.find(r => r.id === b.recipe_id) : null;
+  if (!rec || !(rec.ingredients || []).length) return null;
+  const vol = b.volume_brewed || rec.volume || 0;
+  const scaleFactor = (b.volume_brewed && rec.volume && rec.volume > 0)
+    ? b.volume_brewed / rec.volume : 1;
+
+  let ingTotal = 0, hasIng = false;
+  const cats = { malt: 0, houblon: 0, levure: 0, autre: 0 };
+  const ingDetails = [];
+  (rec.ingredients || []).forEach(ing => {
+    const c = ingCost(ing);
+    if (c !== null) {
+      const scaled = c * scaleFactor;
+      ingTotal += scaled;
+      cats[ing.category] = (cats[ing.category] || 0) + scaled;
+      ingDetails.push({ name: ing.name, category: ing.category, cost: scaled,
+        qty: (ing.quantity || 0) * scaleFactor, unit: ing.unit });
+      hasIng = true;
+    }
+  });
+  if (!hasIng) return null;
+
+  // Water cost
+  const waterPrice = parseFloat((appSettings.water || {}).price) || null;
+  let waterCost = null;
+  if (waterPrice != null && waterPrice > 0 && vol > 0) {
+    const grainKg   = (rec.ingredients || []).filter(i => i.category === 'malt')
+      .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : (i.quantity || 0) / 1000), 0) * scaleFactor;
+    const boilTime  = rec.boil_time  || 60;
+    const evapRate  = rec.evap_rate  || 3;
+    const absorption = rec.grain_absorption || 0.8;
+    const preboil   = vol + evapRate * (boilTime / 60);
+    const totalWaterL = preboil + grainKg * absorption;
+    waterCost = totalWaterL * waterPrice;
+  }
+
+  const gas  = parseFloat(appSettings.energy?.gas_per_brew)  || 0;
+  const elec = parseFloat(appSettings.energy?.elec_per_brew) || 0;
+  const total = ingTotal + (waterCost || 0) + gas + elec;
+  const perLiter = vol > 0 ? total / vol : null;
+
+  // Cost per bottle from linked cave entries
+  let per33 = null, per75 = null;
+  if (total > 0) {
+    const linkedBeers = (S.beers || []).filter(bx => bx.brew_id === b.id && !bx.archived);
+    const tot33 = linkedBeers.reduce((s, bx) => s + (bx.stock_33cl || 0), 0);
+    const tot75 = linkedBeers.reduce((s, bx) => s + (bx.stock_75cl || 0), 0);
+    if (tot33 > 0) per33 = total / tot33;
+    if (tot75 > 0) per75 = total / tot75;
+  }
+
+  return { total, ingTotal, waterCost, perLiter, per33, per75, scaleFactor, cats, ingDetails, gas, elec };
+}
+
+// Status badges used in the recipe list sidebar
+const _REC_STATUS = {
+  planned:    { icon:'calendar-plus',     color:'var(--muted)', get label(){ return t('brew.status_planned');     } },
+  in_progress:{ icon:'fire-flame-curved', color:'var(--amber)', get label(){ return t('brew.status_in_progress'); } },
+  fermenting: { icon:'flask',             color:'var(--info)',  get label(){ return t('brew.status_fermenting');  } },
+};
+
+function _recipeItemHtml(r) {
+  const cost = recipeCost(r);
+  const costBadge = cost !== null
+    ? `<span style="color:var(--success);font-weight:700;white-space:nowrap"><i class="fas fa-euro-sign" style="font-size:.65rem"></i> ${cost.toFixed(2)}</span>`
+    : '';
+  const starsHtml = r.rating
+    ? `<span class="stars-sm">${Array.from({length:5},(_,i)=>`<span style="color:${i<r.rating?'var(--amber)':'var(--border)'}">\u2605</span>`).join('')}</span>`
+    : '';
+  const activeBrews = S.brews.filter(b => b.recipe_id === r.id && !b.archived && b.status !== 'completed');
+  const linkedBeers = S.beers.filter(b => b.recipe_id === r.id && !b.archived);
+  const total33  = linkedBeers.reduce((s, b) => s + (b.stock_33cl   || 0), 0);
+  const total75  = linkedBeers.reduce((s, b) => s + (b.stock_75cl   || 0), 0);
+  const totalKeg = linkedBeers.reduce((s, b) => s + (b.keg_liters   || 0), 0);
+  const hasStock = (total33 + total75 + totalKeg) > 0;
+
+  let statusHtml = '';
+  if (activeBrews.length > 0) {
+    const brew = activeBrews[0];
+    const bs = _REC_STATUS[brew.status] || { icon:'flask', color:'var(--muted)', label:brew.status };
+    const brewLabel = activeBrews.length > 1
+      ? `${activeBrews.length} ${t('rec.active_brews_plural')}`
+      : esc(brew.name);
+    statusHtml += `<button class="rec-status-btn" style="color:${bs.color};background:${bs.color}1a;border-color:${bs.color}55"
+          onclick="event.stopPropagation();navigate('brassins')" title="${esc(brew.name)} — ${bs.label}">
+          <i class="fas fa-${bs.icon}"></i> ${brewLabel}</button>`;
+  }
+  if (total33 + total75 > 0) {
+    const parts = [total33 ? total33 + '\u00d7 33cl' : '', total75 ? total75 + '\u00d7 75cl' : ''].filter(Boolean).join(' · ');
+    statusHtml += `<button class="rec-status-btn" style="color:var(--success);background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.3)"
+          onclick="event.stopPropagation();goToCaveFromRecipe(${r.id})" title="${t('rec.view_in_cave')}">
+          <i class="fas fa-wine-bottle"></i> ${parts}</button>`;
+  }
+  if (totalKeg > 0) {
+    statusHtml += `<button class="rec-status-btn" style="color:var(--amber);background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.3)"
+          onclick="event.stopPropagation();goToCaveFromRecipe(${r.id})" title="${t('rec.view_in_cave')}">
+          <i class="fas fa-wine-barrel"></i> ${totalKeg} L</button>`;
+  }
+  if (!activeBrews.length && !hasStock) {
+    statusHtml = `<span style="font-size:.72rem;color:var(--muted);font-style:italic"><i class="fas fa-circle-info"></i> ${t('rec.no_brew_no_stock')}</span>`;
+  }
+  const dragHandle = recSort === 'recent'
+    ? `<span class="rec-drag-handle" onclick="event.stopPropagation()" title="${t('rec.drag_to_reorder')}"><i class="fas fa-grip-vertical"></i></span>`
+    : '';
+  return `<div class="recipe-item ${r.archived?'archived-item':''} ${recEditingId===r.id?'active':''}" data-id="${r.id}" ${recSort==='recent'?'draggable="true"':''} onclick="loadRecipeForm(${r.id})">
+        ${dragHandle}
+        <div style="min-width:0;flex:1">
+          <div class="recipe-item-name">${esc(r.name)}</div>
+          <div class="recipe-item-meta" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span>${r.batch_no ? '#' + r.batch_no + ' · ' : ''}${r.style ? esc(r.style) + ' · ' : ''}${r.volume}L · ${r.ingredients.length} ing.</span>
+            ${starsHtml}
+            ${costBadge}
+          </div>
+          <div class="recipe-item-status">${statusHtml}</div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0;margin-top:2px">
+          <button class="btn btn-icon btn-ghost btn-sm" onclick="event.stopPropagation();archiveItem('rec',${r.id},${r.archived?0:1})" title="${r.archived?t('common.restore'):t('common.archive')}"><i class="fas fa-${r.archived?'box-open':'box-archive'}"></i></button>
+          <button class="btn btn-icon btn-danger btn-sm" onclick="event.stopPropagation();deleteRecipe(${r.id})" title="${t('common.delete')}"><i class="fas fa-trash"></i></button>
+        </div>
+      </div>`;
+}
+
+let _recListAC = null;
+const renderRecipeListDebounced = debounce(renderRecipeList, 200);
+
+function renderRecipeList() {
+  // Sync sort select
+  const sortSel = document.getElementById('rec-sort-select');
+  if (sortSel) sortSel.value = recSort;
+
+  const q = (document.getElementById('rec-search')?.value || '').toLowerCase();
+
+  const c = document.getElementById('recipe-list-container');
+  const active = S.recipes.filter(r => !r.archived);
+  const arch   = S.recipes.filter(r => r.archived);
+  const all    = showArchivedRec ? [...active, ...arch] : active;
+  const shown  = all.filter(r => !q || r.name.toLowerCase().includes(q) || (r.style || '').toLowerCase().includes(q));
+
+  // Apply sort (archives always follow actives)
+  const sortFn = {
+    name:   (a, b) => a.name.localeCompare(b.name),
+    rating: (a, b) => (b.rating || 0) - (a.rating || 0),
+    style:  (a, b) => (a.style || '').localeCompare(b.style || ''),
+    volume: (a, b) => b.volume - a.volume,
+    recent: () => 0,
+  }[recSort] || (() => 0);
+  if (recSort !== 'recent') shown.sort(sortFn);
+
+  if (!shown.length) {
+    let emptyHtml;
+    if (q) {
+      emptyHtml = `<div class="empty-state" id="recipe-list-empty">
+           <div class="empty-state-icon" style="background:rgba(148,163,184,.08)"><i class="fas fa-magnifying-glass" style="color:var(--muted)"></i></div>
+           <div class="empty-state-title">${t('common.no_results')}</div>
+         </div>`;
+    } else if (!showArchivedRec && arch.length > 0) {
+      emptyHtml = `<div class="empty-state" id="recipe-list-empty">
+           <div class="empty-state-icon" style="background:rgba(148,163,184,.08)"><i class="fas fa-box-archive" style="color:var(--muted)"></i></div>
+           <div class="empty-state-title">${t('rec.empty_all_archived_title')}</div>
+           <div class="empty-state-sub">${t('rec.empty_all_archived_sub').replace('${n}', arch.length)}</div>
+           <div class="empty-state-actions">
+             <button class="btn btn-ghost" onclick="toggleShowArchived('rec')"><i class="fas fa-box-open"></i> ${t('rec.show_archives')}</button>
+           </div>
+         </div>`;
+    } else {
+      emptyHtml = `<div class="empty-state" id="recipe-list-empty">
+           <div class="empty-state-icon" style="background:rgba(245,158,11,.12)"><i class="fas fa-scroll" style="color:var(--amber)"></i></div>
+           <div class="empty-state-title">${t('rec.empty_title')}</div>
+           <div class="empty-state-sub">${t('rec.empty_sub')}</div>
+           <div class="empty-state-actions">
+             <button class="btn btn-primary" onclick="newRecipeFromList()"><i class="fas fa-plus"></i> ${t('rec.new')}</button>
+             <button class="btn btn-ghost" onclick="importBeerXMLFile()"><i class="fas fa-file-import"></i> BeerXML</button>
+           </div>
+         </div>`;
+    }
+    c.innerHTML = emptyHtml;
+  } else {
+    // Remove empty-state placeholder if present
+    c.querySelector('.empty')?.remove();
+    _patchList(c, shown, r => r.id, _recipeItemHtml);
+  }
+  const recCount = document.getElementById('rec-search-count');
+  if (recCount) recCount.textContent = q
+    ? t('common.n_results_of').replace('${n}', shown.length).replace('${total}', all.length)
+    : t('common.n_results').replace('${n}', shown.length);
+
+  // Archive toggle button for recipes
+  const archWrap = document.getElementById('rec-arch-wrap');
+  if (archWrap) {
+    const archCount = arch.length;
+    archWrap.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="toggleShowArchived('rec')">${showArchivedRec ? t('rec.show_archives') : '\uD83D\uDDC3\uFE0F Archives (' + archCount + ')'}</button>`;
+  }
+
+  // ── Drag & drop reorder (mode "Récent" uniquement) ──
+  if (_recListAC) _recListAC.abort();
+  _recListAC = new AbortController();
+  const { signal: recSig } = _recListAC;
+
+  if (recSort === 'recent') {
+    let dragSrcIdx = null;
+    c.querySelectorAll('.recipe-item[draggable]').forEach((item, idx) => {
+      item.addEventListener('dragstart', e => {
+        dragSrcIdx = idx;
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      }, { signal: recSig });
+      item.addEventListener('dragend', () => {
+        item.classList.remove('dragging');
+        c.querySelectorAll('.recipe-item').forEach(el => el.classList.remove('drag-over'));
+      }, { signal: recSig });
+      item.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        c.querySelectorAll('.recipe-item').forEach(el => el.classList.remove('drag-over'));
+        if (dragSrcIdx !== idx) item.classList.add('drag-over');
+      }, { signal: recSig });
+      item.addEventListener('dragleave', () => item.classList.remove('drag-over'), { signal: recSig });
+      item.addEventListener('drop', e => {
+        e.preventDefault();
+        if (dragSrcIdx === null || dragSrcIdx === idx) return;
+        // Reorder within shown list (active only or active+archived)
+        const items = [...c.querySelectorAll('.recipe-item[draggable]')];
+        const movedId = parseInt(items[dragSrcIdx].dataset.id);
+        const targetId = parseInt(items[idx].dataset.id);
+        const mi = S.recipes.findIndex(r => r.id === movedId);
+        const ti = S.recipes.findIndex(r => r.id === targetId);
+        if (mi === -1 || ti === -1) return;
+        const [moved] = S.recipes.splice(mi, 1);
+        S.recipes.splice(ti, 0, moved);
+        dragSrcIdx = null;
+        saveRecipeOrder();
+        renderRecipeList();
+      }, { signal: recSig });
+    });
+  }
+}
+
+let _saveRecipeOrderTimer = null;
+function saveRecipeOrder() {
+  clearTimeout(_saveRecipeOrderTimer);
+  _saveRecipeOrderTimer = setTimeout(async () => {
+    try {
+      await api('PUT', '/api/recipes/reorder',
+        S.recipes.map((r, i) => ({ id: r.id, sort_order: i })));
+    } catch(e) { toast(t('rec.err_save_order'), 'error'); }
+  }, 600);
+}
+
+function clearRecipeForm() {
+  recEditingId     = null;
+  recIngredients   = [];
+  _fermProfile     = [];
+  _renderFermProfile();
+  _wcSourceProfile = null;
+  document.getElementById('rec-editing-id').value = '';
+  const _maxBatch = S.recipes.reduce((m, r) => Math.max(m, r.batch_no || 0), 0);
+  document.getElementById('rec-batch').value    = _maxBatch + 1;
+  document.getElementById('rec-name').value     = '';
+  document.getElementById('rec-style').value    = '';
+  document.getElementById('rec-volume').value   = '20';
+  document.getElementById('rec-brew-date').value= '';
+  document.getElementById('rec-mash-temp').value= '66';
+  document.getElementById('rec-mash-time').value= '60';
+  document.getElementById('rec-boil-time').value= '60';
+  document.getElementById('rec-efficiency').value='72';
+  document.getElementById('rec-mash-ratio').value='3.5';
+  document.getElementById('rec-evap').value     = '3.0';
+  document.getElementById('rec-absorption').value='1.0';
+  document.getElementById('rec-notes').value    = '';
+  document.getElementById('rec-rating').value   = '';
+  renderRecStars(0);
+  renderIngredientRows();
+  recCalc();
+  renderRecipeList();
+  showRecAlert('');
+  setRecipeMode('edit');
+}
+
+function loadRecipeForm(id) {
+  const r = S.recipes.find(x => x.id === id);
+  if (!r) return;
+  exitRecipeListOnly();
+  recEditingId = id;
+  document.getElementById('rec-editing-id').value = id;
+  document.getElementById('rec-batch').value    = r.batch_no || '';
+  document.getElementById('rec-name').value     = r.name;
+  document.getElementById('rec-style').value    = r.style || '';
+  document.getElementById('rec-volume').value   = r.volume;
+  document.getElementById('rec-brew-date').value= r.brew_date || '';
+  document.getElementById('rec-mash-temp').value= r.mash_temp;
+  document.getElementById('rec-mash-time').value= r.mash_time;
+  document.getElementById('rec-boil-time').value= r.boil_time;
+  document.getElementById('rec-efficiency').value= r.brewhouse_efficiency;
+  document.getElementById('rec-mash-ratio').value= r.mash_ratio;
+  document.getElementById('rec-evap').value     = r.evap_rate;
+  document.getElementById('rec-absorption').value= r.grain_absorption;
+  document.getElementById('rec-ferm-temp').value = r.ferm_temp ?? 20;
+  document.getElementById('rec-ferm-time').value = r.ferm_time ?? 14;
+  _fermProfile     = r.ferm_profile ? JSON.parse(r.ferm_profile) : [];
+  _renderFermProfile();
+  _wcSourceProfile = null;
+  document.getElementById('rec-notes').value    = r.notes || '';
+  document.getElementById('rec-rating').value   = r.rating || '';
+  renderRecStars(r.rating || 0);
+  recIngredients = r.ingredients.map(i => ({...i}));
+  renderIngredientRows();
+  recCalc();
+  renderRecipeList();
+  showRecAlert('');
+  setRecipeMode('view');
+}
+
+function showRecAlert(msg, type='danger') {
+  const el = document.getElementById('rec-alert');
+  if (!msg) { el.classList.remove('show'); return; }
+  el.className = `alert alert-${type} show`;
+  el.textContent = msg;
+}
+
+// Water calcs
+function recCalc() {
+  const vol  = parseFloat(document.getElementById('rec-volume').value) || 20;
+  const boil = parseFloat(document.getElementById('rec-boil-time').value) || 60;
+  const ratio= parseFloat(document.getElementById('rec-mash-ratio').value) || 3;
+  const evap = parseFloat(document.getElementById('rec-evap').value) || 3;
+  const abs  = parseFloat(document.getElementById('rec-absorption').value) || 0.8;
+
+  const grainKg = recIngredients.filter(i=>i.category==='malt')
+    .reduce((s,i) => s + (i.unit==='kg' ? i.quantity : i.quantity/1000), 0);
+
+  const preboil     = vol + evap * (boil/60);
+  const grainAbs    = grainKg * abs;
+  const totalWater  = preboil + grainAbs;          // Eau totale toujours nécessaire
+
+  // Eau d'empâtage : ratio voulu, mais au minimum 55 % du total
+  // pour garantir empâtage ≥ rinçage dans tous les cas
+  const mashFromRatio = grainKg * ratio;
+  const mashMin       = totalWater * 0.55;
+  const mashWater     = grainKg > 0 ? Math.max(mashFromRatio, mashMin) : 0;
+  const sparge        = Math.max(0, totalWater - mashWater);
+
+  const fmtL = v => v > 0 ? v.toFixed(1) : '–';
+  const hasGrain = grainKg > 0;
+  document.getElementById('rw-mash').textContent   = hasGrain ? fmtL(mashWater) : '–';
+  document.getElementById('rw-sparge').textContent = hasGrain ? fmtL(sparge) : '–';
+  document.getElementById('rw-preboil').textContent= fmtL(preboil);
+  document.getElementById('rw-total').textContent  = hasGrain ? fmtL(totalWater) : '–';
+
+  // Volumes cuves + alertes dépassement
+  // Cuve empatage : eau + volume du grain (≈ 0.67 L/kg de grain sec)
+  const _grainVol  = grainKg * 0.67;
+  const _mashTotal = mashWater + _grainVol;
+  const _vs = appSettings.vessels || {};
+  const _vesselChecks = [
+    { key: 'sparge', vol: sparge,     icon: 'fa-shower',        label: t('rec.hop_sparge'), sub: `${sparge.toFixed(1)} L eau` },
+    { key: 'mash',   vol: _mashTotal, icon: 'fa-temperature-half', label: t('rec.hop_empatage'), sub: `${mashWater.toFixed(1)} L eau + ${_grainVol.toFixed(1)} L grain` },
+    { key: 'boil',   vol: preboil,    icon: 'fa-fire-burner',   label: t('rec.hop_ebullition'), sub: `${preboil.toFixed(1)} L ${t('rec.preboil_label')}` },
+  ];
+  const _vesselWarnEl = document.getElementById('rw-vessel-warnings');
+  if (_vesselWarnEl && !hasGrain) { _vesselWarnEl.innerHTML = ''; }
+  if (_vesselWarnEl && hasGrain) {
+    _vesselWarnEl.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap">` + _vesselChecks.map(c => {
+      const cap     = _vs[c.key] > 0 ? _vs[c.key] : null;
+      const over    = cap && c.vol > cap;
+      const pct     = cap ? Math.min(c.vol / cap * 100, 100) : 0;
+      const color   = over ? 'var(--danger)' : cap ? 'var(--success)' : 'var(--muted)';
+      const bg      = over ? 'rgba(239,68,68,.08)'  : cap ? 'rgba(16,185,129,.06)' : 'var(--card2)';
+      const border  = over ? 'rgba(239,68,68,.35)'  : cap ? 'rgba(16,185,129,.25)' : 'var(--border)';
+      const barColor= over ? '#ef4444' : '#10b981';
+      const capLine = cap
+        ? `<div style="margin-top:4px;height:4px;border-radius:2px;background:var(--border);overflow:hidden">
+             <div style="width:${pct.toFixed(1)}%;height:100%;background:${barColor};transition:width .3s"></div>
+           </div>
+           <div style="font-size:.7rem;color:${color};margin-top:2px">${c.vol.toFixed(1)} / ${cap} L${over ? ` <i class="fas fa-triangle-exclamation"></i> ${t('rec.vessel_overflow')}` : ''}</div>`
+        : `<div style="font-size:.7rem;color:var(--muted);margin-top:2px">${c.vol.toFixed(1)} L <span style="opacity:.6">(${t('rec.vessel_no_limit')})</span></div>`;
+      return `<div style="flex:1;min-width:130px;padding:7px 10px;background:${bg};border:1px solid ${border};border-radius:8px">
+        <div style="display:flex;align-items:center;gap:5px;font-size:.78rem;font-weight:600;color:${color}">
+          <i class="fas ${c.icon}" style="font-size:.72rem"></i> ${c.label}
+        </div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:1px">${c.sub}</div>
+        ${capLine}
+      </div>`;
+    }).join('') + `</div>`;
+  }
+
+  calcBrewStats();
+  // Store recipe-computed suggestion for water correction panel
+  window._wcSugg = hasGrain ? { mash: mashWater, sparge } : null;
+  _updateWcSuggRow();
+  // Auto-fill water correction volumes only if panel is open AND inputs are empty
+  if (hasGrain) {
+    const wcPanel = document.getElementById('rec-wc-panel');
+    if (wcPanel && wcPanel.style.display !== 'none') {
+      const wcMash   = document.getElementById('wc-volume-mash');
+      const wcSparge = document.getElementById('wc-volume-sparge');
+      if (wcMash   && !wcMash.value)   wcMash.value   = mashWater.toFixed(1);
+      if (wcSparge && !wcSparge.value) wcSparge.value = sparge.toFixed(1);
+      calcWaterCorrection();
+    }
+  }
+}
+
+function _updateWcSuggRow() {
+  const row = document.getElementById('wc-sugg-row');
+  if (!row) return;
+  const s = window._wcSugg;
+  if (!s) { row.style.display = 'none'; return; }
+  const lbl = document.getElementById('wc-sugg-label');
+  if (lbl) lbl.textContent = `${t('rec.wc_sugg')} ${s.mash.toFixed(1)} L + ${s.sparge.toFixed(1)} L`;
+  row.style.display = 'flex';
+}
+
+function _applyWcSugg() {
+  if (!window._wcSugg) return;
+  const wcMash   = document.getElementById('wc-volume-mash');
+  const wcSparge = document.getElementById('wc-volume-sparge');
+  if (wcMash)   wcMash.value   = window._wcSugg.mash.toFixed(1);
+  if (wcSparge) wcSparge.value = window._wcSugg.sparge.toFixed(1);
+  calcWaterCorrection();
+}
+
+// ── Conversion d'unité pour calcul de coût ───────────────────────────────────
+function convertQtyForCost(qty, from, to) {
+  if (from === to) return qty;
+  if (from === 'g'  && to === 'kg') return qty / 1000;
+  if (from === 'kg' && to === 'g')  return qty * 1000;
+  if ((from === 'ml' || from === 'mL') && to === 'L')  return qty / 1000;
+  if (from === 'L' && (to === 'ml' || to === 'mL'))   return qty * 1000;
+  return null; // incompatible
+}
+
+// Unité canonique dans laquelle le prix est toujours saisi/stocké
+const CANONICAL_PRICE_UNIT = { malt: 'kg', houblon: 'g', levure: 'sachet' };
+
+function ingCost(ing) {
+  const inv = ing.inventory_item_id
+    ? S.inventory.find(i => i.id === ing.inventory_item_id)
+    : S.inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase() && i.category === ing.category);
+  if (!inv || inv.price_per_unit == null) return null;
+  // Convertir la quantité de l'ingrédient vers l'unité canonique du prix
+  // (ex: g → kg pour les malts, peu importe l'unité de stockage)
+  const priceUnit = CANONICAL_PRICE_UNIT[ing.category] || inv.unit;
+  const converted = convertQtyForCost(ing.quantity || 0, ing.unit, priceUnit);
+  if (converted === null) return null;
+  return converted * inv.price_per_unit;
+}
+
+// ── Scale recette ────────────────────────────────────────────────────────────
+function openScaleModal() {
+  const vol = parseFloat(document.getElementById('rec-volume').value) || 0;
+  if (!vol) { toast(t('rec.err_no_volume'), 'error'); return; }
+  document.getElementById('scale-from').value = vol;
+  document.getElementById('scale-to').value   = '';
+  document.getElementById('scale-preview').textContent = '';
+  _dirtyModals.delete('modal-scale');
+  document.getElementById('modal-scale').classList.add('open');
+  setTimeout(() => document.getElementById('scale-to').focus(), 80);
+}
+function closeScaleModal() {
+  closeModal('modal-scale');
+}
+function updateScalePreview() {
+  const from = parseFloat(document.getElementById('scale-from').value) || 0;
+  const to   = parseFloat(document.getElementById('scale-to').value)   || 0;
+  const el   = document.getElementById('scale-preview');
+  if (!from || !to || !recIngredients.length) { el.innerHTML = ''; return; }
+  const ratio = to / from;
+  const fmtQ = (q, u) => {
+    const v = Math.round(q * 1000) / 1000;
+    return `${v % 1 === 0 ? v : v.toFixed(2)} ${u}`;
+  };
+  const CATS = [
+    { key: 'malt',    label: t('cat.malts'),    icon: 'fa-wheat-awn', color: 'var(--malt)'  },
+    { key: 'houblon', label: t('cat.houblons'), icon: 'fa-seedling',  color: 'var(--hop)'   },
+    { key: 'levure',  label: t('cat.levures'),  icon: 'fa-flask',     color: 'var(--yeast)' },
+    { key: 'autre',   label: t('cat.autres'),   icon: 'fa-box',       color: 'var(--other)' },
+  ];
+  const rows = CATS.map(cat => {
+    const items = recIngredients.filter(i => i.category === cat.key && i.name && i.quantity > 0);
+    if (!items.length) return '';
+    const lines = items.map(i => {
+      const newQ = i.quantity * ratio;
+      return `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--text);font-size:.82rem">${esc(i.name)}</span>
+        <span style="white-space:nowrap;font-size:.82rem">
+          <span style="color:var(--muted)">${fmtQ(i.quantity, i.unit)}</span>
+          <span style="color:var(--muted);margin:0 4px">→</span>
+          <span style="color:${cat.color};font-weight:600">${fmtQ(newQ, i.unit)}</span>
+        </span>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:8px">
+      <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${cat.color};margin-bottom:4px">
+        <i class="fas ${cat.icon}"></i> ${cat.label}
+      </div>
+      ${lines}
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="font-size:.8rem;color:var(--muted);text-align:center;margin-bottom:10px">
+      Facteur <strong style="color:var(--text)">${ratio.toFixed(3)}×</strong>
+    </div>
+    <div style="max-height:260px;overflow-y:auto;padding-right:2px">${rows}</div>`;
+}
+function applyScale() {
+  const from = parseFloat(document.getElementById('scale-from').value) || 0;
+  const to   = parseFloat(document.getElementById('scale-to').value)   || 0;
+  if (!from || !to) { toast(t('rec.err_invalid_volume'), 'error'); return; }
+  if (to === from)  { closeScaleModal(); return; }
+  const ratio = to / from;
+  recIngredients.forEach(ing => {
+    if (ing.quantity != null) {
+      const scaled = ing.quantity * ratio;
+      ing.quantity = (ing.unit === 'g' || ing.unit === 'ml')
+        ? Math.round(scaled * 100) / 100
+        : Math.round(scaled * 1000) / 1000;
+    }
+  });
+  document.getElementById('rec-volume').value = to;
+  renderIngredientRows();
+  recCalc();
+  closeScaleModal();
+  toast(t('rec.scaled').replace('${from}', from).replace('${to}', to).replace('${ratio}', ratio.toFixed(2)), 'success');
+}
+
+// Ingredient rows
+let ingRowId = 0;
+function addIngRow(cat, data = null) {
+  const rid = ++ingRowId;
+  const ing = data || { _rid: rid, category: cat, name: '', quantity: 0,
+    unit: cat==='malt'?'kg':cat==='houblon'?'g':cat==='levure'?'sachet':'g',
+    hop_type: cat==='houblon' ? 'ebullition' : null,
+    other_type: cat==='autre' ? 'ebullition' : null,
+    inventory_item_id: null };
+  if (!data) { ing._rid = rid; recIngredients.push(ing); }
+  else ing._rid = rid;
+  renderIngredientRows();
+}
+
+function renderIngredientRows() {
+  const container = document.getElementById('rec-ingredients');
+  if (!recIngredients.length) {
+    container.innerHTML = `<div style="color:var(--muted);font-size:.875rem;padding:12px 0">${t('rec.no_ing')}</div>`;
+    return;
+  }
+
+  const cats = ['malt','houblon','levure','autre'];
+  let html = '';
+  // Pre-compute total malt kg for % display
+  const totalMaltKg = recIngredients
+    .filter(i => i.category === 'malt')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.quantity / 1000), 0);
+  const totalHopG = recIngredients
+    .filter(i => i.category === 'houblon')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity * 1000 : i.quantity), 0);
+
+  cats.forEach(cat => {
+    const ings = recIngredients.filter(i => i.category === cat);
+    if (!ings.length) return;
+    const catColors = {malt:'var(--malt)',houblon:'var(--hop)',levure:'var(--yeast)',autre:'var(--other)'};
+    let totalLabel = '';
+    if (cat === 'malt' && totalMaltKg > 0)
+      totalLabel = `<span style="font-weight:400;opacity:.7;margin-left:8px">${totalMaltKg >= 1 ? totalMaltKg.toFixed(2)+' kg' : (totalMaltKg*1000).toFixed(0)+' g'}</span>`;
+    if (cat === 'houblon') {
+      const hopTotalSpan = totalHopG > 0 ? `<span style="font-weight:400;opacity:.7;margin-left:8px">${totalHopG.toFixed(0)} g</span>` : '';
+      totalLabel = hopTotalSpan + `<span id="rec-ibu-badge" style="font-weight:600;margin-left:10px;font-size:.78rem;color:var(--hop)"></span>`;
+    }
+    html += `<div style="margin-bottom:10px"><div class="section-label" style="color:${catColors[cat]};margin-bottom:6px">${catLabel(cat)}${totalLabel}</div>`;
+    ings.forEach((ing, idx) => {
+      const realIdx = recIngredients.indexOf(ing);
+      const stockInfo = getStockInfo(ing);
+      let extraFields = '';
+      if (cat === 'houblon') {
+        const ht = ing.hop_type || 'ebullition';
+        const durationField = ht === 'dryhop' ? `
+          <div style="flex-shrink:0;width:88px">
+            <div class="ing-lbl"><i class="fas fa-calendar-days"></i> ${t('rec.ing_days')}</div>
+            <input type="number" placeholder="${t('rec.ing_days').toLowerCase()}" step="1" min="0" value="${ing.hop_days!=null?ing.hop_days:''}"
+              onchange="recIngredients[${realIdx}].hop_days=parseFloat(this.value)||null;calcBrewStats()"
+              style="font-size:.8rem">
+          </div>` : `
+          <div style="flex-shrink:0;width:88px">
+            <div class="ing-lbl"><i class="fas fa-clock"></i> ${t('rec.ing_min')}</div>
+            <input type="number" placeholder="min" step="1" min="0" value="${ing.hop_time!=null?ing.hop_time:''}"
+              onchange="recIngredients[${realIdx}].hop_time=parseFloat(this.value)||null;calcBrewStats()"
+              style="font-size:.8rem">
+          </div>`;
+        extraFields = `
+          <div style="flex-shrink:0;width:78px">
+            <div class="ing-lbl"><i class="fas fa-percent"></i> Alpha</div>
+            <input type="number" placeholder="%" step="0.1" min="0" max="30" value="${ing.alpha!=null?ing.alpha:''}"
+              onchange="recIngredients[${realIdx}].alpha=parseFloat(this.value)||null;calcBrewStats()"
+              style="font-size:.8rem">
+          </div>
+          <div style="flex-shrink:0;min-width:128px">
+            <div class="ing-lbl"><i class="fas fa-tag"></i> ${t('rec.ing_type')}</div>
+            <select onchange="recIngredients[${realIdx}].hop_type=this.value;renderIngredientRows()" style="font-size:.8rem">
+              <option value="ebullition" ${ht==='ebullition'?'selected':''}>${t('rec.hop_ebullition')}</option>
+              <option value="whirlpool"  ${ht==='whirlpool' ?'selected':''}>${t('rec.hop_whirlpool')}</option>
+              <option value="dryhop"     ${ht==='dryhop'    ?'selected':''}>${t('rec.hop_dryhop')}</option>
+            </select>
+          </div>
+          ${durationField}`;
+      }
+      if (cat === 'autre') {
+        const ot = ing.other_type || 'ebullition';
+        const OTHER_LABELS = {empatage:t('rec.hop_empatage'),sparge:t('rec.hop_sparge'),ebullition:t('rec.hop_ebullition'),flameout:t('rec.hop_flameout'),whirlpool:t('rec.hop_whirlpool'),dryhop:t('rec.hop_dryhop'),fermentation:t('rec.hop_fermentation'),packaging:t('rec.hop_packaging')};
+        const needsMinutes = ot === 'ebullition' || ot === 'whirlpool';
+        const needsDays    = ot === 'dryhop';
+        const timeField = needsMinutes ? `
+          <div style="flex-shrink:0;width:88px">
+            <div class="ing-lbl"><i class="fas fa-clock"></i> ${t('rec.ing_min')}</div>
+            <input type="number" placeholder="min" step="1" min="0" value="${ing.other_time!=null?ing.other_time:''}"
+              onchange="recIngredients[${realIdx}].other_time=parseFloat(this.value)||null"
+              style="font-size:.8rem">
+          </div>` : needsDays ? `
+          <div style="flex-shrink:0;width:88px">
+            <div class="ing-lbl"><i class="fas fa-calendar-days"></i> ${t('rec.ing_days')}</div>
+            <input type="number" placeholder="${t('rec.ing_days').toLowerCase()}" step="1" min="0" value="${ing.other_time!=null?ing.other_time:''}"
+              onchange="recIngredients[${realIdx}].other_time=parseFloat(this.value)||null"
+              style="font-size:.8rem">
+          </div>` : '';
+        extraFields = `
+          <div style="flex-shrink:0;min-width:152px">
+            <div class="ing-lbl"><i class="fas fa-tag"></i> ${t('rec.ing_stage')}</div>
+            <select onchange="recIngredients[${realIdx}].other_type=this.value;renderIngredientRows()" style="font-size:.8rem">
+              ${Object.entries(OTHER_LABELS).map(([v,l])=>`<option value="${v}" ${ot===v?'selected':''}>${l}</option>`).join('')}
+            </select>
+          </div>
+          ${timeField}`;
+      }
+      // Malt % badge
+      const maltKg  = cat === 'malt' ? (ing.unit === 'kg' ? ing.quantity : ing.quantity / 1000) : 0;
+      const maltPct = cat === 'malt' && totalMaltKg > 0 ? (maltKg / totalMaltKg * 100).toFixed(1) : null;
+
+      html += `
+        <div class="ing-row" draggable="true" data-ridx="${realIdx}">
+          <div class="ing-drag-handle" onmousedown="_ingDragFromHandle=true" onmouseup="_ingDragFromHandle=false" ontouchstart="_ingDragFromHandle=true"><i class="fas fa-grip-vertical"></i></div>
+          <div class="ing-name" style="position:relative">
+            <div class="ing-lbl"><i class="fas fa-flask" style="font-size:.6rem"></i> ${t('rec.ing_name')}</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <div class="stock-dot ${stockInfo.cls}" title="${stockInfo.tip}" style="flex-shrink:0"></div>
+              <input type="text" placeholder="${t('common.name')}" value="${esc(ing.name)}"
+                oninput="recIngredients[${realIdx}].name=this.value;updateIngSuggest(this,${realIdx},'${cat}')"
+                onfocus="updateIngSuggest(this,${realIdx},'${cat}')"
+                onblur="setTimeout(()=>closeAllSuggest(),200)"
+                style="font-size:.875rem">
+              ${stockInfo.badge}
+            </div>
+            <div class="ing-suggest" id="sug-${realIdx}"></div>
+          </div>
+          <div class="ing-qty" style="max-width:110px">
+            <div class="ing-lbl"><i class="fas fa-scale-balanced"></i> ${t('rec.ing_qty')}</div>
+            <input type="number" placeholder="0" step="${ing.unit==='g'?0.01:ing.unit==='sachet'?0.5:0.1}" min="0" value="${ing.quantity||''}"
+              onchange="recIngredients[${realIdx}].quantity=parseFloat(this.value)||0;renderIngredientRows();recCalc()"
+              style="font-size:.875rem">
+          </div>
+          <div class="ing-unit" style="max-width:90px">
+            <div class="ing-lbl"><i class="fas fa-ruler"></i> ${t('rec.ing_unit')}</div>
+            <select onchange="recIngredients[${realIdx}].unit=this.value;renderIngredientRows();recCalc()" style="font-size:.8rem">
+              ${['kg','g','L','mL','sachet','pièce'].map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
+            </select>
+          </div>
+          ${maltPct !== null ? `<div class="malt-pct">${maltPct}%</div>` : ''}
+          ${extraFields}
+          ${(() => { const c = ingCost(ing); return c !== null ? `<div style="flex-shrink:0;text-align:center"><div class="ing-lbl"><i class="fas fa-euro-sign"></i> ${t('rec.ing_cost')}</div><div style="font-size:.85rem;color:var(--success);font-weight:600">≈ ${c.toFixed(2)} €</div></div>` : ''; })()}
+          <button class="btn btn-icon btn-danger btn-sm ing-remove" onclick="removeIng(${realIdx})"><i class="fas fa-times"></i></button>
+        </div>`;
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+  _initIngDrag(container);
+  calcBrewStats();
+}
+
+function getStockInfo(ing) {
+  if (!ing.inventory_item_id) {
+    const match = S.inventory.find(i => i.name.toLowerCase() === ing.name.toLowerCase() && i.category === ing.category);
+    if (match) { ing.inventory_item_id = match.id; }
+  }
+  const inv = ing.inventory_item_id ? S.inventory.find(i => i.id === ing.inventory_item_id) : null;
+  if (!inv) return { cls: 'stock-na', tip: t('inv.not_linked'), badge: '' };
+
+  const needed = _toBaseQty(parseFloat(ing.quantity) || 0, ing.unit);
+  const avail  = _toBaseQty(parseFloat(inv.quantity)  || 0, inv.unit);
+
+  // Familles d'unités incompatibles (masse vs volume) — on ne peut pas comparer
+  if (needed.base !== avail.base && needed.val > 0) {
+    const badge = `<div class="stock-badge sb-ok" style="font-size:.7rem">${_formatBaseQty(avail.val, avail.base)}</div>`;
+    return { cls: 'stock-na', tip: t('inv.not_linked'), badge };
+  }
+
+  const ok  = avail.val >= needed.val;
+  const low = avail.val > 0 && avail.val < needed.val;
+  const cls   = ok ? 'stock-ok' : low ? 'stock-low' : 'stock-none';
+  const sbcls = ok ? 'sb-ok'    : low ? 'sb-low'    : 'sb-empty';
+  const tip   = ok ? t('cave.group_in_stock') : low ? t('inv.low_stock') : t('brew.stock_warn');
+
+  // Badge : disponible / nécessaire si insuffisant
+  const availStr  = _formatBaseQty(avail.val, avail.base);
+  const neededStr = _formatBaseQty(needed.val, needed.base);
+  const badge = `<div class="stock-badge ${sbcls}" style="font-size:.7rem">${availStr}${!ok ? ` / ${neededStr}` : ''}</div>`;
+
+  return { cls, tip, badge };
+}
+
+function updateIngSuggest(input, idx, cat) {
+  const q   = input.value.toLowerCase();
+  const sug = document.getElementById(`sug-${idx}`);
+  _rSugItems = [];
+  closeAllSuggest();
+
+  // Search catalog first, then include inventory-only items
+  const catItems = S.catalog.filter(c =>
+    c.category === cat && (q.length < 1 || c.name.toLowerCase().includes(q))
+  );
+  // Also include inventory items not in catalog
+  const invExtra = S.inventory.filter(i =>
+    i.category === cat &&
+    (q.length < 1 || i.name.toLowerCase().includes(q)) &&
+    !catItems.some(c => c.name.toLowerCase() === i.name.toLowerCase())
+  );
+
+  if (!catItems.length && !invExtra.length) return;
+
+  // Group by subcategory
+  const groups = {};
+  catItems.forEach(c => {
+    const g = c.subcategory || t('cat.autres');
+    if (!groups[g]) groups[g] = [];
+    const invMatch = S.inventory.find(i => i.name.toLowerCase() === c.name.toLowerCase() && i.category === cat);
+    groups[g].push({ ...c, _inv: invMatch || null });
+  });
+  if (invExtra.length) {
+    const _gKey = t('cave.group_in_stock');
+    if (!groups[_gKey]) groups[_gKey] = [];
+    invExtra.forEach(i => groups[_gKey].push({ name: i.name, _inv: i, id: null }));
+  }
+
+  let html = '';
+  Object.entries(groups).forEach(([grp, items]) => {
+    html += `<div class="ing-suggest-cat">${esc(grp)}</div>`;
+    items.forEach(item => {
+      const inv     = item._inv;
+      const stockTxt = inv ? `<span style="color:${inv.quantity>0?'var(--success)':'var(--danger)'};">${inv.quantity} ${inv.unit}</span>` : '';
+      const specs   = [];
+      if (item.ebc   != null) specs.push(`EBC ${item.ebc}`);
+      if (item.alpha != null) specs.push(`α ${item.alpha}%`);
+      const specTxt = specs.length ? `<span style="color:var(--muted);font-size:.72rem">${specs.join(' · ')}</span>` : '';
+      const _ri = _rSugItems.push({name: item.name, invId: inv?inv.id:null, catalog: item}) - 1;
+      html += `<div class="ing-suggest-item" onmousedown="selectSuggest(${idx},${_ri})">
+        <span>${esc(item.name)} ${specTxt}</span>
+        ${stockTxt}
+      </div>`;
+    });
+  });
+  sug.innerHTML = html;
+  sug.classList.add('open');
+}
+
+function closeAllSuggest() {
+  document.querySelectorAll('.ing-suggest').forEach(s => s.classList.remove('open'));
+}
+
+function selectSuggest(idx, si) {
+  const { name, invId, catalog } = _rSugItems[si];
+  recIngredients[idx].name = name;
+  recIngredients[idx].inventory_item_id = invId || null;
+  // Auto-fill from catalog
+  if (catalog) {
+    if (catalog.ebc   != null) recIngredients[idx].ebc   = catalog.ebc;
+    if (catalog.alpha != null) recIngredients[idx].alpha = catalog.alpha;
+    if (catalog.gu    != null) recIngredients[idx].gu    = catalog.gu;
+    if (catalog.default_unit && !recIngredients[idx].unit)  recIngredients[idx].unit  = catalog.default_unit;
+  }
+  if (!recIngredients[idx].unit && invId) {
+    const inv = S.inventory.find(i => i.id === invId);
+    if (inv) recIngredients[idx].unit = inv.unit;
+  }
+  renderIngredientRows();
+  recCalc();
+}
+
+function removeIng(idx) {
+  recIngredients.splice(idx, 1);
+  renderIngredientRows();
+  recCalc();
+}
+
+function _validateRecipeFields() {
+  const checks = [
+    { id: 'rec-mash-temp',   label: t('rec.mash_temp'),        min: 30,  max: 85  },
+    { id: 'rec-mash-time',   label: t('rec.mash_time'),        min: 0,   max: 500 },
+    { id: 'rec-boil-time',   label: t('rec.boil_time'),        min: 0,   max: 500 },
+    { id: 'rec-efficiency',  label: t('rec.efficiency'),       min: 5,   max: 100 },
+    { id: 'rec-ferm-temp',   label: t('rec.ferm_temp'),        min: 0,   max: 50  },
+    { id: 'rec-ferm-time',   label: t('rec.ferm_time_label'),  min: 0,   max: 730 },
+    { id: 'rec-mash-ratio',  label: t('rec.mash_ratio'),       min: 0.5, max: 10  },
+    { id: 'rec-evap',        label: t('rec.evap'),             min: 0,   max: 50  },
+    { id: 'rec-absorption',  label: t('rec.absorption'),       min: 0,   max: 5   },
+  ];
+  const errors = [];
+  checks.forEach(({ id, label, min, max }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.borderColor = '';
+    const val = parseFloat(el.value);
+    if (isNaN(val) || val < min || val > max) {
+      errors.push(`${label} (${min}–${max})`);
+      el.style.borderColor = 'var(--danger)';
+      el.addEventListener('input', () => { el.style.borderColor = ''; }, { once: true });
+    }
+  });
+  return errors;
+}
+
+async function saveRecipe(silent = false) {
+  const name = document.getElementById('rec-name').value.trim();
+  if (!name) { showRecAlert(t('rec.err_name_required')); return; }
+  const fieldErrors = _validateRecipeFields();
+  if (fieldErrors.length) {
+    showRecAlert(t('rec.err_field_range').replace('${fields}', fieldErrors.join(', ')));
+    return;
+  }
+  const payload = {
+    batch_no:    parseInt(document.getElementById('rec-batch').value) || null,
+    name,
+    style:       document.getElementById('rec-style').value.trim() || null,
+    volume:      parseFloat(document.getElementById('rec-volume').value) || 20,
+    brew_date:   document.getElementById('rec-brew-date').value || null,
+    mash_temp:   parseFloat(document.getElementById('rec-mash-temp').value),
+    mash_time:   parseInt(document.getElementById('rec-mash-time').value),
+    boil_time:   parseInt(document.getElementById('rec-boil-time').value),
+    mash_ratio:  parseFloat(document.getElementById('rec-mash-ratio').value),
+    evap_rate:   parseFloat(document.getElementById('rec-evap').value),
+    grain_absorption: parseFloat(document.getElementById('rec-absorption').value),
+    brewhouse_efficiency: parseFloat(document.getElementById('rec-efficiency').value),
+    ferm_temp:    parseFloat(document.getElementById('rec-ferm-temp').value) || 20,
+    ferm_time:    parseInt(document.getElementById('rec-ferm-time').value)   || 14,
+    ferm_profile: _fermProfile.length ? JSON.stringify(_fermProfile) : null,
+    notes:        document.getElementById('rec-notes').value.trim() || null,
+    rating:      parseInt(document.getElementById('rec-rating').value) || null,
+    ingredients: recIngredients.map(i => ({
+      inventory_item_id: i.inventory_item_id || null,
+      name: i.name, category: i.category,
+      quantity: i.quantity, unit: i.unit,
+      hop_time: i.hop_time || null, hop_type: i.hop_type || null, hop_days: i.hop_days || null,
+      other_type: i.other_type || null, other_time: i.other_time || null,
+      ebc: i.ebc || null, alpha: i.alpha || null, notes: i.notes || null,
+    })),
+  };
+  try {
+    if (recEditingId) {
+      const updated = await api('PUT', `/api/recipes/${recEditingId}`, payload);
+      const idx = S.recipes.findIndex(r => r.id === recEditingId);
+      if (idx !== -1) S.recipes[idx] = updated;
+      if (!silent) toast(t('rec.updated'), 'success');
+    } else {
+      let usedDraftId = null;
+      if (_pendingDraftId) { usedDraftId = _pendingDraftId; payload.draft_id = _pendingDraftId; _pendingDraftId = null; }
+      let created;
+      try {
+        created = await api('POST', '/api/recipes', payload);
+      } catch(e) {
+        if (e.error === 'duplicate') {
+          if (!await confirmModal(t('rec.duplicate_confirm').replace('${name}', e.name))) return;
+          created = await api('POST', '/api/recipes?force=1', payload);
+        } else throw e;
+      }
+      S.recipes.unshift(created);
+      recEditingId = created.id;
+      // Lier l'événement calendrier du brouillon à la nouvelle recette
+      if (usedDraftId) {
+        const ce = (S.customEvents || []).find(e => e.draft_id === usedDraftId && !e.recipe_id);
+        if (ce) {
+          try {
+            const updatedEv = await api('PUT', `/api/custom_events/${ce.id}`, { ...ce, recipe_id: created.id });
+            const idx = S.customEvents.findIndex(x => x.id === ce.id);
+            if (idx !== -1) S.customEvents[idx] = updatedEv;
+          } catch(_) {}
+        }
+      }
+      if (!silent) toast(t('rec.saved'), 'success');
+    }
+    renderRecipeList();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    showRecAlert('');
+    setRecipeMode('view');
+  } catch(e) {
+    if (e.error === 'validation' && e.fields) {
+      const _labels = {
+        mash_temp:'rec.mash_temp', mash_time:'rec.mash_time', boil_time:'rec.boil_time',
+        brewhouse_efficiency:'rec.efficiency', ferm_temp:'rec.ferm_temp',
+        ferm_time:'rec.ferm_time_label', mash_ratio:'rec.mash_ratio',
+        evap_rate:'rec.evap', grain_absorption:'rec.absorption', volume:'rec.volume',
+      };
+      const msgs = Object.entries(e.fields)
+        .map(([f, msg]) => `${t(_labels[f] || f)} : ${msg}`)
+        .join(' — ');
+      showRecAlert(msgs);
+    } else {
+      showRecAlert(t('rec.err_save_msg') + ' : ' + (e.detail || e.error || ''));
+    }
+  }
+}
+
+async function deleteRecipe(id) {
+  if (!await confirmModal(t('common.confirm_delete'), { danger: true })) return;
+  try {
+    await api('DELETE', `/api/recipes/${id}`);
+    S.recipes = S.recipes.filter(r => r.id !== id);
+    if (recEditingId === id) clearRecipeForm();
+    else renderRecipeList();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast(t('rec.deleted'), 'success');
+  } catch(e) { toast(t('common.delete') + ' — ' + t('common.error'), 'error'); }
+}
+
+// ── Mode visualisation / édition ──────────────────────────────────────────────
+function setRecipeMode(mode) {
+  recViewMode = mode;
+  const formEl  = document.getElementById('rec-form-panel');
+  const viewEl  = document.getElementById('rec-view-panel');
+  const actions = document.getElementById('rec-actions');
+  if (mode === 'view') {
+    formEl.style.display = 'none';
+    viewEl.style.display = '';
+    renderRecipeView();
+    actions.innerHTML = `
+      <button class="btn btn-ghost" onclick="showRecipeListOnly()"><i class="fas fa-arrow-left"></i> ${t('common.back')}</button>
+      <button class="btn btn-ghost" onclick="newRecipeFromList()"><i class="fas fa-plus"></i> ${t('rec.new')}</button>
+      <div style="position:relative">
+        <button class="btn btn-ghost" onclick="toggleRecActionsMenu(event)" title="${t('rec.more_actions')}"><i class="fas fa-ellipsis"></i></button>
+        <div id="rec-more-menu" class="rec-menu" style="display:none">
+          <button class="rec-menu-item" onclick="openBrewModal(recEditingId);closeRecActionsMenu()" style="color:var(--success)"><i class="fas fa-fire-burner" style="width:14px"></i> ${t('rec.brew_btn')}</button>
+          <div class="rec-menu-sep"></div>
+          <button class="rec-menu-item" onclick="openCloneModal();closeRecActionsMenu()"><i class="fas fa-copy" style="width:14px"></i> ${t('rec.clone_title')}</button>
+          <button class="rec-menu-item" onclick="checkRecipeStock();closeRecActionsMenu()" style="color:var(--info)"><i class="fas fa-boxes-stacked" style="width:14px"></i> ${t('rec.check_stock')}</button>
+          <div class="rec-menu-sep"></div>
+          <button class="rec-menu-item" onclick="printRecipe();closeRecActionsMenu()"><i class="fas fa-print" style="width:14px"></i> ${t('cave.print')}</button>
+          <button class="rec-menu-item" onclick="printBrewingSheet();closeRecActionsMenu()" style="color:var(--hop)"><i class="fas fa-file-lines" style="width:14px"></i> ${t('rec.brew_sheet_btn')}</button>
+          <button class="rec-menu-item" onclick="printCombinedSheet();closeRecActionsMenu()" style="color:var(--info)"><i class="fas fa-table-columns" style="width:14px"></i> ${t('rec.combined_print_btn')}</button>
+          <button class="rec-menu-item" onclick="openBrewingGuide();closeRecActionsMenu()" style="color:var(--amber)"><i class="fas fa-fire-burner" style="width:14px"></i> ${t('rec.guide_btn')}</button>
+          <div class="rec-menu-sep"></div>
+          <button class="rec-menu-item" onclick="openPrimingCalc();closeRecActionsMenu()" style="color:var(--info)"><i class="fas fa-flask" style="width:14px"></i> ${t('rec.priming_btn')}</button>
+          <button class="rec-menu-item" onclick="exportSingleBeerXML(recEditingId);closeRecActionsMenu()"><i class="fas fa-file-export" style="width:14px"></i> ${t('rec.beerxml_export_btn')}</button>
+          <button class="rec-menu-item" onclick="openRecipeHistory();closeRecActionsMenu()"><i class="fas fa-clock-rotate-left" style="width:14px"></i> ${t('rec.history_btn')}</button>
+        </div>
+      </div>
+      <button class="btn btn-ghost" onclick="checkRecipeStock()" title="${t('rec.check_stock')}"><i class="fas fa-cart-shopping" style="color:var(--amber)"></i></button>
+      <button class="btn btn-primary" onclick="setRecipeMode('edit')"><i class="fas fa-pen"></i> ${t('common.edit')}</button>`;
+  } else {
+    formEl.style.display = '';
+    viewEl.style.display = 'none';
+    const hasRec = !!recEditingId;
+    actions.innerHTML = `
+      <button class="btn btn-ghost" onclick="showRecipeListOnly()"><i class="fas fa-arrow-left"></i> ${t('common.back')}</button>
+      ${hasRec ? `<button class="btn btn-ghost" onclick="loadRecipeForm(${recEditingId})"><i class="fas fa-rotate-left"></i> ${t('common.cancel')}</button>` : ''}
+      <button class="btn btn-primary" onclick="withBtn(this, saveRecipe)"><i class="fas fa-floppy-disk"></i> ${t('common.save')}</button>`;
+  }
+}
+
+// ── Helpers unités (partagés par getStockInfo + checkRecipeStock) ─────────────
+
+function _toBaseQty(qty, unit) {
+  if (unit === 'kg')                  return { val: qty * 1000, base: 'g'  };
+  if (unit === 'g')                   return { val: qty,        base: 'g'  };
+  if (unit === 'L' || unit === 'l')   return { val: qty * 1000, base: 'ml' };
+  if (unit === 'ml' || unit === 'mL') return { val: qty,        base: 'ml' };
+  return { val: qty, base: unit };
+}
+function _formatBaseQty(val, base) {
+  if (base === 'g'  && val >= 1000) return (val / 1000).toFixed(3).replace(/\.?0+$/, '') + ' kg';
+  if (base === 'ml' && val >= 1000) return (val / 1000).toFixed(3).replace(/\.?0+$/, '') + ' L';
+  return val.toFixed(3).replace(/\.?0+$/, '') + ' ' + base;
+}
+
+// ── Vérification disponibilité stock / liste de courses ──────────────────────
+let _shoppingText = '';
+
+async function checkRecipeStock() {
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+
+  const titleEl = document.getElementById('stock-check-title');
+  const body    = document.getElementById('stock-check-body');
+  if (!titleEl || !body) return;
+  titleEl.textContent = t('rec.stock_title') + ' — ' + r.name;
+
+  // Charger l'inventaire si non encore disponible sur cette page
+  if (!S.inventory.length) {
+    body.innerHTML = `<div style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i> ${t('rec.stock_loading')}</div>`;
+    openModal('modal-stock-check');
+    await ensureInventoryLoaded();
+  }
+
+  const toBase     = _toBaseQty;
+  const formatBase = _formatBaseQty;
+
+  const inv = (S.inventory || []).filter(i => !i.archived);
+  if (!inv.length) {
+    body.innerHTML = `<div class="empty" style="padding:20px 0"><i class="fas fa-box-open"></i><p>${t('rec.stock_no_inv')}</p></div>`;
+    openModal('modal-stock-check');
+    return;
+  }
+
+  // Build an inventory map: normalize all quantities to base unit, summed by name+unit-base
+  const invMap = {};
+  inv.forEach(item => {
+    const key  = item.name.trim().toLowerCase();
+    const b    = toBase(parseFloat(item.quantity) || 0, item.unit);
+    if (!invMap[key]) invMap[key] = {};
+    invMap[key][b.base] = (invMap[key][b.base] || 0) + b.val;
+  });
+
+  const ings = recIngredients.length ? recIngredients : (r.ingredients || []);
+  if (!ings.length) {
+    body.innerHTML = `<p style="color:var(--muted);text-align:center">${t('rec.list_empty')}</p>`;
+    openModal('modal-stock-check');
+    return;
+  }
+
+  const CAT_COLOR = { malt:'var(--malt)', houblon:'var(--hop)', levure:'var(--yeast)', autre:'var(--other)' };
+  const CAT_ICON  = { malt:'wheat-awn', houblon:'seedling', levure:'flask', autre:'box' };
+
+  // ── Hop substitution helper ────────────────────────────────────────────────
+  function hopSubstitutes(ingName, neededAlpha) {
+    const catalog = S.catalog || [];
+    const hops = catalog.filter(c => c.category === 'houblon' && c.name.trim().toLowerCase() !== ingName.trim().toLowerCase());
+    if (!hops.length) return [];
+
+    // Parse aroma keywords for the missing hop (from catalog)
+    const sourceHop  = catalog.find(c => c.category === 'houblon' && c.name.trim().toLowerCase() === ingName.trim().toLowerCase());
+    const srcKeywords = sourceHop && sourceHop.aroma_spec
+      ? sourceHop.aroma_spec.toLowerCase().split(/[,;\s]+/).filter(k => k.length > 2)
+      : [];
+    const srcAlpha = neededAlpha != null ? neededAlpha : (sourceHop ? parseFloat(sourceHop.alpha) || null : null);
+
+    const scored = hops.map(h => {
+      let score = 0;
+      // Alpha proximity (0..50 pts) — only if both have alpha
+      const hAlpha = parseFloat(h.alpha);
+      if (srcAlpha != null && !isNaN(hAlpha)) {
+        const diff = Math.abs(hAlpha - srcAlpha);
+        score += Math.max(0, 50 - diff * 5);
+      }
+      // Aroma keyword overlap (0..50 pts)
+      if (srcKeywords.length && h.aroma_spec) {
+        const hKeywords = h.aroma_spec.toLowerCase().split(/[,;\s]+/).filter(k => k.length > 2);
+        const overlap = srcKeywords.filter(k => hKeywords.includes(k)).length;
+        score += Math.min(50, (overlap / srcKeywords.length) * 50);
+      }
+      // Inventory availability bonus
+      const hKey = h.name.trim().toLowerCase();
+      const inStock = invMap[hKey] && Object.values(invMap[hKey]).some(v => v > 0);
+      return { hop: h, score, inStock };
+    });
+
+    return scored
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score || (b.inStock ? 1 : 0) - (a.inStock ? 1 : 0))
+      .slice(0, 3);
+  }
+
+  function renderSubstitutePanel(ingName, ingAlpha) {
+    const subs = hopSubstitutes(ingName, ingAlpha);
+    if (!subs.length) {
+      return `<div style="font-size:.75rem;color:var(--muted);padding:4px 0 2px 24px">${t('rec.stock_sub_none')}</div>`;
+    }
+    const items = subs.map(s => {
+      const alphaStr = s.hop.alpha != null ? ` · ${t('rec.stock_sub_alpha')} ${parseFloat(s.hop.alpha).toFixed(1)}%` : '';
+      const aromaStr = s.hop.aroma_spec ? ` · <em style="color:var(--muted)">${esc(s.hop.aroma_spec)}</em>` : '';
+      const stockBadge = s.inStock
+        ? `<span style="background:rgba(16,185,129,.12);color:var(--success);padding:1px 6px;border-radius:8px;font-size:.7rem;margin-left:4px">${t('rec.stock_sub_in_stock')}</span>`
+        : '';
+      return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0 2px 24px;font-size:.77rem">
+        <i class="fas fa-seedling" style="color:var(--muted);width:10px;font-size:.65rem;flex-shrink:0"></i>
+        <span style="font-weight:500">${esc(s.hop.name)}</span>${stockBadge}<span style="color:var(--muted)">${alphaStr}${aromaStr}</span>
+      </div>`;
+    }).join('');
+    return `<div style="padding:4px 0 2px">
+      <div style="font-size:.72rem;color:var(--muted);padding:2px 0 2px 24px;text-transform:uppercase;letter-spacing:.04em">${t('rec.stock_substitutes')}</div>
+      ${items}
+    </div>`;
+  }
+
+  const shoppingItems = [];
+  let allOk = true;
+  let rows = '';
+  ings.forEach(ing => {
+    const needed     = toBase(parseFloat(ing.quantity) || 0, ing.unit);
+    const nameKey    = (ing.name || '').trim().toLowerCase();
+    const invQtyMap  = invMap[nameKey] || {};
+    const available  = invQtyMap[needed.base] || 0;
+    const inInv      = Object.keys(invQtyMap).length > 0;
+    // Item is in inventory but stored in a different unit family (e.g. recipe in ml, inventory in g)
+    const unitMismatch = inInv && available === 0;
+    const color      = CAT_COLOR[ing.category] || 'var(--text)';
+    const icon       = CAT_ICON[ing.category]  || 'box';
+
+    let status, statusColor, detail;
+    if (!inInv) {
+      status      = `<span style="background:rgba(239,68,68,.12);color:#f87171;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_missing')}</span>`;
+      statusColor = '#f87171';
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong></span>`;
+      allOk = false;
+      shoppingItems.push({ name: ing.name, cat: ing.category, qty: ing.quantity, unit: ing.unit });
+    } else if (unitMismatch) {
+      // Can't compare — units are in different families (mass vs volume)
+      const altBase = Object.keys(invQtyMap)[0];
+      const altQty  = invQtyMap[altBase];
+      status      = `<span style="background:rgba(139,92,246,.12);color:#a78bfa;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">≈ unités diff.</span>`;
+      statusColor = '#a78bfa';
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:#a78bfa">${formatBase(altQty, altBase)}</strong></span>`;
+    } else if (available >= needed.val) {
+      status      = `<span style="background:rgba(16,185,129,.12);color:var(--success);padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_ok')}</span>`;
+      statusColor = 'var(--success)';
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--success)">${formatBase(available, needed.base)}</strong></span>`;
+    } else {
+      const shortVal = needed.val - available;
+      status      = `<span style="background:rgba(251,191,36,.12);color:var(--amber);padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_low')}</span>`;
+      statusColor = 'var(--amber)';
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--amber)">${formatBase(available, needed.base)}</strong> · <span style="color:#f87171">${t('rec.stock_short_by')} ${formatBase(shortVal, needed.base)}</span></span>`;
+      allOk = false;
+      shoppingItems.push({ name: ing.name, cat: ing.category, qty: formatBase(shortVal, needed.base), unit: '' });
+    }
+
+    const needsSub = ing.category === 'houblon' && (!inInv || available < needed.val);
+    const subPanel = needsSub ? renderSubstitutePanel(ing.name, ing.alpha) : '';
+
+    rows += `<div style="border-bottom:1px solid var(--border);padding:9px 0">
+      <div style="display:flex;align-items:center;gap:10px">
+        <i class="fas fa-${icon}" style="color:${color};width:14px;text-align:center;flex-shrink:0"></i>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:.88rem">${esc(ing.name)}</div>
+          ${detail}
+        </div>
+        ${status}
+      </div>
+      ${subPanel}
+    </div>`;
+  });
+
+  const banner = allOk
+    ? `<div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:8px;padding:10px 14px;color:var(--success);font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px"><i class="fas fa-circle-check"></i> ${t('rec.stock_all_ok')}</div>`
+    : '';
+
+  // ── Liste de courses ──────────────────────────────────────────────────────
+  let shopHtml = '';
+  _shoppingText = '';
+  if (shoppingItems.length > 0) {
+    const CAT_LBL = { malt: t('cat.malt'), houblon: t('cat.houblon'), levure: t('cat.levure'), autre: t('cat.autre') };
+    const shopRows = shoppingItems.map(s => {
+      const qtyStr = s.unit ? `${s.qty} ${s.unit}` : s.qty;
+      _shoppingText += `☐  ${s.name.padEnd(28)} ${qtyStr.padStart(10)}   (${CAT_LBL[s.cat] || s.cat})\n`;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+        <i class="far fa-square" style="color:var(--muted);font-size:.8rem;flex-shrink:0;width:14px;text-align:center"></i>
+        <span style="flex:1;font-weight:600;font-size:.88rem">${esc(s.name)}</span>
+        <span style="color:var(--amber);font-weight:700;font-size:.9rem">${esc(qtyStr)}</span>
+        <span style="font-size:.72rem;color:var(--muted);min-width:52px;text-align:right">${CAT_LBL[s.cat] || s.cat}</span>
+      </div>`;
+    }).join('');
+    _shoppingText = `${t('rec.stock_title')} — ${r.name}\n${'─'.repeat(44)}\n` + _shoppingText;
+    shopHtml = `
+      <div style="margin-top:18px;border-top:2px solid var(--border);padding-top:14px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <i class="fas fa-cart-shopping" style="color:var(--amber)"></i>
+          <span style="font-weight:700;font-size:.9rem">${t('rec.stock_shopping_title')}</span>
+          <span style="background:rgba(251,191,36,.15);color:var(--amber);padding:1px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${shoppingItems.length}</span>
+        </div>
+        <div style="background:var(--card2);border-radius:10px;padding:10px 14px">${shopRows}</div>
+      </div>`;
+  }
+
+  body.innerHTML = banner + `<div>${rows}</div>` + shopHtml;
+
+  // Mettre à jour le pied de modal
+  const foot = document.getElementById('stock-check-foot');
+  if (foot) {
+    foot.innerHTML = shoppingItems.length > 0
+      ? `<button class="btn btn-ghost" onclick="closeModal('modal-stock-check')">${t('common.close')}</button>
+         <button class="btn btn-primary" onclick="_doCopyShoppingList()"><i class="fas fa-copy"></i> ${t('rec.stock_copy')}</button>`
+      : `<button class="btn btn-ghost" onclick="closeModal('modal-stock-check')">${t('common.close')}</button>`;
+  }
+
+  openModal('modal-stock-check');
+}
+
+function _doCopyShoppingList() {
+  if (!_shoppingText) return;
+  navigator.clipboard.writeText(_shoppingText).then(() => {
+    toast(t('rec.stock_copied'), 'success');
+  }).catch(() => {
+    // Fallback for browsers without clipboard API
+    const el = document.createElement('textarea');
+    el.value = _shoppingText;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    toast(t('rec.stock_copied'), 'success');
+  });
+}
+
+function ebcToColor(ebc) {
+  const srm = (ebc || 0) / 1.97;
+  if (srm <  2) return '#FFE699';
+  if (srm <  4) return '#FFD878';
+  if (srm <  6) return '#FFCA5A';
+  if (srm <  9) return '#FFC033';
+  if (srm < 12) return '#EBB008';
+  if (srm < 15) return '#D98000';
+  if (srm < 18) return '#CB6E00';
+  if (srm < 22) return '#BE5C00';
+  if (srm < 28) return '#A95200';
+  if (srm < 35) return '#8D4C00';
+  if (srm < 44) return '#6B3A00';
+  return '#3D1F00';
+}
+
+function renderRecipeView() {
+  const panel = document.getElementById('rec-view-panel');
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) { panel.innerHTML = ''; return; }
+
+  // Water values from hidden form elements (already computed)
+  const wv = id => document.getElementById(id)?.textContent || '–';
+
+  // Malt bill
+  const malts = recIngredients.filter(i => i.category === 'malt');
+  const totalMaltKg = malts.reduce((s, m) => s + (m.unit === 'kg' ? m.quantity : m.quantity / 1000), 0);
+  let maltHtml = '';
+  malts.forEach(m => {
+    const kg  = m.unit === 'kg' ? m.quantity : m.quantity / 1000;
+    const pct = totalMaltKg > 0 ? (kg / totalMaltKg * 100) : 0;
+    const ebcVal = m.ebc != null ? m.ebc : (S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase())?.ebc ?? null);
+    const dot = ebcVal != null
+      ? `<span class="malt-ebc-dot" style="background:${ebcToColor(ebcVal)}" title="EBC ${ebcVal}"></span>` : '';
+    maltHtml += `<div class="malt-bar-row">
+      <div class="malt-bar-label">
+        <span class="malt-bar-name">${dot}<span>${esc(m.name)}</span></span>
+        <span style="color:var(--muted)">${m.quantity} ${m.unit}&ensp;<strong style="color:var(--malt)">${totalMaltKg > 0 ? pct.toFixed(1) : '–'}%</strong></span>
+      </div>
+      <div class="malt-bar-track"><div class="malt-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
+    </div>`;
+  });
+
+  // Hops
+  const hops = recIngredients.filter(i => i.category === 'houblon');
+  let hopHtml = '';
+  if (hops.length) {
+    hopHtml = `<table class="view-ing-table"><thead><tr>
+      <th>Houblon</th><th>Qté</th><th>Alpha</th><th>Type</th><th>Durée</th>
+    </tr></thead><tbody>`;
+    hops.forEach(h => {
+      const ht = h.hop_type || 'ebullition';
+      const htLabel = { ebullition: t('rec.hop_ebullition'), whirlpool: t('rec.hop_whirlpool'), dryhop: t('rec.hop_dryhop') }[ht] || ht;
+      const dur = ht === 'dryhop'
+        ? (h.hop_days != null ? h.hop_days + ' j' : '–')
+        : (h.hop_time != null ? h.hop_time + ' min' : '–');
+      hopHtml += `<tr>
+        <td style="color:var(--hop);font-weight:500">${esc(h.name)}</td>
+        <td>${h.quantity} ${h.unit}</td>
+        <td>${h.alpha != null ? h.alpha + '%' : '–'}</td>
+        <td><span style="font-size:.75rem;padding:2px 7px;border-radius:10px;background:rgba(16,185,129,.1);color:var(--hop)">${htLabel}</span></td>
+        <td>${dur}</td>
+      </tr>`;
+    });
+    hopHtml += '</tbody></table>';
+  }
+
+  // Levures + Autres
+  const OTHER_TYPE_LABELS = {empatage:t('rec.hop_empatage'),sparge:t('rec.hop_sparge'),ebullition:t('rec.hop_ebullition'),flameout:t('rec.hop_flameout'),whirlpool:t('rec.hop_whirlpool'),dryhop:t('rec.hop_dryhop'),fermentation:t('rec.hop_fermentation'),packaging:t('rec.hop_packaging')};
+  let otherHtml = '';
+  [{ cat: 'levure', label: t('cat.levures'), color: 'var(--yeast)' }, { cat: 'autre', label: t('cat.autres'), color: 'var(--other)' }].forEach(({ cat, label, color }) => {
+    const items = recIngredients.filter(i => i.category === cat);
+    if (!items.length) return;
+    otherHtml += `<div class="rec-view-section" style="color:${color}">${label}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">`;
+    items.forEach(i => {
+      let addInfo = '';
+      if (cat === 'autre') {
+        const ot = i.other_type || 'ebullition';
+        const otl = OTHER_TYPE_LABELS[ot] || ot;
+        const timeStr = (ot === 'dryhop') ? (i.other_time != null ? ' · ' + i.other_time + ' j' : '')
+          : (ot === 'ebullition' || ot === 'whirlpool') ? (i.other_time != null ? ' · ' + i.other_time + ' min' : '')
+          : '';
+        addInfo = `<span style="font-size:.72rem;color:${color};margin-left:5px">${otl}${timeStr}</span>`;
+      }
+      otherHtml += `<span style="background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:.82rem">
+        <strong>${esc(i.name)}</strong> <span style="color:var(--muted)">${i.quantity} ${i.unit}</span>${addInfo}
+      </span>`;
+    });
+    otherHtml += '</div>';
+  });
+
+  // Clone calc panel bars from the hidden form
+  const calcSrc = document.getElementById('rec-calc-panel');
+  const calcHtml = calcSrc?.innerHTML || '';
+
+  const rvStarsHtml = Array.from({length:5}, (_, i) => {
+    const v = i + 1;
+    const filled = (r.rating || 0) >= v;
+    return `<span onclick="rateRecipe(${r.id},${v})" title="${STAR_LABELS()[v]}" style="cursor:pointer;font-size:1.5rem;line-height:1;color:${filled?'var(--amber)':'var(--border)'};transition:opacity .15s" onmouseover="this.style.opacity='.6'" onmouseout="this.style.opacity='1'">\u2605</span>`;
+  }).join('');
+
+  // Image du brouillon d'origine
+  const _draftImg = (() => {
+    if (!r.draft_id) return null;
+    return S.drafts.find(d => d.id === r.draft_id)?.image || null;
+  })();
+
+  panel.innerHTML = `
+    <div class="rec-view-header" style="position:relative">
+      ${_draftImg ? `
+      <img src="${_draftImg}" alt="aperçu brouillon"
+        onclick="openImgLightbox(this.src,'${esc(r.name)}')"
+        title="${t('rec.draft_img_zoom')}"
+        style="position:absolute;top:0;right:0;width:72px;height:72px;object-fit:cover;
+          border-radius:10px;cursor:zoom-in;box-shadow:0 2px 8px rgba(0,0,0,.3);
+          border:2px solid var(--border);transition:transform .15s"
+        onmouseenter="this.style.transform='scale(1.06)'"
+        onmouseleave="this.style.transform=''">` : ''}
+      <div class="rec-view-title" style="${_draftImg ? 'padding-right:88px' : ''}">${esc(r.name)}</div>
+      <div class="rec-view-meta">
+        ${r.style    ? `<span class="rec-view-badge"><i class="fas fa-tag"></i> ${esc(r.style)}</span>` : ''}
+        ${r.batch_no ? `<span class="rec-view-badge"><i class="fas fa-hashtag"></i> ${t('rec.batch_word')} ${r.batch_no}</span>` : ''}
+        <span class="rec-view-badge"><i class="fas fa-flask"></i> ${r.volume} L</span>
+        ${r.brew_date ? `<span class="rec-view-badge"><i class="fas fa-calendar"></i> ${r.brew_date}</span>` : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+        <div style="display:flex;gap:2px">${rvStarsHtml}</div>
+        <span style="font-size:.82rem;color:var(--muted)">${STAR_LABELS()[r.rating||0]}</span>
+      </div>
+    </div>
+
+    <div class="rvp-strip">
+      <div class="rvp-row">
+        <span><span class="rvp-lbl">${t('rec.hop_empatage')}</span>${r.mash_temp || 66}°C · ${r.mash_time || 60} min</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">${t('rec.hop_ebullition')}</span>${r.boil_time || 60} min</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">${t('rec.efficiency_label')}</span>${r.brewhouse_efficiency || 72}%</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">${t('rec.hop_fermentation')}</span><span style="color:var(--info)">${r.ferm_temp ?? 20}°C · ${r.ferm_time ?? 14} j</span></span>
+      </div>
+      <div class="rvp-row">
+        <span><span class="rvp-lbl">${t('rec.water_mash_abbr')}</span>${wv('rw-mash')} L</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">${t('rec.rinse_label')}</span>${wv('rw-sparge')} L</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">${t('rec.preboil_label')}</span>${wv('rw-preboil')} L</span>
+        <span class="rvp-sep">·</span>
+        <span><span class="rvp-lbl">${t('rec.water_total_label')}</span>${wv('rw-total')} L</span>
+      </div>
+    </div>
+
+    ${calcHtml}
+
+    ${malts.length ? `<div class="rec-view-section" style="color:var(--malt)"><i class="fas fa-wheat-awn"></i> ${t('rec.malts_full')}</div><div style="margin-bottom:12px">${maltHtml}</div>` : ''}
+    ${hops.length  ? `<div class="rec-view-section" style="color:var(--hop)"><i class="fas fa-seedling"></i> ${t('cat.houblons')}</div><div style="margin-bottom:12px">${hopHtml}</div>` : ''}
+    ${otherHtml}
+    ${r.notes ? `<div class="rec-view-section"><i class="fas fa-note-sticky"></i> Notes</div><div class="view-notes">${esc(r.notes)}</div>` : ''}
+
+    ${(() => {
+      const linked = S.beers.filter(b => b.recipe_id === r.id && !b.archived && b.photo);
+      if (!linked.length) return '';
+      const thumbs = linked.map(b => `
+        <div style="display:flex;flex-direction:column;align-items:center;gap:5px;cursor:zoom-in"
+          onclick="openImgLightbox('${b.photo.replace(/'/g,"\\'")}','${esc(b.name).replace(/'/g,"\\'")}')">
+          <img src="${b.photo}" alt="${esc(b.name)}"
+            style="width:90px;height:90px;object-fit:cover;border-radius:10px;
+              border:2px solid var(--border);transition:transform .15s;box-shadow:0 2px 6px rgba(0,0,0,.25)"
+            onmouseenter="this.style.transform='scale(1.06)'"
+            onmouseleave="this.style.transform=''">
+          <span style="font-size:.72rem;color:var(--muted);text-align:center;max-width:90px;
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.name)}</span>
+        </div>`).join('');
+      return `<div class="rec-view-section" style="color:var(--success)">
+        <i class="fas fa-wine-bottle"></i> Étiquettes en cave
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">${thumbs}</div>`;
+    })()}
+
+    <div id="rec-evolution-container"></div>
+  `;
+
+  _loadRecipeEvolution(r);
+}
+
+// ── Évolution historique : rendement réel vs théorique ───────────────────────
+
+function _recMaxExtract(r) {
+  // Extrait max à 100% de rendement (pts de gravité, avant volume) depuis les ingrédients de la recette
+  let maxPts = 0;
+  (r.ingredients || []).filter(i => i.category === 'malt').forEach(m => {
+    let gu = m.gu != null ? m.gu : null;
+    if (gu == null) { const c = S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase()); if (c?.gu != null) gu = c.gu; }
+    if (gu == null) return;
+    maxPts += (m.unit === 'kg' ? m.quantity : m.quantity / 1000) * gu;
+  });
+  return maxPts;
+}
+
+function _recTheoretical(r) {
+  const vol    = r.volume || 20;
+  const eff    = r.brewhouse_efficiency || 72;
+  const maxPts = _recMaxExtract(r);
+  if (!maxPts) return null;
+  const ogPts = maxPts * (eff / 100) / vol;
+  const og    = 1 + ogPts / 1000;
+  const fg    = 1 + (og - 1) * 0.25;
+  const abv   = (og - fg) * 131.25;
+  return { og, fg, abv, eff, maxPts };
+}
+
+async function _loadRecipeEvolution(r) {
+  const capturedId = recEditingId;
+  let el = document.getElementById('rec-evolution-container');
+  if (!el) return;
+
+  if (!S.brews.length) {
+    el.innerHTML = `<div class="rec-view-section" style="color:var(--info)"><i class="fas fa-chart-line"></i> ${t('rec.evolution_title')}</div>
+      <div style="text-align:center;padding:16px;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i></div>`;
+    await ensureBrewsLoaded();
+    if (recEditingId !== capturedId) return;
+    el = document.getElementById('rec-evolution-container');
+    if (!el) return;
+  }
+
+  const brews = S.brews
+    .filter(b => b.recipe_id === r.id && !b.archived)
+    .sort((a, b) => (a.brew_date || '').localeCompare(b.brew_date || ''));
+
+  if (!brews.length) { el.innerHTML = ''; return; }
+
+  const theo   = _recTheoretical(r);
+  const maxPts = theo ? theo.maxPts : 0;
+
+  const bd = brews.map(b => ({
+    ...b,
+    actualEff: b.actual_efficiency ??
+      (maxPts && b.og && b.volume_brewed ? (b.og - 1) * 1000 * b.volume_brewed / maxPts * 100 : null)
+  }));
+  const hasMeasures = bd.some(b => b.og || b.abv);
+
+  // ── Stats summary ──────────────────────────────────────────────────────────
+  const withOG  = bd.filter(b => b.og);
+  const withABV = bd.filter(b => b.abv);
+  const withEff = bd.filter(b => b.actualEff != null);
+  const avg = arr => arr.length ? arr.reduce((s, b, _, a) => s + b / a.length, 0) : null;
+  const avgOG  = avg(withOG.map(b => b.og));
+  const avgABV = avg(withABV.map(b => b.abv));
+  const avgEff = avg(withEff.map(b => b.actualEff));
+
+  const dTag = (d, t1, t2, dec, unit = '') => {
+    if (d == null) return '';
+    const c = Math.abs(d) < t1 ? 'var(--success)' : Math.abs(d) < t2 ? 'var(--amber)' : '#f87171';
+    return `<span style="font-size:.7rem;color:${c};margin-left:3px">${d > 0 ? '+' : ''}${d.toFixed(dec)}${unit}</span>`;
+  };
+
+  const statCard = (val, color, valStr, label, subLabel) => val == null ? '' :
+    `<div style="background:var(--card2);border-radius:8px;padding:10px 14px;text-align:center">
+      <div style="font-size:1.15rem;font-weight:800;color:${color};line-height:1.1">${valStr}</div>
+      <div style="font-size:.71rem;color:var(--text);font-weight:600;margin-top:4px">${label}</div>
+      ${subLabel ? `<div style="font-size:.68rem;color:var(--muted);margin-top:1px">${subLabel}</div>` : ''}
+    </div>`;
+
+  const statsHtml = hasMeasures ? `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:14px">
+      ${statCard(avgOG,  'var(--malt)',    avgOG?.toFixed(3)  + (theo ? dTag(avgOG - theo.og,  0.003, 0.008, 3)   : ''), 'OG moy.',                    theo ? `théo. ${theo.og.toFixed(3)}` : '')}
+      ${statCard(avgABV, 'var(--amber)',   avgABV?.toFixed(1) + '%' + (theo ? dTag(avgABV - theo.abv, 0.2, 0.5, 1, '%') : ''), 'ABV moy.',              theo ? `théo. ${theo.abv.toFixed(1)}%` : '')}
+      ${statCard(avgEff, 'var(--info)',    avgEff?.toFixed(1) + '%' + (theo ? dTag(avgEff - theo.eff, 3, 7, 1, '%') : ''), t('rec.evolution_actual_eff'), theo ? `théo. ${theo.eff.toFixed(0)}%` : '')}
+      ${statCard(brews.length, 'var(--muted)', brews.length, t('rec.evolution_n_brews'), '')}
+    </div>` : '';
+
+  // ── Tableau ────────────────────────────────────────────────────────────────
+  const dCell = (actual, expected, t1, t2, dec, unit = '') => {
+    if (actual == null) return '<td style="color:var(--muted)">–</td>';
+    const d = expected != null ? actual - expected : null;
+    const dStr = d != null ? dTag(d, t1, t2, dec, unit) : '';
+    return `<td>${actual.toFixed(dec)}${unit}${dStr}</td>`;
+  };
+
+  const theoRow = theo
+    ? `<tr style="color:var(--muted);font-size:.78rem;border-bottom:2px solid var(--border)">
+        <td><em>${t('rec.evolution_theo')}</em></td><td>–</td>
+        <td>${theo.og.toFixed(3)}</td><td>${theo.fg.toFixed(3)}</td>
+        <td>${theo.abv.toFixed(1)}%</td><td>${theo.eff.toFixed(0)}%</td>
+        <td>${r.volume}L</td>
+      </tr>` : '';
+
+  const tableRows = bd.map(b => `<tr>
+    <td style="font-weight:500">${esc(b.name)}</td>
+    <td style="color:var(--muted)">${b.brew_date || '–'}</td>
+    ${dCell(b.og,        theo?.og,  0.003, 0.008, 3)}
+    ${dCell(b.fg,        null,      0,     0,     3)}
+    ${dCell(b.abv,       theo?.abv, 0.2,   0.5,   1, '%')}
+    ${b.actualEff != null ? dCell(b.actualEff, theo?.eff, 3, 7, 1, '%') : '<td style="color:var(--muted)">–</td>'}
+    <td>${b.volume_brewed ? b.volume_brewed + 'L' : '–'}</td>
+  </tr>`).join('');
+
+  const chartSection = hasMeasures && bd.length >= 2
+    ? `<div style="height:220px;position:relative;margin-bottom:12px"><canvas id="rec-evolution-chart"></canvas></div>` : '';
+
+  el.innerHTML = `
+    <div class="rec-view-section" style="color:var(--info)">
+      <i class="fas fa-chart-line"></i> ${t('rec.evolution_title')}
+      <span style="font-size:.75rem;font-weight:400;color:var(--muted);margin-left:8px">${brews.length} ${t('rec.evolution_n_brews')}</span>
+    </div>
+    ${statsHtml}
+    ${chartSection}
+    <div style="overflow-x:auto;margin-bottom:12px">
+      <table class="view-ing-table"><thead><tr>
+        <th>${t('rec.evolution_brew')}</th><th>${t('rec.evolution_date')}</th>
+        <th>${t('rec.evolution_og')} <span style="font-size:.68rem;color:var(--muted)">(Δ${t('rec.evolution_theo')})</span></th>
+        <th>${t('rec.evolution_fg')}</th>
+        <th>${t('rec.evolution_abv')} <span style="font-size:.68rem;color:var(--muted)">(Δ${t('rec.evolution_theo')})</span></th>
+        <th>${t('rec.evolution_actual_eff')}</th>
+        <th>${t('rec.evolution_vol')}</th>
+      </tr></thead><tbody>${theoRow}${tableRows}</tbody></table>
+    </div>`;
+
+  // ── Graphique ──────────────────────────────────────────────────────────────
+  if (window._recEvolutionChart) { window._recEvolutionChart.destroy(); window._recEvolutionChart = null; }
+  const evCtx = document.getElementById('rec-evolution-chart');
+  if (!evCtx) return;
+
+  const labels   = bd.map(b => b.brew_date || b.name);
+  const effData  = bd.map(b => b.actualEff != null ? +b.actualEff.toFixed(1) : null);
+  const hasEff   = effData.some(v => v != null);
+  const n        = bd.length;
+
+  const datasets = [
+    { label: 'OG',  data: bd.map(b => b.og  ? +b.og.toFixed(3)  : null), borderColor:'var(--malt)',  backgroundColor:'transparent', yAxisID:'yOG',  tension:.3, pointRadius:4, spanGaps:true },
+    { label: 'FG',  data: bd.map(b => b.fg  ? +b.fg.toFixed(3)  : null), borderColor:'var(--hop)',   backgroundColor:'transparent', yAxisID:'yOG',  tension:.3, pointRadius:4, spanGaps:true },
+    { label: 'ABV', data: bd.map(b => b.abv ? +b.abv.toFixed(1) : null), borderColor:'var(--amber)', backgroundColor:'transparent', yAxisID:'yABV', tension:.3, pointRadius:4, spanGaps:true },
+    ...(hasEff ? [{ label: t('rec.evolution_actual_eff'), data: effData, borderColor:'var(--info)', backgroundColor:'transparent', yAxisID:'yEff', tension:.3, pointRadius:4, spanGaps:true }] : []),
+    // Lignes de référence théoriques (sans légende)
+    ...(theo ? [
+      { label: '', data: Array(n).fill(+theo.og.toFixed(3)),  borderColor:'var(--malt)',  backgroundColor:'transparent', yAxisID:'yOG',  tension:0, pointRadius:0, spanGaps:true, borderDash:[3,5], borderWidth:1 },
+      { label: '', data: Array(n).fill(+theo.abv.toFixed(1)), borderColor:'var(--amber)', backgroundColor:'transparent', yAxisID:'yABV', tension:0, pointRadius:0, spanGaps:true, borderDash:[3,5], borderWidth:1 },
+      ...(hasEff ? [{ label: '', data: Array(n).fill(+theo.eff.toFixed(1)), borderColor:'var(--info)', backgroundColor:'transparent', yAxisID:'yEff', tension:0, pointRadius:0, spanGaps:true, borderDash:[3,5], borderWidth:1 }] : []),
+    ] : []),
+  ];
+
+  window._recEvolutionChart = new Chart(evCtx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color:'var(--muted)', font:{size:11}, filter: item => item.text !== '' } } },
+      scales: {
+        x:    { ticks:{ color:'var(--muted)', font:{size:10} }, grid:{ color:'rgba(255,255,255,.05)' } },
+        yOG:  { position:'left',  min:1.0, ticks:{ color:'var(--malt)',  font:{size:10} }, grid:{ color:'rgba(255,255,255,.05)' } },
+        yABV: { position:'right', min:0,   ticks:{ color:'var(--amber)', font:{size:10}, callback: v => v+'%' }, grid:{ display:false } },
+        yEff: { display: hasEff, position:'right', min:50, max:100, offset:true,
+                ticks:{ color:'var(--info)', font:{size:9}, callback: v => v+'%' }, grid:{ display:false } },
+      }
+    }
+  });
+}
+
+// ── Glisser-déposer pour réordonner les ingrédients ────────────────────────────
+let _ingDragFromHandle = false;
+let _ingDragSrc = null;
+
+function _initIngDrag(container) {
+  container.querySelectorAll('.ing-row').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      if (!_ingDragFromHandle) { e.preventDefault(); return; }
+      _ingDragFromHandle = false;
+      _ingDragSrc = parseInt(row.dataset.ridx);
+      row.classList.add('ing-dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      _ingDragSrc = null;
+      container.querySelectorAll('.ing-row').forEach(r => {
+        r.classList.remove('ing-dragging', 'ing-drop-target');
+      });
+    });
+    row.addEventListener('dragover', e => {
+      if (_ingDragSrc === null) return;
+      const targetIdx = parseInt(row.dataset.ridx);
+      if (targetIdx === _ingDragSrc) return;
+      if (recIngredients[targetIdx]?.category !== recIngredients[_ingDragSrc]?.category) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      container.querySelectorAll('.ing-row').forEach(r => r.classList.remove('ing-drop-target'));
+      row.classList.add('ing-drop-target');
+    });
+    row.addEventListener('dragleave', e => {
+      if (!row.contains(e.relatedTarget)) row.classList.remove('ing-drop-target');
+    });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      if (_ingDragSrc === null) return;
+      const targetIdx = parseInt(row.dataset.ridx);
+      if (targetIdx === _ingDragSrc) return;
+      if (recIngredients[targetIdx]?.category !== recIngredients[_ingDragSrc]?.category) return;
+      const item = recIngredients.splice(_ingDragSrc, 1)[0];
+      recIngredients.splice(targetIdx, 0, item);
+      renderIngredientRows();
+    });
+  });
+}
+
+// ── Paramètres avancés toggle ─────────────────────────────────────────────────
+function toggleAdvancedParams() {
+  const el  = document.getElementById('rec-advanced-params');
+  const btn = document.getElementById('btn-adv-params');
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : '';
+  btn.classList.toggle('open', !open);
+}
+
+function toggleFermProfile() {
+  const el  = document.getElementById('rec-ferm-profile-wrap');
+  const btn = document.getElementById('btn-ferm-profile');
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : '';
+  btn.classList.toggle('open', !open);
+}
+
+function _renderFermProfile() {
+  const wrap  = document.getElementById('rec-ferm-profile-rows');
+  const empty = document.getElementById('rec-ferm-profile-empty');
+  if (!wrap) return;
+  wrap.innerHTML = _fermProfile.map((s, i) => `
+    <div style="display:grid;grid-template-columns:60px 80px 80px 1fr;gap:6px;align-items:center">
+      <span style="font-size:.78rem;color:var(--muted)">${t('rec.ferm_profile_step').replace('${n}', i + 1)}</span>
+      <input type="number" value="${s.day}" min="0" step="1" style="text-align:center"
+        oninput="_fermProfileSet(${i},'day',+this.value)">
+      <input type="number" value="${s.temp}" min="0" max="40" step="0.5" style="text-align:center"
+        oninput="_fermProfileSet(${i},'temp',+this.value)">
+      <button type="button" class="btn btn-icon btn-sm btn-ghost" style="justify-self:start"
+        onclick="_removeFermProfileRow(${i})"><i class="fas fa-xmark"></i></button>
+    </div>`).join('');
+  if (empty) empty.style.display = _fermProfile.length ? 'none' : '';
+}
+
+function _fermProfileSet(idx, key, val) {
+  if (_fermProfile[idx]) { _fermProfile[idx][key] = val; }
+}
+
+function _addFermProfileRow() {
+  const lastDay  = _fermProfile.length ? _fermProfile[_fermProfile.length - 1].day : 0;
+  const lastTemp = _fermProfile.length ? _fermProfile[_fermProfile.length - 1].temp
+    : parseFloat(document.getElementById('rec-ferm-temp')?.value) || 20;
+  _fermProfile.push({ day: lastDay, temp: lastTemp });
+  _renderFermProfile();
+  const wrap = document.getElementById('rec-ferm-profile-wrap');
+  if (wrap && wrap.style.display === 'none') toggleFermProfile();
+}
+
+function _removeFermProfileRow(idx) {
+  _fermProfile.splice(idx, 1);
+  _renderFermProfile();
+}
+
+// ── Dupliquer une recette ──────────────────────────────────────────────────────
+function openCloneModal() {
+  if (!recEditingId) { showRecAlert(t('rec.err_open_to_dup')); return; }
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+  const vol = parseFloat(document.getElementById('rec-volume').value) || r.volume || 20;
+  const baseName = r.name.replace(/\s+v\d+$/i, '').replace(/\s*\(copie\)\s*$/i, '').trim();
+  const re = new RegExp('^' + baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\s+v(\\d+))?$', 'i');
+  let maxVer = 1;
+  S.recipes.forEach(x => { const m = x.name.match(re); if (m) maxVer = Math.max(maxVer, m[1] ? parseInt(m[1]) : 1); });
+  document.getElementById('clone-name').value = `${baseName} v${maxVer + 1}`;
+  document.getElementById('clone-from').value = vol;
+  document.getElementById('clone-to').value   = vol;
+  document.getElementById('clone-preview').innerHTML = '';
+  _dirtyModals.delete('modal-clone');
+  document.getElementById('modal-clone').classList.add('open');
+  setTimeout(() => { const el = document.getElementById('clone-to'); el.select(); el.focus(); }, 80);
+}
+function closeCloneModal() {
+  closeModal('modal-clone');
+}
+function updateClonePreview() {
+  const from = parseFloat(document.getElementById('clone-from').value) || 0;
+  const to   = parseFloat(document.getElementById('clone-to').value)   || 0;
+  const el   = document.getElementById('clone-preview');
+  if (!from || !to || from === to || !recIngredients.length) { el.innerHTML = ''; return; }
+  const ratio = to / from;
+  const fmtQ = (q, u) => { const v = Math.round(q * 1000) / 1000; return `${v % 1 === 0 ? v : v.toFixed(2)} ${u}`; };
+  const CATS = [
+    { key: 'malt',    label: t('cat.malts'),    color: 'var(--malt)'  },
+    { key: 'houblon', label: t('cat.houblons'), color: 'var(--hop)'   },
+    { key: 'levure',  label: t('cat.levures'),  color: 'var(--yeast)' },
+    { key: 'autre',   label: t('cat.autres'),   color: 'var(--other)' },
+  ];
+  const rows = CATS.map(cat => {
+    const items = recIngredients.filter(i => i.category === cat.key && i.name && i.quantity > 0);
+    if (!items.length) return '';
+    return `<div style="margin-bottom:8px">
+      <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:${cat.color};margin-bottom:3px">${cat.label}</div>
+      ${items.map(i => {
+        const newQ = i.quantity * ratio;
+        return `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--text)">${esc(i.name)}</span>
+          <span><span style="color:var(--muted)">${fmtQ(i.quantity, i.unit)}</span>
+          <span style="color:var(--muted);margin:0 4px">→</span>
+          <span style="color:${cat.color};font-weight:600">${fmtQ(newQ, i.unit)}</span></span>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).filter(Boolean).join('');
+  el.innerHTML = rows || '';
+}
+async function applyClone() {
+  if (!recEditingId) return;
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+  const name = document.getElementById('clone-name').value.trim();
+  if (!name) { document.getElementById('clone-name').focus(); return; }
+  const from = parseFloat(document.getElementById('clone-from').value) || 0;
+  const to   = parseFloat(document.getElementById('clone-to').value)   || 0;
+  if (!to) { toast(t('rec.err_invalid_volume'), 'error'); return; }
+  const ratio = from > 0 ? to / from : 1;
+  const maxBatch = S.recipes.reduce((m, x) => Math.max(m, x.batch_no || 0), 0);
+  const scaleQ = (q, unit) => {
+    const scaled = q * ratio;
+    return (unit === 'g' || unit === 'mL') ? Math.ceil(scaled) : Math.round(scaled * 1000) / 1000;
+  };
+  const payload = {
+    batch_no: maxBatch + 1, name,
+    style: r.style || null, volume: to, brew_date: null,
+    mash_temp: r.mash_temp, mash_time: r.mash_time, boil_time: r.boil_time,
+    mash_ratio: r.mash_ratio, evap_rate: r.evap_rate, grain_absorption: r.grain_absorption,
+    brewhouse_efficiency: r.brewhouse_efficiency,
+    ferm_temp: r.ferm_temp || 20, ferm_time: r.ferm_time || 14,
+    notes: r.notes || null,
+    ingredients: recIngredients.map(i => ({
+      inventory_item_id: i.inventory_item_id || null,
+      name: i.name, category: i.category,
+      quantity: scaleQ(i.quantity, i.unit), unit: i.unit,
+      hop_time: i.hop_time || null, hop_type: i.hop_type || null, hop_days: i.hop_days || null,
+      other_type: i.other_type || null, other_time: i.other_time || null,
+      ebc: i.ebc || null, alpha: i.alpha || null, notes: i.notes || null,
+    })),
+  };
+  try {
+    const created = await api('POST', '/api/recipes', payload);
+    S.recipes.unshift(created);
+    closeCloneModal();
+    loadRecipeForm(created.id);
+    renderRecipeList();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast(t('rec.cloned').replace('${name}', name).replace('${vol}', to), 'success');
+  } catch(e) { showRecAlert(t('common.error') + ' : ' + (e.detail || e.error || '')); }
+}
+
+async function duplicateRecipe() {
+  if (!recEditingId) { showRecAlert(t('rec.err_open_to_dup')); return; }
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+  const maxBatch = S.recipes.reduce((m, x) => Math.max(m, x.batch_no || 0), 0);
+
+  // Versioning automatique : strip " vN" ou "(copie)" existants, puis cherche le max
+  const baseName = r.name.replace(/\s+v\d+$/i, '').replace(/\s*\(copie\)\s*$/i, '').trim();
+  const re = new RegExp('^' + baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\s+v(\\d+))?$', 'i');
+  let maxVer = 1;
+  S.recipes.forEach(x => { const m = x.name.match(re); if (m) maxVer = Math.max(maxVer, m[1] ? parseInt(m[1]) : 1); });
+  const newName = `${baseName} v${maxVer + 1}`;
+
+  const payload = {
+    batch_no:   maxBatch + 1,
+    name:       newName,
+    style:      r.style || null,
+    volume:     r.volume,
+    brew_date:  null,
+    mash_temp:  r.mash_temp,
+    mash_time:  r.mash_time,
+    boil_time:  r.boil_time,
+    mash_ratio: r.mash_ratio,
+    evap_rate:  r.evap_rate,
+    grain_absorption:     r.grain_absorption,
+    brewhouse_efficiency: r.brewhouse_efficiency,
+    ferm_temp:  r.ferm_temp || 20,
+    ferm_time:  r.ferm_time || 14,
+    notes:      r.notes || null,
+    ingredients: (r.ingredients || []).map(i => ({
+      inventory_item_id: i.inventory_item_id || null,
+      name: i.name, category: i.category,
+      quantity: i.quantity, unit: i.unit,
+      hop_time: i.hop_time || null, hop_type: i.hop_type || null, hop_days: i.hop_days || null,
+      other_type: i.other_type || null, other_time: i.other_time || null,
+      ebc: i.ebc || null, alpha: i.alpha || null, notes: i.notes || null,
+    })),
+  };
+  try {
+    const created = await api('POST', '/api/recipes', payload);
+    S.recipes.unshift(created);
+    loadRecipeForm(created.id);
+    renderRecipeList();
+    const stats = await api('GET', '/api/stats');
+    updateNavBadges(stats);
+    toast(t('rec.duplicated'), 'success');
+  } catch(e) { showRecAlert(t('common.error') + ' : ' + (e.detail || e.error || '')); }
+}
+
+// ── Imprimer une recette ───────────────────────────────────────────────────────
+function printRecipe() {
+  if (!recEditingId) { showRecAlert(t('rec.err_open_to_print')); return; }
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+
+  const wv = id => document.getElementById(id)?.textContent || '–';
+
+  // ── Recalcul des estimations ───────────────────────────────────────────────
+  const vol = parseFloat(document.getElementById('rec-volume').value) || 20;
+  const eff = parseFloat(document.getElementById('rec-efficiency').value) || 72;
+
+  let ogPoints = 0;
+  recIngredients.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let guVal = m.gu != null ? m.gu : null;
+    if (guVal == null) { const c = S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase()); if (c?.gu != null) guVal = c.gu; }
+    if (guVal == null) return;
+    ogPoints += (m.unit === 'kg' ? m.quantity : m.quantity / 1000) * guVal * (eff / 100);
+  });
+  const og  = ogPoints > 0 ? 1 + ogPoints / vol / 1000 : null;
+  const fg  = og != null ? 1 + (og - 1) * 0.25 : null;
+  const abv = og != null ? (og - fg) * 131.25 : null;
+
+  const wortOG = og || 1.050;
+  const _ibuFormulaPrint = appSettings.energy?.ibu_formula || 'tinseth';
+  let ibuTotal = 0;
+  recIngredients.filter(i => i.category === 'houblon').forEach(h => {
+    if (!h.quantity || !h.alpha) return;
+    const ht = h.hop_type || 'ebullition';
+    if (ht === 'dryhop') return;
+    const mins = ht === 'whirlpool' ? 15 : (h.hop_time ?? 60);
+    const g = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
+    if (_ibuFormulaPrint === 'rager') {
+      const util = 18.11 + 13.86 * Math.tanh((mins - 31.32) / 18.27);
+      const adj  = wortOG > 1.050 ? (wortOG - 1.050) / 0.2 : 0;
+      ibuTotal += (g * (util / 100) * (h.alpha / 100) * 1000) / (vol * (1 + adj));
+    } else {
+      ibuTotal += 1.65 * Math.pow(0.000125, wortOG - 1) * (1 - Math.exp(-0.04 * mins)) / 4.15 * (h.alpha / 100) * g * 1000 / vol;
+    }
+  });
+  const ibuVal = ibuTotal > 0 ? ibuTotal : null;
+
+  // ── EBC / SRM (formule Morey) ─────────────────────────────────────────────
+  let totalMcuPrint = 0;
+  recIngredients.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let e = m.ebc ?? (S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase())?.ebc ?? null);
+    if (e == null) return;
+    const kg       = m.unit === 'kg' ? m.quantity : m.quantity / 1000;
+    const lovibond = (e / 1.97 + 0.76) / 1.3546;
+    totalMcuPrint += (kg * 2.20462 * lovibond) / (vol * 0.264172);
+  });
+  const srmValPrint = totalMcuPrint > 0 ? 1.4922 * Math.pow(totalMcuPrint, 0.6859) : null;
+  const ebcVal      = srmValPrint != null ? srmValPrint * 1.97 : null;
+
+  // BJCP
+  const bjcp = S.bjcp.find(x => x.name === (document.getElementById('rec-style').value || '').trim()) || null;
+
+  // ── Barre d'estimation (HTML pur, compatible impression) ───────────────────
+  function estBar(label, val, cfgMin, cfgMax, dec, unit, bMin, bMax) {
+    const span = cfgMax - cfgMin;
+    const hasBjcp = bMin != null && bMax != null;
+    const pct = val != null ? Math.min(100, Math.max(0, (val - cfgMin) / span * 100)) : null;
+    const rL  = hasBjcp ? Math.min(100, Math.max(0, (bMin - cfgMin) / span * 100)) : 0;
+    const rW  = hasBjcp ? Math.min(100, Math.max(0, (bMax - cfgMin) / span * 100)) - rL : 0;
+    const inR = hasBjcp && val != null && val >= bMin && val <= bMax;
+    const col = val == null ? '#9ca3af' : hasBjcp ? (inR ? '#16a34a' : '#dc2626') : '#d97706';
+    const valStr = val != null ? val.toFixed(dec) + (unit ? '\u00a0' + unit : '') : '–';
+    const tgt = hasBjcp ? `⌖\u00a0${bMin.toFixed(dec)}–${bMax.toFixed(dec)}${unit||''}` : '';
+    return `<div class="est-row">
+      <div class="est-lbl">${label}</div>
+      <div class="est-track">
+        ${hasBjcp ? `<div class="est-range" style="left:${rL.toFixed(1)}%;width:${rW.toFixed(1)}%"></div>` : ''}
+        ${pct != null ? `<div class="est-marker" style="left:${pct.toFixed(1)}%;background:${col}"></div>` : ''}
+      </div>
+      <div class="est-val" style="color:${col}">${valStr}</div>
+      <div class="est-target">${tgt}</div>
+    </div>`;
+  }
+
+  const _printEbcColor = ebcVal != null ? ebcToColor(ebcVal) : null;
+  const _printColorSwatch = _printEbcColor ? `
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <div style="width:26px;height:26px;border-radius:50%;background:${_printEbcColor};border:1px solid rgba(0,0,0,.2);flex-shrink:0"></div>
+      <span style="font-size:.8rem">EBC\u00a0${ebcVal.toFixed(0)}&ensp;·&ensp;SRM\u00a0${srmValPrint.toFixed(0)}&ensp;·&ensp;${t('rec.ebc_morey')}</span>
+    </div>` : '';
+
+  const estimHtml =
+    estBar('OG',  og,     1.020, 1.130, 3, '',  bjcp?.og_min,  bjcp?.og_max)  +
+    estBar('FG',  fg,     1.002, 1.030, 3, '',  bjcp?.fg_min,  bjcp?.fg_max)  +
+    estBar('ABV', abv,    0,     14,    1, '%', bjcp?.abv_min, bjcp?.abv_max) +
+    estBar('IBU', ibuVal, 0,     120,   0, '',  bjcp?.ibu_min, bjcp?.ibu_max) +
+    estBar('EBC', ebcVal, 0,     120,   0, '',  bjcp?.ebc_min, bjcp?.ebc_max) +
+    _printColorSwatch;
+
+  // ── Tableaux ingrédients ───────────────────────────────────────────────────
+  const catLabels = { malt: t('rec.malts_full'), houblon: t('cat.houblons'), levure: t('cat.levures'), autre: t('cat.autres') };
+  const totalMaltKg = (r.ingredients || []).filter(i => i.category === 'malt')
+    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.quantity / 1000), 0);
+
+  const PRINT_OT_LABELS = {empatage:t('rec.hop_empatage'),sparge:t('rec.hop_sparge'),ebullition:t('rec.hop_ebullition'),flameout:t('rec.hop_flameout'),whirlpool:t('rec.hop_whirlpool'),dryhop:t('rec.hop_dryhop'),fermentation:t('rec.hop_fermentation'),packaging:t('rec.hop_packaging')};
+
+  function maltTable(items) {
+    if (!items.length) return '';
+    return `<table><thead><tr><th>${t('rec.ing_name')}</th><th>${t('rec.ing_qty_abbr')}</th></tr></thead><tbody>`
+      + items.map(i => `<tr><td>${esc(i.name)}</td><td>${i.quantity}\u00a0${esc(i.unit)}</td></tr>`).join('')
+      + `</tbody></table>`;
+  }
+
+  let ingHtml = '';
+  const malts = (r.ingredients || []).filter(i => i.category === 'malt');
+  if (malts.length) {
+    const half = Math.ceil(malts.length / 2);
+    ingHtml += `<h3>${catLabels.malt}</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:4px;border:1px solid #ddd;border-radius:4px;overflow:hidden">
+      <div style="border-right:2px solid #ccc;padding-right:0">${maltTable(malts.slice(0, half))}</div>
+      <div>${maltTable(malts.slice(half))}</div>
+    </div>`;
+  }
+
+  ['houblon','levure','autre'].forEach(cat => {
+    const items = (r.ingredients || []).filter(i => i.category === cat);
+    if (!items.length) return;
+    let cols = `<th>${t('rec.ing_name')}</th><th>${t('rec.ing_qty_abbr')}</th>`;
+    if (cat === 'houblon') cols += `<th>Alpha</th><th>${t('rec.col_type')}</th><th>${t('rec.col_duration')}</th>`;
+    if (cat === 'autre')   cols += `<th>${t('rec.col_moment')}</th><th>${t('rec.col_duration')}</th>`;
+    ingHtml += `<h3>${catLabels[cat]}</h3><table><thead><tr>${cols}</tr></thead><tbody>`;
+    items.forEach(i => {
+      let row = `<td>${esc(i.name)}</td><td>${i.quantity}\u00a0${esc(i.unit)}</td>`;
+      if (cat === 'houblon') {
+        const ht = i.hop_type || 'ebullition';
+        const htLabel = {ebullition:t('rec.hop_ebullition'), whirlpool:t('rec.hop_whirlpool'), dryhop:t('rec.hop_dryhop')}[ht] || ht;
+        const dur = ht === 'dryhop' ? (i.hop_days != null ? i.hop_days + ' j' : '–') : (i.hop_time != null ? i.hop_time + ' min' : '–');
+        row += `<td>${i.alpha != null ? i.alpha + '%' : '–'}</td><td>${htLabel}</td><td>${dur}</td>`;
+      }
+      if (cat === 'autre') {
+        const ot = i.other_type || 'ebullition';
+        const otLabel = PRINT_OT_LABELS[ot] || ot;
+        const dur = (ot === 'dryhop') ? (i.other_time != null ? i.other_time + ' j' : '–')
+          : (ot === 'ebullition' || ot === 'whirlpool') ? (i.other_time != null ? i.other_time + ' min' : '–')
+          : '–';
+        row += `<td>${otLabel}</td><td>${dur}</td>`;
+      }
+      ingHtml += `<tr>${row}</tr>`;
+    });
+    ingHtml += '</tbody></table>';
+  });
+
+  const notesHtml = r.notes
+    ? `<div class="notes"><strong>${t('common.notes')} :</strong><br>${esc(r.notes).replace(/\n/g,'<br>')}</div>` : '';
+
+  const win = window.open('', '_blank', 'width=840,height=700');
+  win.document.write(`<!DOCTYPE html><html lang="fr"><head>
+  <meta charset="UTF-8"><title>${esc(r.name)}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    body{font-family:Georgia,serif;color:#111;padding:28px 36px;font-size:13px}
+    h1{font-size:22px;margin-bottom:6px}
+    h3{font-family:sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin:18px 0 6px;border-bottom:1px solid #ddd;padding-bottom:4px}
+    .meta{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:16px}
+    .badge{display:inline-block;background:#f3f3f3;border:1px solid #ccc;border-radius:4px;padding:2px 8px;font-size:11px}
+    .header{border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px}
+    .params-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
+    .param{background:#f8f8f8;padding:5px 8px;border-radius:4px}
+    .param-val{font-size:12px;font-weight:bold}
+    .param-lbl{font-family:sans-serif;font-size:9px;color:#888;text-transform:uppercase;margin-top:1px}
+    .water-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:4px}
+    .stat-box{text-align:center;background:#f8f8f8;padding:8px 4px;border-radius:6px}
+    .stat-val{font-size:15px;font-weight:bold}
+    .stat-lbl{font-family:sans-serif;font-size:10px;color:#888}
+    table{width:100%;border-collapse:collapse;margin-bottom:4px}
+    th{text-align:left;padding:4px 8px;font-size:11px;text-transform:uppercase;color:#888;border-bottom:1px solid #ddd;font-family:sans-serif}
+    td{padding:5px 8px;border-bottom:1px solid #f0f0f0;font-size:12px}
+    .notes{margin-top:16px;padding:10px 12px;background:#f8f8f8;border-radius:6px;font-size:12px;font-family:sans-serif;line-height:1.5}
+    .est-row{display:grid;grid-template-columns:44px 1fr 76px 140px;align-items:center;gap:8px;margin-bottom:7px;font-family:sans-serif}
+    .est-lbl{font-size:11px;font-weight:700;color:#555}
+    .est-track{height:8px;background:#e5e7eb;border-radius:4px;position:relative;overflow:visible}
+    .est-range{position:absolute;top:0;height:100%;background:#fbbf24;opacity:.33;border-radius:4px}
+    .est-marker{position:absolute;top:-3px;width:3px;height:14px;border-radius:2px;transform:translateX(-50%)}
+    .est-val{font-size:13px;font-weight:700;text-align:right}
+    .est-target{font-size:10px;color:#9ca3af}
+    .ebc-dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:middle;border:1px solid rgba(0,0,0,.15)}
+    @media print{body{padding:16px}}
+    @page{margin:12mm}
+  </style></head><body>
+  <div class="header">
+    <h1>${esc(r.name)}</h1>
+    <div class="meta">
+      ${r.style   ? `<span class="badge">${esc(r.style)}</span>` : ''}
+      ${r.batch_no? `<span class="badge">${t('rec.batch_word')} #${r.batch_no}</span>` : ''}
+      <span class="badge">${r.volume} L</span>
+      ${r.brew_date ? `<span class="badge">${r.brew_date}</span>` : ''}
+    </div>
+  </div>
+  <div class="params-grid">
+    <div class="param"><div class="param-val">${r.mash_temp||66}°C</div><div class="param-lbl">${t('rec.mash_temp')}</div></div>
+    <div class="param"><div class="param-val">${r.mash_time||60} min</div><div class="param-lbl">${t('rec.mash_time')}</div></div>
+    <div class="param"><div class="param-val">${r.boil_time||60} min</div><div class="param-lbl">${t('rec.boil_time')}</div></div>
+    <div class="param"><div class="param-val">${r.ferm_temp||20}°C</div><div class="param-lbl">${t('rec.ferm_temp')}</div></div>
+    <div class="param"><div class="param-val">${r.ferm_time||14} j</div><div class="param-lbl">${t('rec.ferm_time_label')}</div></div>
+  </div>
+  <h3>${t('rec.print_estimations')}${bjcp ? ' \u2014 ' + esc(bjcp.name) : ''}</h3>
+  <div style="padding:8px 0 4px">${estimHtml}</div>
+  <h3>${t('rec.print_water')}</h3>
+  <div class="water-grid" style="margin-bottom:14px">
+    <div class="stat-box"><div class="stat-val">${wv('rw-mash')}</div><div class="stat-lbl">${t('rec.water_mash')}</div></div>
+    <div class="stat-box"><div class="stat-val">${wv('rw-sparge')}</div><div class="stat-lbl">${t('rec.water_sparge')}</div></div>
+    <div class="stat-box"><div class="stat-val">${wv('rw-preboil')}</div><div class="stat-lbl">${t('rec.water_preboil')}</div></div>
+    <div class="stat-box"><div class="stat-val">${wv('rw-total')}</div><div class="stat-lbl">${t('rec.water_total')}</div></div>
+  </div>
+  ${ingHtml}
+  ${notesHtml}
+  <script>window.onload=function(){window.print()}<\/script>
+</body></html>`);
+  win.document.close();
+}
+
+// ── Fiche de brassage imprimable ──────────────────────────────────────────────
+function printBrewingSheet() {
+  if (!recEditingId) { showRecAlert(t('rec.err_open_to_print')); return; }
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+
+  const wv  = id => document.getElementById(id)?.textContent || '–';
+  const vol = parseFloat(document.getElementById('rec-volume').value) || r.volume || 20;
+  const eff = parseFloat(document.getElementById('rec-efficiency').value) || r.brewhouse_efficiency || 72;
+
+  // OG / FG / ABV / IBU / EBC (same calcs as printRecipe)
+  let ogPts = 0;
+  recIngredients.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let gu = m.gu ?? (S.catalog.find(c => c.name.toLowerCase()===m.name.toLowerCase())?.gu ?? null);
+    if (gu == null) return;
+    ogPts += (m.unit==='kg'?m.quantity:m.quantity/1000)*gu*(eff/100);
+  });
+  const og  = ogPts > 0 ? 1 + ogPts/vol/1000 : null;
+  const fg  = og != null ? 1+(og-1)*0.25 : null;
+  const abv = og != null ? (og-fg)*131.25 : null;
+
+  // Hop schedule sorted high→low boil time (first addition first)
+  const boilTime = r.boil_time || 60;
+  const hops = recIngredients.filter(i=>i.category==='houblon');
+  const boilHops = hops.filter(h=>['ebullition','whirlpool','flameout'].includes(h.hop_type||'ebullition'))
+    .sort((a,b)=>(b.hop_time??boilTime)-(a.hop_time??boilTime));
+  const dryHops  = hops.filter(h=>h.hop_type==='dryhop');
+  const malts    = recIngredients.filter(i=>i.category==='malt');
+  const yeasts   = recIngredients.filter(i=>i.category==='levure');
+  const others   = recIngredients.filter(i=>i.category==='autre');
+  const totalMaltKg = malts.reduce((s,m)=>s+(m.unit==='kg'?m.quantity:m.quantity/1000),0);
+
+  // Cost
+  let totalCost = 0;
+  recIngredients.forEach(ing => {
+    const inv = (S.inventory||[]).find(i=>i.name.toLowerCase()===ing.name.toLowerCase());
+    if (!inv?.price) return;
+    const kg = ing.category==='malt'||ing.category==='houblon' ? (ing.unit==='kg'?ing.quantity:ing.quantity/1000) : null;
+    if (kg != null) totalCost += kg * inv.price;
+    else totalCost += (ing.quantity||1) * (inv.price||0);
+  });
+
+  function cb(label) { return `<div class="cb"><span class="box"></span><span>${label}</span></div>`; }
+
+  // Boil schedule HTML
+  let schedHtml = '<table><thead><tr><th>T (min)</th><th>Houblon</th><th>Qté</th><th>Alpha</th><th>Type</th></tr></thead><tbody>';
+  boilHops.forEach(h => {
+    const ht = h.hop_type||'ebullition';
+    const mins = ht==='whirlpool'||ht==='flameout' ? 0 : (h.hop_time??boilTime);
+    const type = {ebullition:'Ébullition',whirlpool:'Whirlpool',flameout:'Flammeout'}[ht]||ht;
+    schedHtml += `<tr><td><strong>${mins}</strong></td><td>${esc(h.name)}</td><td>${h.quantity}\u00a0${h.unit}</td><td>${h.alpha?h.alpha+'%':'–'}</td><td>${type}</td></tr>`;
+  });
+  if (!boilHops.length) schedHtml += `<tr><td colspan="5" style="color:#aaa;text-align:center">Aucun houblon d'ébullition</td></tr>`;
+  schedHtml += '</tbody></table>';
+
+  const win = window.open('', '_blank', 'width=840,height=900');
+  win.document.write(`<!DOCTYPE html><html lang="fr"><head>
+  <meta charset="UTF-8"><title>Fiche — ${esc(r.name)}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    body{font-family:sans-serif;color:#111;padding:22px 28px;font-size:12px}
+    h1{font-size:20px;font-family:Georgia,serif;margin-bottom:4px}
+    h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin:16px 0 6px;border-bottom:1px solid #ddd;padding-bottom:3px}
+    .meta{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px}
+    .badge{background:#f3f3f3;border:1px solid #ccc;border-radius:4px;padding:2px 8px;font-size:11px}
+    .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+    .box{background:#f8f8f8;padding:10px 8px;border-radius:6px;text-align:center}
+    .bv{font-size:18px;font-weight:bold}
+    .bl{font-size:10px;color:#888;margin-top:2px}
+    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+    .target{background:#fff8e1;border:1px solid #fbbf24;border-radius:6px;text-align:center;padding:8px}
+    table{width:100%;border-collapse:collapse;margin-bottom:8px}
+    th{text-align:left;padding:4px 8px;font-size:10px;text-transform:uppercase;color:#888;border-bottom:1px solid #ddd}
+    td{padding:5px 8px;border-bottom:1px solid #f0f0f0;font-size:11px}
+    .cb{display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:12px;break-inside:avoid}
+    .cb .box{width:16px;height:16px;border:1.5px solid #555;border-radius:3px;flex-shrink:0;background:#fff;margin-top:1px}
+    .notes-area{border:1px solid #ccc;border-radius:6px;padding:10px;min-height:60px;margin-bottom:8px;font-size:11px;color:#888}
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    @media print{body{padding:12px}@page{size:A4 portrait;margin:10mm}}
+  </style></head><body>
+  <h1>${esc(r.name)}</h1>
+  <div class="meta">
+    ${r.style   ? `<span class="badge">${esc(r.style)}</span>` : ''}
+    ${r.batch_no? `<span class="badge">Brassin #${r.batch_no}</span>` : ''}
+    <span class="badge">${vol} L</span>
+    ${r.brew_date? `<span class="badge">${r.brew_date}</span>` : ''}
+    ${totalCost > 0 ? `<span class="badge">≈ ${totalCost.toFixed(2)} €</span>` : ''}
+  </div>
+
+  <h2>Volumes d'eau</h2>
+  <div class="grid4">
+    <div class="box"><div class="bv">${wv('rw-mash')}\u00a0L</div><div class="bl">Empâtage</div></div>
+    <div class="box"><div class="bv">${wv('rw-sparge')}\u00a0L</div><div class="bl">Rinçage</div></div>
+    <div class="box"><div class="bv">${wv('rw-preboil')}\u00a0L</div><div class="bl">Pré-ébullition</div></div>
+    <div class="box"><div class="bv">${wv('rw-total')}\u00a0L</div><div class="bl">Total</div></div>
+  </div>
+
+  <div class="two-col">
+    <div>
+      <h2>Étapes de brassage</h2>
+      ${cb(`Chauffer <strong>${wv('rw-mash')} L</strong> à <strong>${(r.mash_temp||66)+10}°C</strong> (température de coulée)`)}
+      ${cb(`Empâtage : <strong>${totalMaltKg.toFixed(2)} kg</strong> de malt — <strong>${r.mash_temp||66}°C</strong> / <strong>${r.mash_time||60} min</strong>`)}
+      ${cb(`Rinçage : <strong>${wv('rw-sparge')} L</strong> à 76°C`)}
+      ${cb(`Ébullition : <strong>${boilTime} min</strong>`)}
+      ${boilHops.map(h => {
+        const mins = ['whirlpool','flameout'].includes(h.hop_type) ? 0 : (h.hop_time??boilTime);
+        return cb(`T+${boilTime-mins} min — Houblon <strong>${esc(h.name)}</strong> ${h.quantity}\u00a0${h.unit}`);
+      }).join('')}
+      ${cb('Refroidir le moût à la température de fermentation')}
+      ${yeasts.map(y => cb(`Ensemencer : <strong>${esc(y.name)}</strong> ${y.quantity}\u00a0${y.unit} — <strong>${r.ferm_temp||20}°C</strong>`)).join('')}
+      ${dryHops.map(h => cb(`Dry-hop : <strong>${esc(h.name)}</strong> ${h.quantity}\u00a0${h.unit} ${h.hop_days!=null?'pendant '+h.hop_days+' j':''}`)).join('')}
+      ${cb(`Fermentation : <strong>${r.ferm_time||14} jours</strong> à <strong>${r.ferm_temp||20}°C</strong>`)}
+      ${cb('Embouteillage / mise en fût')}
+    </div>
+    <div>
+      <h2>Objectifs</h2>
+      <div class="grid3" style="margin-bottom:10px">
+        <div class="target"><div class="bv">${og?og.toFixed(3):'–'}</div><div class="bl">DI</div></div>
+        <div class="target"><div class="bv">${fg?fg.toFixed(3):'–'}</div><div class="bl">DF</div></div>
+        <div class="target"><div class="bv">${abv?abv.toFixed(1)+'%':'–'}</div><div class="bl">ABV</div></div>
+      </div>
+
+      <h2>Planning houblons</h2>
+      ${schedHtml}
+
+      ${others.length ? `<h2>Autres additions</h2><table><thead><tr><th>Nom</th><th>Qté</th><th>Moment</th></tr></thead><tbody>${others.map(o=>`<tr><td>${esc(o.name)}</td><td>${o.quantity}\u00a0${esc(o.unit)}</td><td>${esc(o.other_type||'–')}</td></tr>`).join('')}</tbody></table>` : ''}
+    </div>
+  </div>
+
+  <h2>Mesures</h2>
+  <table><thead><tr><th>Étape</th><th>Valeur mesurée</th><th>Notes</th></tr></thead><tbody>
+    <tr><td>DI (avant fermentation)</td><td style="min-width:120px;border-bottom:1px solid #aaa">&nbsp;</td><td style="min-width:200px;border-bottom:1px solid #aaa">&nbsp;</td></tr>
+    <tr><td>DF (fin fermentation)</td><td style="border-bottom:1px solid #aaa">&nbsp;</td><td style="border-bottom:1px solid #aaa">&nbsp;</td></tr>
+    <tr><td>ABV calculé</td><td style="border-bottom:1px solid #aaa">&nbsp;</td><td style="border-bottom:1px solid #aaa">&nbsp;</td></tr>
+  </table>
+
+  ${r.notes ? `<h2>Notes</h2><div style="font-size:11px;line-height:1.6;padding:8px 10px;background:#f8f8f8;border-radius:6px">${esc(r.notes).replace(/\n/g,'<br>')}</div>` : ''}
+
+  <script>window.onload=function(){window.print()}<\/script>
+</body></html>`);
+  win.document.close();
+}
+
+// ── Impression combinée recette + guide de brassage (A4 paysage) ─────────────
+function printCombinedSheet() {
+  if (!recEditingId) { showRecAlert(t('rec.err_open_to_print')); return; }
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+
+  const wv  = id => document.getElementById(id)?.textContent || '–';
+  const vol = parseFloat(document.getElementById('rec-volume').value) || r.volume || 20;
+  const eff = parseFloat(document.getElementById('rec-efficiency').value) || r.brewhouse_efficiency || 72;
+
+  // ── Estimations OG/FG/ABV/IBU/EBC ────────────────────────────────────────
+  let ogPoints = 0;
+  recIngredients.filter(i => i.category === 'malt').forEach(m => {
+    if (!m.quantity) return;
+    let guVal = m.gu ?? (S.catalog.find(c => c.name.toLowerCase()===m.name.toLowerCase())?.gu ?? null);
+    if (guVal == null) return;
+    ogPoints += (m.unit==='kg'?m.quantity:m.quantity/1000)*guVal*(eff/100);
+  });
+  const og  = ogPoints > 0 ? 1 + ogPoints/vol/1000 : null;
+  const fg  = og != null ? 1+(og-1)*0.25 : null;
+  const abv = og != null ? (og-fg)*131.25 : null;
+
+  const wortOG = og || 1.050;
+  const _ibuF  = appSettings.energy?.ibu_formula || 'tinseth';
+  let ibuTotal = 0;
+  recIngredients.filter(i=>i.category==='houblon').forEach(h => {
+    if (!h.quantity||!h.alpha) return;
+    const ht=h.hop_type||'ebullition'; if(ht==='dryhop') return;
+    const mins=ht==='whirlpool'?15:(h.hop_time??60);
+    const g=h.unit==='kg'?h.quantity*1000:h.quantity;
+    if(_ibuF==='rager'){const util=18.11+13.86*Math.tanh((mins-31.32)/18.27);const adj=wortOG>1.050?(wortOG-1.050)/0.2:0;ibuTotal+=(g*(util/100)*(h.alpha/100)*1000)/(vol*(1+adj));}
+    else{ibuTotal+=1.65*Math.pow(0.000125,wortOG-1)*(1-Math.exp(-0.04*mins))/4.15*(h.alpha/100)*g*1000/vol;}
+  });
+  const ibuVal = ibuTotal > 0 ? ibuTotal : null;
+
+  let totalMcu = 0;
+  recIngredients.filter(i=>i.category==='malt').forEach(m => {
+    if(!m.quantity) return;
+    let e=m.ebc??(S.catalog.find(c=>c.name.toLowerCase()===m.name.toLowerCase())?.ebc??null);
+    if(e==null) return;
+    const kg=m.unit==='kg'?m.quantity:m.quantity/1000;
+    totalMcu+=(kg*2.20462*((e/1.97+0.76)/1.3546))/(vol*0.264172);
+  });
+  const srmVal = totalMcu>0 ? 1.4922*Math.pow(totalMcu,0.6859) : null;
+  const ebcVal = srmVal!=null ? srmVal*1.97 : null;
+
+  const bjcp = S.bjcp.find(x=>x.name===(document.getElementById('rec-style').value||'').trim())||null;
+
+  // ── Barre estimations ─────────────────────────────────────────────────────
+  function estBar(label,val,cfgMin,cfgMax,dec,unit,bMin,bMax){
+    const span=cfgMax-cfgMin, hasBjcp=bMin!=null&&bMax!=null;
+    const pct=val!=null?Math.min(100,Math.max(0,(val-cfgMin)/span*100)):null;
+    const rL=hasBjcp?Math.min(100,Math.max(0,(bMin-cfgMin)/span*100)):0;
+    const rW=hasBjcp?Math.min(100,Math.max(0,(bMax-cfgMin)/span*100))-rL:0;
+    const inR=hasBjcp&&val!=null&&val>=bMin&&val<=bMax;
+    const col=val==null?'#9ca3af':hasBjcp?(inR?'#16a34a':'#dc2626'):'#d97706';
+    const valStr=val!=null?val.toFixed(dec)+(unit?'\u00a0'+unit:''):'–';
+    const tgt=hasBjcp?`⌖\u00a0${bMin.toFixed(dec)}–${bMax.toFixed(dec)}${unit||''}`:'';
+    return `<div class="est-row"><div class="est-lbl">${label}</div><div class="est-track">${hasBjcp?`<div class="est-range" style="left:${rL.toFixed(1)}%;width:${rW.toFixed(1)}%"></div>`:''} ${pct!=null?`<div class="est-marker" style="left:${pct.toFixed(1)}%;background:${col}"></div>`:''}</div><div class="est-val" style="color:${col}">${valStr}</div><div class="est-tgt">${tgt}</div></div>`;
+  }
+  const estimHtml =
+    estBar('OG',og,1.020,1.130,3,'',bjcp?.og_min,bjcp?.og_max)+
+    estBar('FG',fg,1.002,1.030,3,'',bjcp?.fg_min,bjcp?.fg_max)+
+    estBar('ABV',abv,0,14,1,'%',bjcp?.abv_min,bjcp?.abv_max)+
+    estBar('IBU',ibuVal,0,120,0,'',bjcp?.ibu_min,bjcp?.ibu_max)+
+    estBar('EBC',ebcVal,0,120,0,'',bjcp?.ebc_min,bjcp?.ebc_max);
+
+  // ── Ingrédients (colonne gauche) ──────────────────────────────────────────
+  const catLabels={malt:t('rec.malts_full'),houblon:t('cat.houblons'),levure:t('cat.levures'),autre:t('cat.autres')};
+  const PRINT_OT={empatage:t('rec.hop_empatage'),sparge:t('rec.hop_sparge'),ebullition:t('rec.hop_ebullition'),flameout:t('rec.hop_flameout'),whirlpool:t('rec.hop_whirlpool'),dryhop:t('rec.hop_dryhop'),fermentation:t('rec.hop_fermentation'),packaging:t('rec.hop_packaging')};
+
+  function maltTable(items){
+    if(!items.length) return '';
+    return `<table><thead><tr><th>${t('rec.ing_name')}</th><th>${t('rec.ing_qty_abbr')}</th></tr></thead><tbody>`
+      +items.map(i=>`<tr><td>${esc(i.name)}</td><td>${i.quantity}\u00a0${esc(i.unit)}</td></tr>`).join('')
+      +`</tbody></table>`;
+  }
+
+  let ingHtml='';
+  const malts=recIngredients.filter(i=>i.category==='malt');
+  const totalMaltKg=malts.reduce((s,m)=>s+(m.unit==='kg'?m.quantity:m.quantity/1000),0);
+  if(malts.length){
+    const half=Math.ceil(malts.length/2);
+    ingHtml+=`<h3>${catLabels.malt}</h3><div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #ddd;border-radius:4px;overflow:hidden;margin-bottom:4px"><div style="border-right:2px solid #ccc">${maltTable(malts.slice(0,half))}</div><div>${maltTable(malts.slice(half))}</div></div>`;
+  }
+  ['houblon','levure','autre'].forEach(cat=>{
+    const items=recIngredients.filter(i=>i.category===cat);
+    if(!items.length) return;
+    let cols=`<th>${t('rec.ing_name')}</th><th>${t('rec.ing_qty_abbr')}</th>`;
+    if(cat==='houblon') cols+=`<th>Alpha</th><th>${t('rec.col_type')}</th><th>${t('rec.col_duration')}</th>`;
+    if(cat==='autre')   cols+=`<th>${t('rec.col_moment')}</th><th>${t('rec.col_duration')}</th>`;
+    ingHtml+=`<h3>${catLabels[cat]}</h3><table><thead><tr>${cols}</tr></thead><tbody>`;
+    items.forEach(i=>{
+      let row=`<td>${esc(i.name)}</td><td>${i.quantity}\u00a0${esc(i.unit)}</td>`;
+      if(cat==='houblon'){const ht=i.hop_type||'ebullition';const htLabel={ebullition:t('rec.hop_ebullition'),whirlpool:t('rec.hop_whirlpool'),dryhop:t('rec.hop_dryhop')}[ht]||ht;const dur=ht==='dryhop'?(i.hop_days!=null?i.hop_days+' j':'–'):(i.hop_time!=null?i.hop_time+' min':'–');row+=`<td>${i.alpha!=null?i.alpha+'%':'–'}</td><td>${htLabel}</td><td>${dur}</td>`;}
+      if(cat==='autre'){const ot=i.other_type||'ebullition';const otLabel=PRINT_OT[ot]||ot;const dur=(ot==='dryhop')?(i.other_time!=null?i.other_time+' j':'–'):(ot==='ebullition'||ot==='whirlpool')?(i.other_time!=null?i.other_time+' min':'–'):'–';row+=`<td>${otLabel}</td><td>${dur}</td>`;}
+      ingHtml+=`<tr>${row}</tr>`;
+    });
+    ingHtml+='</tbody></table>';
+  });
+
+  // ── Guide de brassage (colonne droite) ────────────────────────────────────
+  const boilTime=r.boil_time||60;
+  const hops=recIngredients.filter(i=>i.category==='houblon');
+  const boilHops=hops.filter(h=>['ebullition','whirlpool','flameout'].includes(h.hop_type||'ebullition')).sort((a,b)=>(b.hop_time??boilTime)-(a.hop_time??boilTime));
+  const dryHops=hops.filter(h=>h.hop_type==='dryhop');
+  const yeasts=recIngredients.filter(i=>i.category==='levure');
+  const others=recIngredients.filter(i=>i.category==='autre');
+
+  function cb(label){return `<div class="cb"><span class="cbox"></span><span>${label}</span></div>`;}
+
+  let schedHtml=`<table><thead><tr><th>T (min)</th><th>${t('cat.houblons')}</th><th>${t('rec.ing_qty_abbr')}</th><th>Alpha</th></tr></thead><tbody>`;
+  boilHops.forEach(h=>{const ht=h.hop_type||'ebullition';const mins=ht==='whirlpool'||ht==='flameout'?0:(h.hop_time??boilTime);schedHtml+=`<tr><td><strong>${mins}</strong></td><td>${esc(h.name)}</td><td>${h.quantity}\u00a0${h.unit}</td><td>${h.alpha?h.alpha+'%':'–'}</td></tr>`;});
+  if(!boilHops.length) schedHtml+=`<tr><td colspan="4" style="color:#aaa;text-align:center">–</td></tr>`;
+  schedHtml+='</tbody></table>';
+
+  const notesHtml=r.notes?`<h3>${t('common.notes')}</h3><div class="notes">${esc(r.notes).replace(/\n/g,'<br>')}</div>`:'';
+
+  const win=window.open('','_blank','width=1100,height=800');
+  win.document.write(`<!DOCTYPE html><html lang="fr"><head>
+  <meta charset="UTF-8"><title>${esc(r.name)}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    body{font-family:sans-serif;color:#111;font-size:10px}
+    .page{display:grid;grid-template-rows:auto 1fr;grid-template-columns:1fr 1fr}
+    .col{padding:8px 12px;overflow:hidden}
+    .col-left{border-right:2px solid #ddd}
+    .page-header{grid-column:1/-1;padding:8px 12px 7px;border-bottom:2px solid #111;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+    h1{font-family:Georgia,serif;font-size:16px;flex:1}
+    .meta{display:flex;flex-wrap:wrap;gap:3px}
+    .badge{background:#f3f3f3;border:1px solid #ccc;border-radius:4px;padding:1px 6px;font-size:9px}
+    h3{font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:#888;margin:8px 0 3px;border-bottom:1px solid #eee;padding-bottom:2px}
+    h3:first-child{margin-top:0}
+    .params-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-bottom:7px}
+    .param{background:#f8f8f8;padding:3px 5px;border-radius:4px}
+    .param-val{font-size:10px;font-weight:bold}
+    .param-lbl{font-size:7px;color:#888;text-transform:uppercase;margin-top:1px}
+    .water-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:7px}
+    .stat-box{text-align:center;background:#f8f8f8;padding:4px 3px;border-radius:4px}
+    .stat-val{font-size:12px;font-weight:bold}
+    .stat-lbl{font-size:8px;color:#888}
+    table{width:100%;border-collapse:collapse;margin-bottom:3px}
+    th{text-align:left;padding:2px 5px;font-size:8px;text-transform:uppercase;color:#888;border-bottom:1px solid #ddd}
+    td{padding:3px 5px;border-bottom:1px solid #f0f0f0;font-size:9px}
+    .est-row{display:grid;grid-template-columns:32px 1fr 54px 100px;align-items:center;gap:5px;margin-bottom:4px}
+    .est-lbl{font-size:9px;font-weight:700;color:#555}
+    .est-track{height:6px;background:#e5e7eb;border-radius:4px;position:relative;overflow:visible}
+    .est-range{position:absolute;top:0;height:100%;background:#fbbf24;opacity:.33;border-radius:4px}
+    .est-marker{position:absolute;top:-3px;width:3px;height:12px;border-radius:2px;transform:translateX(-50%)}
+    .est-val{font-size:11px;font-weight:700;text-align:right}
+    .est-tgt{font-size:8px;color:#9ca3af}
+    .cb{display:flex;align-items:flex-start;gap:6px;padding:3px 0;font-size:10px}
+    .cbox{width:12px;height:12px;border:1.5px solid #555;border-radius:2px;flex-shrink:0;margin-top:1px;background:#fff}
+    .target-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:7px}
+    .target{background:#fff8e1;border:1px solid #fbbf24;border-radius:4px;text-align:center;padding:4px}
+    .tv{font-size:13px;font-weight:bold}
+    .tl{font-size:8px;color:#888;margin-top:1px}
+    .meas-table td{min-width:80px}
+    .notes{font-size:9px;line-height:1.4;padding:4px 6px;background:#f8f8f8;border-radius:4px;margin-top:4px}
+    @media print{
+      html,body{height:100%}
+      .page{height:100%;overflow:hidden}
+      .col{overflow:hidden}
+      @page{size:A4 landscape;margin:8mm}
+    }
+  </style></head><body>
+  <div class="page">
+    <div class="page-header">
+      <h1>${esc(r.name)}</h1>
+      <div class="meta">
+        ${r.style?`<span class="badge">${esc(r.style)}</span>`:''}
+        ${r.batch_no?`<span class="badge">${t('rec.batch_word')} #${r.batch_no}</span>`:''}
+        <span class="badge">${vol} L</span>
+        ${r.brew_date?`<span class="badge">${r.brew_date}</span>`:''}
+      </div>
+    </div>
+
+    <div class="col col-left">
+      <h3>${t('rec.print_estimations')}${bjcp?' \u2014 '+esc(bjcp.name):''}</h3>
+      <div style="margin-bottom:10px">${estimHtml}</div>
+
+      <h3>${t('rec.print_water')}</h3>
+      <div class="water-grid">
+        <div class="stat-box"><div class="stat-val">${wv('rw-mash')}</div><div class="stat-lbl">${t('rec.water_mash')}</div></div>
+        <div class="stat-box"><div class="stat-val">${wv('rw-sparge')}</div><div class="stat-lbl">${t('rec.water_sparge')}</div></div>
+        <div class="stat-box"><div class="stat-val">${wv('rw-preboil')}</div><div class="stat-lbl">${t('rec.water_preboil')}</div></div>
+        <div class="stat-box"><div class="stat-val">${wv('rw-total')}</div><div class="stat-lbl">${t('rec.water_total')}</div></div>
+      </div>
+
+      <h3>${t('rec.print_params')}</h3>
+      <div class="params-grid">
+        <div class="param"><div class="param-val">${r.mash_temp||66}°C</div><div class="param-lbl">${t('rec.mash_temp')}</div></div>
+        <div class="param"><div class="param-val">${r.mash_time||60} min</div><div class="param-lbl">${t('rec.mash_time')}</div></div>
+        <div class="param"><div class="param-val">${r.boil_time||60} min</div><div class="param-lbl">${t('rec.boil_time')}</div></div>
+        <div class="param"><div class="param-val">${r.ferm_temp||20}°C</div><div class="param-lbl">${t('rec.ferm_temp')}</div></div>
+        <div class="param"><div class="param-val">${r.ferm_time||14} j</div><div class="param-lbl">${t('rec.ferm_time_label')}</div></div>
+      </div>
+
+      ${ingHtml}
+    </div>
+
+    <div class="col col-right">
+      <h3>Objectifs</h3>
+      <div class="target-grid">
+        <div class="target"><div class="tv">${og?og.toFixed(3):'–'}</div><div class="tl">DI</div></div>
+        <div class="target"><div class="tv">${fg?fg.toFixed(3):'–'}</div><div class="tl">DF</div></div>
+        <div class="target"><div class="tv">${abv?abv.toFixed(1)+'%':'–'}</div><div class="tl">ABV</div></div>
+      </div>
+
+      <h3>${t('rec.print_steps')}</h3>
+      ${cb(`${t('rec.sheet_heat')} <strong>${wv('rw-mash')} L</strong> ${t('rec.sheet_to')} <strong>${(r.mash_temp||66)+10}°C</strong>`)}
+      ${cb(`${t('rec.sheet_mash')} : <strong>${totalMaltKg.toFixed(2)} kg</strong> — <strong>${r.mash_temp||66}°C</strong> / <strong>${r.mash_time||60} min</strong>`)}
+      ${cb(`${t('rec.sheet_sparge')} : <strong>${wv('rw-sparge')} L</strong> à 76°C`)}
+      ${cb(`${t('rec.sheet_boil')} : <strong>${boilTime} min</strong>`)}
+      ${boilHops.map(h=>{const mins=['whirlpool','flameout'].includes(h.hop_type)?0:(h.hop_time??boilTime);return cb(`T+${boilTime-mins} min — <strong>${esc(h.name)}</strong> ${h.quantity}\u00a0${h.unit}`);}).join('')}
+      ${cb(t('rec.sheet_chill'))}
+      ${yeasts.map(y=>cb(`${t('rec.sheet_pitch')} : <strong>${esc(y.name)}</strong> ${y.quantity}\u00a0${y.unit} — <strong>${r.ferm_temp||20}°C</strong>`)).join('')}
+      ${dryHops.map(h=>cb(`Dry-hop : <strong>${esc(h.name)}</strong> ${h.quantity}\u00a0${h.unit}${h.hop_days!=null?' — '+h.hop_days+' j':''}`)).join('')}
+      ${cb(`${t('rec.sheet_ferm')} : <strong>${r.ferm_time||14} j</strong> — <strong>${r.ferm_temp||20}°C</strong>`)}
+      ${cb(t('rec.sheet_package'))}
+
+      <h3>${t('rec.print_hop_sched')}</h3>
+      ${schedHtml}
+
+      ${others.length?`<h3>${t('cat.autres')}</h3><table><thead><tr><th>${t('rec.ing_name')}</th><th>${t('rec.ing_qty_abbr')}</th><th>${t('rec.col_moment')}</th></tr></thead><tbody>${others.map(o=>`<tr><td>${esc(o.name)}</td><td>${o.quantity}\u00a0${esc(o.unit)}</td><td>${esc(o.other_type||'–')}</td></tr>`).join('')}</tbody></table>`:''}
+
+      <h3>${t('rec.print_measurements')}</h3>
+      <table class="meas-table"><thead><tr><th>${t('rec.meas_step')}</th><th>${t('rec.meas_value')}</th><th>${t('common.notes')}</th></tr></thead><tbody>
+        <tr><td>DI</td><td style="border-bottom:1px solid #aaa">&nbsp;</td><td style="border-bottom:1px solid #aaa">&nbsp;</td></tr>
+        <tr><td>DF</td><td style="border-bottom:1px solid #aaa">&nbsp;</td><td style="border-bottom:1px solid #aaa">&nbsp;</td></tr>
+        <tr><td>ABV</td><td style="border-bottom:1px solid #aaa">&nbsp;</td><td style="border-bottom:1px solid #aaa">&nbsp;</td></tr>
+      </tbody></table>
+
+      ${notesHtml}
+    </div>
+  </div>
+  <script>window.onload=function(){window.print()}<\/script>
+</body></html>`);
+  win.document.close();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── CALCULATEUR DE PRIMAGE ───────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function openPrimingCalc() {
+  // Pre-fill volume from current recipe if available
+  const vol = parseFloat(document.getElementById('rec-volume')?.value)
+    || S.recipes.find(x => x.id === recEditingId)?.volume
+    || 20;
+  const volEl = document.getElementById('priming-vol');
+  if (volEl) volEl.value = vol;
+  document.getElementById('priming-style').value = '';
+  calcPriming();
+  document.getElementById('modal-priming').classList.add('open');
+}
+
+function primingStylePreset(pfx = 'priming-') {
+  const val = document.getElementById(pfx + 'style').value;
+  if (!val) return;
+  document.getElementById(pfx + 'co2').value = val;
+  calcPriming(pfx);
+}
+
+function calcPriming(pfx = 'priming-') {
+  const vol    = parseFloat(document.getElementById(pfx + 'vol')?.value)   || 20;
+  const tempC  = parseFloat(document.getElementById(pfx + 'temp')?.value)  ?? 20;
+  const target = parseFloat(document.getElementById(pfx + 'co2')?.value)   || 2.5;
+  const factor = parseFloat(document.getElementById(pfx + 'sugar')?.value) || 4.64;
+  const block  = document.getElementById(pfx + 'result-block');
+  if (!block) return;
+
+  // Formule Brewer's Friend — T doit être en °F
+  const tempF   = tempC * 9 / 5 + 32;
+  const residual = 3.0378 - 0.050062 * tempF + 0.00026555 * tempF * tempF;
+  const toAdd    = Math.max(0, target - residual);
+
+  if (target <= residual) {
+    block.innerHTML = `<div style="padding:12px 14px;background:rgba(251,191,36,.12);border:1px solid var(--warning);border-radius:8px;font-size:.87rem;color:var(--warning)">
+      <i class="fas fa-triangle-exclamation"></i> ${t('rec.priming_warn_low')}
+      <div style="margin-top:6px;font-size:.8rem;color:var(--muted)">${t('rec.priming_residual')} : <strong>${residual.toFixed(2)} vol</strong></div>
+    </div>`;
+    return;
+  }
+
+  const grams = toAdd * vol * factor;
+  const per33 = (grams * 0.33 / vol).toFixed(1);
+  const per50 = (grams * 0.50 / vol).toFixed(1);
+  const per75 = (grams * 0.75 / vol).toFixed(1);
+
+  block.innerHTML = `
+    <div style="text-align:center;padding:14px 0 10px">
+      <div style="font-size:2.8rem;font-weight:700;color:var(--info);letter-spacing:-.01em">${grams.toFixed(1)}<span style="font-size:1.1rem;font-weight:500;color:var(--muted);margin-left:4px">g</span></div>
+      <div style="color:var(--muted);font-size:.85rem;margin-top:2px">${t('rec.priming_result')}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">
+      <div style="background:var(--card2);border-radius:8px;padding:10px 8px;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--info)">${per33} g</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:2px">33 cL</div>
+      </div>
+      <div style="background:var(--card2);border-radius:8px;padding:10px 8px;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--info)">${per50} g</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:2px">50 cL</div>
+      </div>
+      <div style="background:var(--card2);border-radius:8px;padding:10px 8px;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--info)">${per75} g</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:2px">75 cL</div>
+      </div>
+    </div>
+    <div style="font-size:.78rem;color:var(--muted);text-align:center;margin-bottom:10px">
+      ${t('rec.priming_residual')} à ${tempC}°C : ${residual.toFixed(2)} vol — ${t('rec.priming_to_add')} : ${toAdd.toFixed(2)} vol
+    </div>
+    <div style="padding:10px 12px;background:var(--card2);border-radius:8px;border-left:3px solid var(--info);font-size:.82rem;line-height:1.5;color:var(--muted)">
+      <i class="fas fa-circle-info" style="color:var(--info)"></i> ${t('rec.priming_tip')}
+    </div>`;
+}
+
+
+// ── Menu actions recette ──────────────────────────────────────────────────────
+function toggleRecActionsMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('rec-more-menu');
+  if (!menu) return;
+  const isOpen = menu.style.display !== 'none';
+  menu.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    setTimeout(() => document.addEventListener('click', closeRecActionsMenu, { once: true }), 0);
+  }
+}
+function closeRecActionsMenu() {
+  const menu = document.getElementById('rec-more-menu');
+  if (menu) menu.style.display = 'none';
+}
+
+// ── Historique des versions ───────────────────────────────────────────────────
+async function openRecipeHistory() {
+  if (!recEditingId) return;
+  const body = document.getElementById('recipe-history-body');
+  body.innerHTML = `<div style="text-align:center;color:var(--muted);padding:24px"><i class="fas fa-spinner fa-spin"></i></div>`;
+  document.getElementById('modal-recipe-history').classList.add('open');
+  try {
+    const versions = await api('GET', `/api/recipes/${recEditingId}/history`);
+    if (!versions.length) {
+      body.innerHTML = `<div class="empty" style="padding:24px 16px"><i class="fas fa-clock-rotate-left"></i><p>${t('rec.history_empty')}</p></div>`;
+      return;
+    }
+    body.innerHTML = versions.map((v, i) => {
+      const num = versions.length - i;
+      const date = new Date(v.saved_at).toLocaleString();
+      const meta = [v.volume ? v.volume + '\u00a0L' : null, v.n_ingredients + ' ing.', v.style ? esc(v.style) : null].filter(Boolean).join(' · ');
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
+        <div style="flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.72rem;font-weight:700">${num}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(v.name)}</div>
+          <div style="font-size:.74rem;color:var(--muted);margin-top:1px">${meta}</div>
+          <div style="font-size:.70rem;color:var(--muted);margin-top:1px"><i class="fas fa-clock" style="font-size:.6rem"></i> ${date}</div>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="restoreRecipeVersion(${v.id})" style="flex-shrink:0">
+          <i class="fas fa-rotate-left"></i> ${t('rec.history_restore')}
+        </button>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    body.innerHTML = `<div style="color:var(--danger);padding:16px;font-size:.85rem"><i class="fas fa-circle-xmark"></i> ${t('common.error')}</div>`;
+  }
+}
+
+function closeRecipeHistory() {
+  document.getElementById('modal-recipe-history').classList.remove('open');
+}
+
+async function restoreRecipeVersion(versionId) {
+  if (!recEditingId) return;
+  if (!await confirmModal(t('rec.history_confirm'))) return;
+  try {
+    const result = await api('POST', `/api/recipes/${recEditingId}/history/${versionId}/restore`);
+    const idx = S.recipes.findIndex(r => r.id === recEditingId);
+    if (idx !== -1) S.recipes[idx] = result;
+    closeRecipeHistory();
+    loadRecipeForm(recEditingId);
+    toast(t('rec.history_restored'), 'success');
+  } catch(e) {
+    toast(t('rec.history_err_restore'), 'error');
+  }
+}
+
