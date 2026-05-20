@@ -106,7 +106,7 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # 1 year cache for static files
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB max request body
 
-_STATIC_V = '0.0.9'  # fallback si _compute_static_v échoue
+_STATIC_V = '0.1.0'  # fallback si _compute_static_v échoue
 
 def _compute_static_v():
     """Version basée sur le mtime max des JS compilés — se met à jour automatiquement."""
