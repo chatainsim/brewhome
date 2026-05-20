@@ -631,6 +631,67 @@ _MIGRATIONS = [
     )""",
     # 122
     "CREATE INDEX IF NOT EXISTS idx_invlog_item ON inventory_log(inventory_item_id, ts DESC)",
+    # 123
+    "ALTER TABLE draft_recipes ADD COLUMN status TEXT NOT NULL DEFAULT 'idea'",
+    # 124 — galerie multi-images
+    "ALTER TABLE draft_recipes ADD COLUMN images TEXT NOT NULL DEFAULT '[]'",
+    # 125 — seed images from existing single image field
+    "UPDATE draft_recipes SET images = json_array(image) WHERE image IS NOT NULL AND images = '[]'",
+    # 126 — stockage images sur disque (tableau de noms de fichiers)
+    "ALTER TABLE draft_recipes ADD COLUMN images_files TEXT NOT NULL DEFAULT '[]'",
+    # 127
+    """CREATE TABLE IF NOT EXISTS shopping_list (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        name              TEXT NOT NULL,
+        category          TEXT NOT NULL DEFAULT 'autre',
+        quantity          REAL NOT NULL DEFAULT 1,
+        unit              TEXT NOT NULL DEFAULT 'g',
+        checked           INTEGER NOT NULL DEFAULT 0,
+        notes             TEXT,
+        inventory_item_id INTEGER,
+        sort_order        INTEGER DEFAULT 0,
+        created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id) ON DELETE SET NULL
+    )""",
+    # 128 — historique d'achat (soft-delete)
+    "ALTER TABLE shopping_list ADD COLUMN bought_at TIMESTAMP",
+    # 129 — index couvrant brew_photos(brew_id, created_at) pour WHERE brew_id=? ORDER BY created_at
+    "CREATE INDEX IF NOT EXISTS idx_bp_brew_date ON brew_photos(brew_id, created_at)",
+    # 130 — variantes/versions de recette
+    "ALTER TABLE recipes ADD COLUMN parent_recipe_id INTEGER REFERENCES recipes(id) ON DELETE SET NULL",
+    "ALTER TABLE recipes ADD COLUMN version_number INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE recipes ADD COLUMN version_notes TEXT",
+    # 133 — historique des modifications du catalogue
+    """CREATE TABLE IF NOT EXISTS catalog_history (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        catalog_item_id INTEGER NOT NULL,
+        item_name       TEXT    NOT NULL,
+        changes         TEXT    NOT NULL,
+        changed_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (catalog_item_id) REFERENCES ingredient_catalog(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_cath_item ON catalog_history(catalog_item_id, changed_at DESC)",
+    # 134 — index couvrant beers(brew_id, archived, stock_33cl, stock_75cl, keg_liters, bottling_date)
+    #        pour l'index-only scan du CTE beer_agg dans get_brews
+    "CREATE INDEX IF NOT EXISTS idx_beers_brew_cov ON beers(brew_id, archived, stock_33cl, stock_75cl, keg_liters, bottling_date) WHERE brew_id IS NOT NULL",
+    # 134 — index couvrant consumption_log(beer_id, ts) pour le CTE cons_agg dans get_brews
+    "CREATE INDEX IF NOT EXISTS idx_clog_beer_ts ON consumption_log(beer_id, ts)",
+    # 136 — étapes planifiées par brassin (cold crash, changement de T°, etc.)
+    """CREATE TABLE IF NOT EXISTS brew_steps (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        brew_id         INTEGER NOT NULL,
+        scheduled_date  TEXT    NOT NULL,
+        title           TEXT    NOT NULL,
+        notes           TEXT,
+        done            INTEGER NOT NULL DEFAULT 0,
+        telegram_notify INTEGER NOT NULL DEFAULT 1,
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (brew_id) REFERENCES brews(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_bstep_brew ON brew_steps(brew_id, scheduled_date)",
+    # 137 — stockage photo cave (beers) sur filesystem
+    "ALTER TABLE beers ADD COLUMN photo_file TEXT",
     # ── Ajouter les nouvelles migrations ci-dessous ───────────────────────────
 ]
 

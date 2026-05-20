@@ -98,6 +98,10 @@ def _sensor_rate_limit(token: str) -> bool:
 
 # ── Conversion unités ─────────────────────────────────────────────────────────
 
+# Unités reconnues par _to_base() / _from_base() — partagées avec les schémas de validation
+VALID_UNITS = frozenset({'kg', 'g', 'L', 'ml', 'mL', 'sachet', 'pièce', 'unité'})
+
+
 def _to_base(qty, unit):
     """Convert quantity to base unit (g for solids, ml for liquids)."""
     if unit == 'kg': return float(qty) * 1000
@@ -131,10 +135,11 @@ def validate(data: dict, schema: dict) -> dict:
     """Valide les valeurs présentes dans *data* selon *schema*.
 
     Chaque clé du schéma peut avoir :
-        type     — type Python attendu (ex. str, int, (int, float))
-        max_len  — longueur maximale pour les chaînes
-        min_val  — borne inférieure pour les nombres
-        max_val  — borne supérieure pour les nombres
+        type           — type Python attendu (ex. str, int, (int, float))
+        max_len        — longueur maximale pour les chaînes
+        min_val        — borne inférieure pour les nombres
+        max_val        — borne supérieure pour les nombres
+        allowed_values — ensemble/liste de valeurs autorisées (whitelist)
 
     Retourne un dict {champ: message} pour chaque champ invalide.
     Un dict vide signifie que toutes les valeurs présentes sont valides.
@@ -175,6 +180,11 @@ def validate(data: dict, schema: dict) -> dict:
                 errors[field] = f'doit être ≥ {min_val}'
             elif max_val is not None and val > max_val:
                 errors[field] = f'doit être ≤ {max_val}'
+
+        # ── Whitelist ─────────────────────────────────────────────────────────
+        allowed = rules.get('allowed_values')
+        if allowed is not None and val not in allowed:
+            errors[field] = f'valeur non autorisée'
 
     return errors
 

@@ -7,6 +7,7 @@ import time
 from flask import Flask, make_response, render_template, g, request
 
 from db import init_db, init_readings_db, migrate_db, PHOTOS_DIR
+from blueprints.admin import APP_VERSION, EXPORT_TOKEN, auto_purge_soft_deleted
 from scheduler import _scheduler
 
 app = Flask(__name__)
@@ -105,7 +106,7 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # 1 year cache for static files
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB max request body
 
-_STATIC_V = '0.0.8'  # fallback si _compute_static_v échoue
+_STATIC_V = '0.0.9'  # fallback si _compute_static_v échoue
 
 def _compute_static_v():
     """Version basée sur le mtime max des JS compilés — se met à jour automatiquement."""
@@ -132,6 +133,7 @@ from blueprints.imports      import bp as imports_bp
 from blueprints.integrations import bp as integrations_bp
 from blueprints.admin        import bp as admin_bp
 from blueprints.calendar     import bp as calendar_bp
+from blueprints.shopping     import bp as shopping_bp
 
 app.register_blueprint(catalog_bp)
 app.register_blueprint(inventory_bp)
@@ -143,6 +145,7 @@ app.register_blueprint(imports_bp)
 app.register_blueprint(integrations_bp)
 app.register_blueprint(admin_bp)
 app.register_blueprint(calendar_bp)
+app.register_blueprint(shopping_bp)
 
 
 # ── DB teardown ───────────────────────────────────────────────────────────────
@@ -179,7 +182,7 @@ def _req_log(response):
 @app.route('/')
 def index():
     _migrate_scripts_to_js()
-    resp = make_response(render_template('index.html', static_v=_compute_static_v()))
+    resp = make_response(render_template('index.html', static_v=_compute_static_v(), app_version=APP_VERSION, export_token=EXPORT_TOKEN))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     return resp
@@ -244,6 +247,7 @@ def _migrate_scripts_to_js():
         ('script_ui.html',         'bh-ui.js'),
         ('script_calendrier.html', 'bh-calendrier.js'),
         ('script_brouillons.html', 'bh-brouillons.js'),
+        ('script_shopping.html',   'bh-shopping.js'),
     ]
     os.makedirs(STATIC_JS, exist_ok=True)
     compiled = 0
@@ -297,5 +301,10 @@ if __name__ == '__main__':
             reschedule_github_backup()
         except Exception as e:
             app.logger.warning(f"GitHub backup scheduler init error: {e}")
+        _scheduler.add_job(
+            auto_purge_soft_deleted,
+            trigger='interval', days=1,
+            id='auto_purge_soft_deleted', replace_existing=True,
+        )
     from waitress import serve
     serve(app, host='0.0.0.0', port=5000, threads=8)
