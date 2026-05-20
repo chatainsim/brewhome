@@ -150,7 +150,7 @@ function renderDraftView() {
     ${d.notes ? `
     <div style="margin-bottom:8px">
       <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px">Notes & idées</div>
-      <div style="font-size:.88rem;line-height:1.6;white-space:pre-wrap;color:var(--text)">${esc(d.notes)}</div>
+      <div class="view-notes">${renderMd(d.notes)}</div>
     </div>` : ''}
   `;
 }
@@ -284,15 +284,11 @@ function renderBrouillons() {
   updateBrouillonsBadge();
 }
 
-let _saveDraftOrderTimer = null;
-function saveDraftOrder() {
-  clearTimeout(_saveDraftOrderTimer);
-  _saveDraftOrderTimer = setTimeout(async () => {
-    try {
-      await api('PUT', '/api/drafts/reorder',
-        S.drafts.map((d, i) => ({ id: d.id, sort_order: i })));
-    } catch(e) { toast(t('inv.err_save_order'), 'error'); }
-  }, 600);
+async function saveDraftOrder() {
+  try {
+    await api('PUT', '/api/drafts/reorder',
+      S.drafts.map((d, i) => ({ id: d.id, sort_order: i })));
+  } catch(e) { toast(t('inv.err_save_order'), 'error'); }
 }
 
 function _showEditor(show) {

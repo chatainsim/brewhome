@@ -3,6 +3,8 @@
     <h2 data-i18n="cave.page_title">Ma cave à bières</h2>
     <div class="actions">
       <button class="btn btn-ghost btn-sm" id="cave-arch-btn" onclick="toggleShowArchived('cave')"></button>
+      <button class="btn btn-ghost btn-sm" id="cave-push-vitrine-btn" onclick="withBtn(this, pushVitrine)" data-i18n-title="settings.github.btn_push_vitrine"><i class="fa-brands fa-github"></i></button>
+      <button class="btn btn-ghost btn-sm" onclick="openVitrineTab()" data-i18n-title="settings.github.btn_open_vitrine"><i class="fas fa-arrow-up-right-from-square"></i></button>
       <div style="position:relative;display:inline-flex;align-items:center">
         <input type="text" id="cave-search" placeholder="🔍 Rechercher..." style="width:220px;padding-right:24px" oninput="renderCaveDebounced();document.getElementById('cave-search-clear').style.display=this.value?'flex':'none'">
         <button id="cave-search-clear" onclick="document.getElementById('cave-search').value='';renderCave();this.style.display='none'" style="display:none;position:absolute;right:5px;background:none;border:none;cursor:pointer;color:var(--muted);font-size:.8rem;padding:0;line-height:1;align-items:center" title="Vider">✕</button>

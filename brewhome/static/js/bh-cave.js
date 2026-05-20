@@ -27,13 +27,13 @@ function beerStockHtml(current, initial, label) {
   </div>`;
 }
 
-function beerStockValue(b) {
+function beerStockValue(b, _rMap, _bMap) {
   if (!b.recipe_id) return null;
-  const recipe = S.recipes.find(r => r.id === b.recipe_id);
+  const recipe = _rMap ? _rMap.get(b.recipe_id) : S.recipes.find(r => r.id === b.recipe_id);
   if (!recipe) return null;
   const totalCost = recipeCost(recipe);
   if (totalCost === null) return null;
-  const brew = b.brew_id ? S.brews.find(br => br.id === b.brew_id) : null;
+  const brew = b.brew_id ? (_bMap ? _bMap.get(b.brew_id) : S.brews.find(br => br.id === b.brew_id)) : null;
   const volume = (brew?.volume_brewed) || recipe.volume;
   if (!volume || volume <= 0) return null;
   const costPerL = totalCost / volume;
@@ -74,6 +74,8 @@ function renderCave() {
   const arch   = S.beers.filter(b => b.archived);
   const all    = showArchivedCave ? [...active, ...arch] : active;
   const shown  = all.filter(b => !q || b.name.toLowerCase().includes(q) || (b.type||'').toLowerCase().includes(q));
+  const recById = new Map(S.recipes.map(r => [r.id, r]));
+  const brwById = new Map(S.brews.map(b => [b.id, b]));
 
   // Stats on active beers only
   const total33 = active.reduce((s,b) => s + (b.stock_33cl||0), 0);
@@ -82,7 +84,7 @@ function renderCave() {
   const totalL  = (total33 * 0.33 + total75 * 0.75 + totalKeg).toFixed(1);
   let stockVal = 0, noPriceCnt = 0;
   active.forEach(b => {
-    const v = beerStockValue(b);
+    const v = beerStockValue(b, recById, brwById);
     if (v !== null) stockVal += v; else noPriceCnt++;
   });
   const partialNote = noPriceCnt > 0 ? ` <span style="font-size:.68rem;color:var(--muted)">${t('cave.stat_value_partial').replace('${n}', noPriceCnt)}</span>` : '';
@@ -139,9 +141,9 @@ function renderCave() {
     // ── Calcul du prix par bouteille ──────────────────────────────────────────
     let priceHtml = '';
     if (b.recipe_id) {
-      const recipe = S.recipes.find(r => r.id === b.recipe_id);
+      const recipe = recById.get(b.recipe_id);
       if (recipe) {
-        const brew      = b.brew_id ? S.brews.find(br => br.id === b.brew_id) : null;
+        const brew      = b.brew_id ? brwById.get(b.brew_id) : null;
         // Prefer frozen snapshot; fall back to live computation (no snapshot yet or brew has no volume)
         const totalCost = (brew?.cost_snapshot != null)
           ? brew.cost_snapshot
@@ -157,7 +159,7 @@ function renderCave() {
             const p33 = (costPerL * 0.33).toFixed(2);
             const p75 = (costPerL * 0.75).toFixed(2);
             const volSrc = (brew?.volume_brewed) ? t('rec.vol_from_brew').replace('${vol}', volume) : t('rec.vol_from_recipe').replace('${vol}', volume);
-            const stockV = beerStockValue(b);
+            const stockV = beerStockValue(b, recById, brwById);
             const stockVHtml = stockV !== null && stockV > 0
               ? `<span style="color:var(--border)">·</span><span style="color:var(--muted)">${t('cave.card_stock_value')} <strong style="color:#a78bfa">${stockV.toFixed(2)}€</strong></span>`
               : '';
@@ -208,7 +210,7 @@ function renderCave() {
             <div class="beer-name">${esc(b.name)}</div>
             ${(() => {
               if (b.abv) return `<div class="beer-abv">${b.abv}%</div>`;
-              const brew = b.brew_id ? S.brews.find(br => br.id === b.brew_id) : null;
+              const brew = b.brew_id ? brwById.get(b.brew_id) : null;
               if (brew && brew.og && brew.fg)
                 return `<div class="beer-abv" style="opacity:.65" title="${t('cave.abv_estimated')}">${((brew.og - brew.fg) * 131.25).toFixed(1)}%~</div>`;
               return '';
@@ -340,15 +342,11 @@ function renderCave() {
   });
 }
 
-let _saveCaveOrderTimer = null;
-function saveCaveOrder() {
-  clearTimeout(_saveCaveOrderTimer);
-  _saveCaveOrderTimer = setTimeout(async () => {
-    try {
-      await api('PUT', '/api/beers/reorder',
-        S.beers.map((b, i) => ({ id: b.id, sort_order: i })));
-    } catch(e) { toast(t('cave.err_save_order'), 'error'); }
-  }, 600);
+async function saveCaveOrder() {
+  try {
+    await api('PUT', '/api/beers/reorder',
+      S.beers.map((b, i) => ({ id: b.id, sort_order: i })));
+  } catch(e) { toast(t('cave.err_save_order'), 'error'); }
 }
 
 function openImgLightbox(src, name = '') {
@@ -762,7 +760,13 @@ let _labelBeerId = null;
 
 function printBeerLabel(id) {
   _labelBeerId = id;
-  document.getElementById('label-copies').value = 1;
+  const b = S.beers.find(x => x.id === id);
+  const totalBottles = (b ? ((b.stock_33cl || 0) + (b.stock_75cl || 0)) : 0);
+  const copiesInput = document.getElementById('label-copies');
+  if (copiesInput) {
+    copiesInput.value = Math.max(1, totalBottles);
+    copiesInput.max   = Math.max(200, totalBottles);
+  }
   const fmt = document.getElementById('label-format');
   if (fmt) fmt.value = 'A4 landscape';
   renderLabelPreview();
@@ -810,15 +814,13 @@ function _buildOneLabelHtml(b, recipe, opts = {}) {
   const fmtDate = d => d ? d.split('-').reverse().join('/') : null;
   const fmtQty = i => esc(i.name) + (i.hop_type === 'dryhop' ? ' <span style="color:#888;font-style:italic">(DH)</span>' : '');
 
-  // Ingrédients groupés (Autres : seulement sucre, miel, lactose)
-  const AUTRES_LABEL = ['sucre', 'miel', 'lactose', 'épice', 'epice', 'cannelle', 'coriandre', 'gingembre', 'vanille', 'cardamome', 'poivre', 'cumin', 'anis', 'muscade', 'piment', 'zeste'];
   let ingHtml = '';
   if (showIngredients) {
     if (recipe && recipe.ingredients && recipe.ingredients.length) {
       const groups = [
         { cat: 'malt',    label: t('cat.malts'),    filter: null },
         { cat: 'houblon', label: t('cat.houblons'), filter: null },
-        { cat: 'autre',   label: t('cat.autres'),   filter: i => AUTRES_LABEL.some(k => i.name.toLowerCase().includes(k)) },
+        { cat: 'autre',   label: t('cat.autres'),   filter: null },
       ];
       groups.forEach(({ cat, label, filter }) => {
         let items = recipe.ingredients.filter(i => i.category === cat);
@@ -883,8 +885,7 @@ function _buildOneLabelHtml(b, recipe, opts = {}) {
   const footerRight = qrHtml
     || (statsText ? `<span style="font-size:5pt;color:#555;font-weight:700">${statsText}</span>` : `<span style="font-weight:800;color:#f59e0b;letter-spacing:.02em">${esc(appSettings.appName || 'BrewHome')}</span>`);
 
-  return `
-    <div class="beer-label">
+  const labelHtml = `<div class="beer-label">
       <div class="beer-label-header" style="background:${accentColor};color:${headerTextColor}">
         <div class="beer-label-title">${esc(b.name)}</div>
         ${subtitle ? `<div class="beer-label-sub">${subtitle}</div>` : ''}
@@ -899,19 +900,21 @@ function _buildOneLabelHtml(b, recipe, opts = {}) {
         ${footerRight}
       </div>
     </div>`;
+  return opts?.showCropMarks ? `<div class="label-crop">${labelHtml}</div>` : labelHtml;
 }
 
 function _readLabelOpts() {
   const chk = id => document.getElementById(id)?.checked ?? true;
   return {
-    showQr:         document.getElementById('label-qr')?.checked || false,
-    showStyle:      chk('label-show-style'),
-    showAbv:        chk('label-show-abv'),
-    showIbu:        chk('label-show-ibu'),
-    showEbc:        chk('label-show-ebc'),
-    showPhoto:      chk('label-show-photo'),
-    showIngredients:chk('label-show-ing'),
-    showDates:      chk('label-show-dates'),
+    showQr:          document.getElementById('label-qr')?.checked || false,
+    showCropMarks:   document.getElementById('label-crop-marks')?.checked || false,
+    showStyle:       chk('label-show-style'),
+    showAbv:         chk('label-show-abv'),
+    showIbu:         chk('label-show-ibu'),
+    showEbc:         chk('label-show-ebc'),
+    showPhoto:       chk('label-show-photo'),
+    showIngredients: chk('label-show-ing'),
+    showDates:       chk('label-show-dates'),
   };
 }
 
@@ -919,7 +922,7 @@ function renderLabelPreview() {
   const b = S.beers.find(x => x.id === _labelBeerId);
   if (!b) return;
   const recipe  = b.recipe_id ? S.recipes.find(r => r.id === b.recipe_id) : null;
-  const copies  = Math.max(1, Math.min(30, parseInt(document.getElementById('label-copies')?.value || '1', 10)));
+  const copies  = Math.max(1, Math.min(200, parseInt(document.getElementById('label-copies')?.value || '1', 10)));
   const opts    = _readLabelOpts();
   const preview = document.getElementById('label-preview-wrap');
   if (preview) preview.innerHTML = Array.from({ length: copies }, () => _buildOneLabelHtml(b, recipe, opts)).join('');
@@ -929,7 +932,7 @@ function doPrintLabel() {
   const b = S.beers.find(x => x.id === _labelBeerId);
   if (!b) return;
   const recipe  = b.recipe_id ? S.recipes.find(r => r.id === b.recipe_id) : null;
-  const copies  = Math.max(1, Math.min(30, parseInt(document.getElementById('label-copies')?.value || '1', 10)));
+  const copies  = Math.max(1, Math.min(200, parseInt(document.getElementById('label-copies')?.value || '1', 10)));
   const pageSize = document.getElementById('label-format')?.value || 'A4 landscape';
   const opts    = _readLabelOpts();
   const html    = Array.from({ length: copies }, () => _buildOneLabelHtml(b, recipe, opts)).join('');
@@ -938,9 +941,13 @@ function doPrintLabel() {
   let styleTag = document.getElementById('_label-page-style');
   if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = '_label-page-style'; document.head.appendChild(styleTag); }
   styleTag.textContent = `@page{size:${pageSize};margin:10mm}`;
-  if (area) { area.innerHTML = html; area.style.display = 'flex'; }
+  if (area) {
+    area.innerHTML = html;
+    area.style.display = 'flex';
+    area.classList.toggle('has-crop-marks', !!opts.showCropMarks);
+  }
   window.print();
-  setTimeout(() => { if (area) { area.innerHTML = ''; area.style.display = 'none'; } }, 800);
+  setTimeout(() => { if (area) { area.innerHTML = ''; area.style.display = 'none'; area.classList.remove('has-crop-marks'); } }, 800);
 }
 
 function printAllCaveLabels() {

@@ -2,7 +2,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════════════════════════════
-const S = { inventory: [], recipes: [], brews: [], beers: [], catalog: [], bjcp: [], spindles: [], tempSensors: [], drafts: [], customEvents: [], sodaKegs: [], consumption: null, depletion: [], checklistTemplates: [] };
+const S = { inventory: [], recipes: [], brews: [], beers: [], catalog: [], bjcp: [], spindles: [], tempSensors: [], drafts: [], customEvents: [], brewSteps: [], sodaKegs: [], consumption: null, depletion: [], checklistTemplates: [], shoppingList: [] };
 
 // ── Multi-tab sync ────────────────────────────────────────────────────────────
 const _bch = (() => { try { return new BroadcastChannel('brewhome-sync'); } catch(e) { return null; } })();
@@ -15,7 +15,9 @@ const _PATH_ENTITY = [
   [/\/api\/spindles/,            'spindles'],
   [/\/api\/soda-kegs/,           'sodaKegs'],
   [/\/api\/custom.events/,       'customEvents'],
+  [/\/api\/brew-steps/,          'brewSteps'],
   [/\/api\/checklist-templates/, 'checklistTemplates'],
+  [/\/api\/shopping-list/,       'shoppingList'],
 ];
 // Pages concernées par chaque entité (d'après _refreshPage)
 const _ENTITY_PAGES = {
@@ -27,8 +29,10 @@ const _ENTITY_PAGES = {
   spindles:           ['brassins', 'spindles'],
   sodaKegs:           ['dashboard', 'brassins', 'cave', 'kegs'],
   customEvents:       ['calendrier'],
+  brewSteps:          ['brassins', 'calendrier'],
   checklistTemplates: [],   // settings modal uniquement, pas de page
-  generic:            ['dashboard','inventaire','recettes','brassins','cave','spindles','calendrier','brouillons','stats','kegs'],
+  shoppingList:       ['shopping'],
+  generic:            ['dashboard','inventaire','recettes','brassins','cave','spindles','calendrier','brouillons','stats','kegs','shopping'],
 };
 function _entityForPath(path) {
   for (const [re, e] of _PATH_ENTITY) if (re.test(path)) return e;

@@ -171,6 +171,13 @@
           <span id="bew-eff-badge" style="margin-left:6px;font-size:.75rem"></span>
           <span id="bew-eff-target" style="margin-left:auto;font-size:.75rem;color:var(--muted)"></span>
         </div>
+        <div id="bew-yield-row" style="display:none;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--card2);border:1px solid var(--border);font-size:.85rem">
+          <i class="fas fa-flask-vial" style="color:var(--muted);font-size:.8rem"></i>
+          <span data-i18n="brew.yield_label" style="color:var(--muted)">Rendement volume</span>
+          <strong id="bew-yield-val" style="margin-left:4px"></strong>
+          <span id="bew-yield-badge" style="margin-left:6px;font-size:.75rem"></span>
+          <span id="bew-yield-target" style="margin-left:auto;font-size:.75rem;color:var(--muted)"></span>
+        </div>
         <div id="bew-og-analysis" style="display:none"></div>
       </div>
       <div class="field"><label data-i18n="brew.field_notes">Notes de brassage</label><textarea id="bew-notes" placeholder="Observations, ajustements, incidents..."></textarea></div>
@@ -454,6 +461,46 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('brew-ferm-log-modal')" data-i18n="common.close">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Étapes planifiées du brassin ─────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-brew-steps" onclick="if(event.target===this)closeModal('modal-brew-steps')">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-head">
+      <span id="bsteps-title" style="font-weight:600"></span>
+      <button class="btn btn-icon btn-ghost btn-sm" onclick="closeModal('modal-brew-steps')"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="modal-body" style="padding:1rem 1.25rem;display:flex;flex-direction:column;gap:12px;max-height:75vh;overflow-y:auto">
+
+      <!-- Formulaire ajout -->
+      <div style="display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">
+          <i class="fas fa-plus"></i> <span data-i18n="brew.steps_add_title">Ajouter une étape</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input type="date" id="bsteps-date" style="width:150px;flex-shrink:0">
+          <input type="text" id="bsteps-titleinput" style="flex:1;min-width:140px" placeholder="Cold crash, augmenter T°…">
+        </div>
+        <textarea id="bsteps-notes" rows="2" style="resize:vertical;font-size:.85rem" placeholder="Notes optionnelles…"></textarea>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:.83rem;cursor:pointer">
+            <input type="checkbox" id="bsteps-tg" checked>
+            <i class="fab fa-telegram" style="color:#229ED9"></i>
+            <span data-i18n="brew.steps_tg_label">Rappel Telegram</span>
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="addBrewStep()">
+            <i class="fas fa-plus"></i> <span data-i18n="brew.steps_add_btn">Ajouter</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Liste des étapes -->
+      <div id="bsteps-list"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('modal-brew-steps')" data-i18n="common.close">Fermer</button>
     </div>
   </div>
 </div>

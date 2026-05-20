@@ -1,8 +1,8 @@
 import json
 from collections import defaultdict
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, make_response
 from db import get_db, _log
-from helpers import validate, api_error
+from helpers import validate, api_error, VALID_UNITS
 
 bp = Blueprint('recipes', __name__)
 
@@ -29,16 +29,22 @@ def _save_recipe_snapshot(conn, recipe_id, keep=20):
     old = _recipe_with_ingredients(conn, recipe_id)
     if not old:
         return
-    conn.execute(
-        'INSERT INTO recipe_history (recipe_id, snapshot) VALUES (?, ?)',
-        (recipe_id, json.dumps(old))
-    )
-    conn.execute(
-        '''DELETE FROM recipe_history WHERE recipe_id=? AND id NOT IN (
-               SELECT id FROM recipe_history WHERE recipe_id=? ORDER BY id DESC LIMIT ?
-           )''',
-        (recipe_id, recipe_id, keep)
-    )
+    conn.execute('SAVEPOINT save_snapshot')
+    try:
+        conn.execute(
+            'INSERT INTO recipe_history (recipe_id, snapshot) VALUES (?, ?)',
+            (recipe_id, json.dumps(old))
+        )
+        conn.execute(
+            '''DELETE FROM recipe_history WHERE recipe_id=? AND id NOT IN (
+                   SELECT id FROM recipe_history WHERE recipe_id=? ORDER BY id DESC LIMIT ?
+               )''',
+            (recipe_id, recipe_id, keep)
+        )
+        conn.execute('RELEASE save_snapshot')
+    except Exception:
+        conn.execute('ROLLBACK TO save_snapshot')
+        raise
 
 
 def _apply_recipe_data(conn, recipe_id, d):
@@ -58,13 +64,14 @@ def _apply_recipe_data(conn, recipe_id, d):
     )
     conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id=?', (recipe_id,))
     for ing in d.get('ingredients', []):
+        unit = ing.get('unit', 'g') if ing.get('unit') in VALID_UNITS else 'g'
         conn.execute(
             '''INSERT INTO recipe_ingredients
                (recipe_id,inventory_item_id,name,category,quantity,unit,
                 hop_time,hop_type,hop_days,other_type,other_time,ebc,alpha,notes)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (recipe_id, ing.get('inventory_item_id'), ing.get('name'), ing.get('category'),
-             ing.get('quantity'), ing.get('unit', 'g'), ing.get('hop_time'),
+             ing.get('quantity'), unit, ing.get('hop_time'),
              ing.get('hop_type'), ing.get('hop_days'),
              ing.get('other_type'), ing.get('other_time'),
              ing.get('ebc'), ing.get('alpha'), ing.get('notes'))
@@ -88,14 +95,29 @@ def _recipe_with_ingredients(conn, recipe_id):
     return result
 
 
+_RECIPES_DEFAULT_LIMIT = 500
+_RECIPES_MAX_LIMIT     = 1000
+
+
 @bp.route('/api/recipes', methods=['GET'])
 def get_recipes():
+    try:
+        limit  = min(max(1, int(request.args.get('limit',  _RECIPES_DEFAULT_LIMIT))), _RECIPES_MAX_LIMIT)
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (ValueError, TypeError):
+        return api_error('validation', 400, detail='limit and offset must be integers')
     with get_db() as conn:
+        total = conn.execute(
+            'SELECT COUNT(*) FROM recipes WHERE deleted_at IS NULL'
+        ).fetchone()[0]
         recipes = conn.execute(
-            'SELECT * FROM recipes WHERE deleted_at IS NULL ORDER BY COALESCE(sort_order, 9999) ASC, created_at DESC'
+            'SELECT * FROM recipes WHERE deleted_at IS NULL ORDER BY COALESCE(sort_order, 9999) ASC, created_at DESC LIMIT ? OFFSET ?',
+            (limit, offset)
         ).fetchall()
         if not recipes:
-            return jsonify([])
+            resp = make_response(jsonify([]))
+            resp.headers['X-Total-Count'] = total
+            return resp
         ids = [r['id'] for r in recipes]
         placeholders = ','.join('?' * len(ids))
         ings = conn.execute(
@@ -109,10 +131,12 @@ def get_recipes():
         ings_by_recipe = defaultdict(list)
         for ing in ings:
             ings_by_recipe[ing['recipe_id']].append(dict(ing))
-        return jsonify([
+        resp = make_response(jsonify([
             {**dict(r), 'ingredients': ings_by_recipe[r['id']]}
             for r in recipes
-        ])
+        ]))
+        resp.headers['X-Total-Count'] = total
+        return resp
 
 
 @bp.route('/api/recipes/reorder', methods=['PUT'])
@@ -255,6 +279,76 @@ def delete_recipe(recipe_id):
         if row:
             _log('recipe', 'deleted', json.dumps({'_i18n':'act.recipe_deleted','name':row['name']}), recipe_id, conn)
         return jsonify({'success': True})
+
+
+@bp.route('/api/recipes/<int:recipe_id>/fork', methods=['POST'])
+def fork_recipe(recipe_id):
+    """Crée une variante d'une recette existante en copiant toutes ses données.
+
+    Le champ parent_recipe_id pointe toujours vers la racine de la famille
+    (pas vers le parent direct), ce qui simplifie les requêtes de regroupement.
+    """
+    d = request.json or {}
+    with get_db() as conn:
+        src = conn.execute(
+            'SELECT * FROM recipes WHERE id=? AND deleted_at IS NULL', (recipe_id,)
+        ).fetchone()
+        if not src:
+            return api_error('not_found', 404)
+
+        # Racine de la famille = parent du parent si existe, sinon la recette elle-même
+        parent_id = src['parent_recipe_id'] or recipe_id
+
+        # Prochain numéro de version dans la famille
+        row = conn.execute(
+            '''SELECT COALESCE(MAX(version_number), 1) FROM recipes
+               WHERE (id=? OR parent_recipe_id=?) AND deleted_at IS NULL''',
+            (parent_id, parent_id)
+        ).fetchone()
+        next_ver = row[0] + 1
+
+        new_name      = d.get('name') or src['name']
+        version_notes = d.get('version_notes') or ''
+
+        cur = conn.execute(
+            '''INSERT INTO recipes
+               (batch_no,name,style,volume,brew_date,bottling_date,mash_temp,mash_time,
+                boil_time,mash_ratio,evap_rate,grain_absorption,brewhouse_efficiency,
+                ferm_temp,ferm_time,notes,rating,
+                parent_recipe_id,version_number,version_notes)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (src['batch_no'], new_name, src['style'], src['volume'],
+             src['brew_date'], src['bottling_date'],
+             src['mash_temp'], src['mash_time'], src['boil_time'],
+             src['mash_ratio'], src['evap_rate'], src['grain_absorption'],
+             src['brewhouse_efficiency'], src['ferm_temp'], src['ferm_time'],
+             src['notes'], src['rating'],
+             parent_id, next_ver, version_notes)
+        )
+        new_id = cur.lastrowid
+
+        ings = conn.execute(
+            'SELECT * FROM recipe_ingredients WHERE recipe_id=? ORDER BY category, id',
+            (recipe_id,)
+        ).fetchall()
+        for ing in ings:
+            conn.execute(
+                '''INSERT INTO recipe_ingredients
+                   (recipe_id,inventory_item_id,name,category,quantity,unit,
+                    hop_time,hop_type,hop_days,other_type,other_time,ebc,alpha,notes)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (new_id, ing['inventory_item_id'], ing['name'], ing['category'],
+                 ing['quantity'], ing['unit'], ing['hop_time'],
+                 ing['hop_type'], ing['hop_days'],
+                 ing['other_type'], ing['other_time'],
+                 ing['ebc'], ing['alpha'], ing['notes'])
+            )
+
+        result = _recipe_with_ingredients(conn, new_id)
+        _log('recipe', 'forked', json.dumps({'_i18n': 'act.recipe_forked', 'name': new_name,
+                                              'from_id': recipe_id, 'version': next_ver}),
+             new_id, conn)
+        return jsonify(result), 201
 
 
 @bp.route('/api/recipes/<int:recipe_id>/restore', methods=['POST'])

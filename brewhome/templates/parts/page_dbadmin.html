@@ -37,10 +37,39 @@
         <button class="btn btn-ghost" onclick="exportSql()">
           <i class="fas fa-file-export"></i> <span data-i18n="dbadmin.btn_export_sql">Exporter SQL complet</span>
         </button>
+        <button class="btn btn-ghost" onclick="withBtn(this, migrateDraftImages)" id="dbadmin-migrate-img-btn">
+          <i class="fas fa-images"></i> <span data-i18n="dbadmin.btn_migrate_images">Migrer images brouillons → fichiers</span>
+        </button>
+        <button class="btn btn-ghost" onclick="withBtn(this, migrateBeerImages)" id="dbadmin-migrate-beer-img-btn">
+          <i class="fas fa-beer"></i> <span data-i18n="dbadmin.btn_migrate_beer_images">Migrer photos cave → fichiers</span>
+        </button>
       </div>
+      <p id="dbadmin-migrate-result" style="font-size:.78rem;color:var(--muted);margin-top:8px;display:none"></p>
+      <p id="dbadmin-migrate-beer-result" style="font-size:.78rem;color:var(--muted);margin-top:4px;display:none"></p>
       <p style="font-size:.72rem;color:var(--muted);margin-top:10px" data-i18n="dbadmin.vacuum_hint">
         VACUUM libère l'espace disque inutilisé, défragmente et optimise la base de données.
       </p>
+    </div>
+
+    <!-- Nettoyage automatique -->
+    <div class="card" style="margin-top:20px">
+      <div class="section-label" style="margin-bottom:12px" data-i18n="dbadmin.purge_title">Nettoyage automatique</div>
+      <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px" data-i18n="dbadmin.purge_hint">
+        Les éléments supprimés (inventaire, recettes, brassins, bières) sont définitivement effacés après la période de rétention.
+      </p>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="font-size:.85rem" data-i18n="dbadmin.purge_retention_label">Rétention :</label>
+        <input type="number" id="purge-retention-days" min="1" max="3650" step="1"
+          style="width:80px" value="90">
+        <span style="font-size:.85rem;color:var(--muted)" data-i18n="dbadmin.purge_days_unit">jours</span>
+        <button class="btn btn-primary btn-sm" onclick="withBtn(this, savePurgeSettings)">
+          <i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span>
+        </button>
+        <button class="btn btn-ghost btn-sm" id="dbadmin-purge-btn" onclick="withBtn(this, runManualPurge)" style="margin-left:8px">
+          <i class="fas fa-trash-clock"></i> <span data-i18n="dbadmin.btn_purge_now">Purger maintenant</span>
+        </button>
+      </div>
+      <p id="dbadmin-purge-result" style="font-size:.78rem;color:var(--muted);margin-top:8px;display:none"></p>
     </div>
 
   </div>

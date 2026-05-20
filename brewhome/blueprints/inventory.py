@@ -1,13 +1,13 @@
 from flask import Blueprint, jsonify, request, current_app
 from db import get_db, _log_inv
-from helpers import validate, api_error
+from helpers import validate, api_error, VALID_UNITS
 
 bp = Blueprint('inventory', __name__)
 
 _INVENTORY_SCHEMA = {
     'name':             {'type': str,          'max_len': 200},
     'category':         {'type': str,          'max_len': 50},
-    'unit':             {'type': str,          'max_len': 20},
+    'unit':             {'type': str,          'max_len': 20,  'allowed_values': VALID_UNITS},
     'origin':           {'type': str,          'max_len': 200},
     'notes':            {'type': str,          'max_len': 2000},
     'quantity':         {'type': (int, float), 'min_val': 0},
@@ -51,7 +51,7 @@ def create_inventory_item():
              d.get('origin'), d.get('ebc'), d.get('alpha'), d.get('notes'),
              d.get('price_per_unit'),
              d.get('yeast_type'), d.get('yeast_mfg_date') or None, d.get('yeast_open_date') or None,
-             d.get('yeast_generation') or 1)
+             d.get('yeast_generation') if d.get('yeast_generation') is not None else 1)
         )
         item_id = cur.lastrowid
         if initial_qty > 0:
@@ -83,7 +83,7 @@ def update_inventory_item(item_id):
              d.get('origin'), d.get('ebc'), d.get('alpha'), d.get('notes'),
              d.get('price_per_unit'), d.get('min_stock'), d.get('expiry_date') or None,
              d.get('yeast_type'), d.get('yeast_mfg_date') or None, d.get('yeast_open_date') or None,
-             d.get('yeast_generation') or 1, item_id)
+             d.get('yeast_generation') if d.get('yeast_generation') is not None else 1, item_id)
         )
         if cur.rowcount == 0:
             return api_error('not_found', 404)
@@ -110,7 +110,7 @@ def reorder_inventory():
 def delete_inventory_item(item_id):
     with get_db() as conn:
         cur = conn.execute(
-            'UPDATE inventory_items SET archived=1, deleted_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL',
+            'UPDATE inventory_items SET archived=1, deleted_at=CURRENT_TIMESTAMP, quantity=0 WHERE id=? AND deleted_at IS NULL',
             (item_id,))
         if cur.rowcount == 0:
             return api_error('not_found', 404)
@@ -146,6 +146,9 @@ def patch_inventory_qty(item_id):
     if not isinstance(new_qty, (int, float)) or isinstance(new_qty, bool) or new_qty < 0:
         return api_error('validation', 400, fields={'quantity': 'must be a non-negative number'})
     with get_db() as conn:
+        # BEGIN IMMEDIATE acquiert le verrou réservé avant le SELECT,
+        # empêchant deux lectures simultanées du même old_qty (race condition).
+        conn.execute('BEGIN IMMEDIATE')
         old_row = conn.execute(
             'SELECT quantity, min_stock, name, unit FROM inventory_items WHERE id=?', (item_id,)
         ).fetchone()

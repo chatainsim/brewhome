@@ -265,8 +265,7 @@ async function _parseBeerXML(xmlText) {
 
   if (imported > 0) {
     renderRecipeList();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('rec.beerxml_imported').replace('${n}', imported), 'success');
     _checkImportMissingCatalog(_allParsedIngs);
   } else {
@@ -397,6 +396,75 @@ async function rateRecipe(id, n) {
   } catch(e) { toast(t('rec.err_notation'), 'error'); }
 }
 
+// ── Stock rapide par recette (badge sur la carte) ─────────────────────────────
+let _recStockInvMap = null;
+
+function _buildRecStockInvMap() {
+  if (!S.inventory?.length) { _recStockInvMap = null; return; }
+  _recStockInvMap = {};
+  S.inventory.filter(i => !i.archived).forEach(item => {
+    const key = item.name.trim().toLowerCase();
+    const b   = _toBaseQty(parseFloat(item.quantity) || 0, item.unit);
+    if (!_recStockInvMap[key]) _recStockInvMap[key] = {};
+    _recStockInvMap[key][b.base] = (_recStockInvMap[key][b.base] || 0) + b.val;
+  });
+}
+
+function _recipeStockBadge(r) {
+  if (!_recStockInvMap) return '';
+  const ings = r.ingredients || [];
+  if (!ings.length) return '';
+  const needs = new Map();
+  ings.forEach(ing => {
+    const key = (ing.name || '').trim().toLowerCase();
+    if (!key) return;
+    const b = _toBaseQty(parseFloat(ing.quantity) || 0, ing.unit);
+    if (!needs.has(key)) needs.set(key, { val: 0, base: b.base });
+    needs.get(key).val += b.val;
+  });
+  let status = 'ok';
+  for (const [key, { val, base }] of needs) {
+    const inv   = _recStockInvMap[key];
+    if (!inv) { status = 'missing'; break; }
+    const avail = inv[base] || 0;
+    if (avail < val) { status = avail === 0 ? 'missing' : 'low'; if (status === 'missing') break; }
+  }
+  const cfg = {
+    ok:      { color:'var(--success)', bg:'rgba(16,185,129,.12)',  border:'rgba(16,185,129,.3)',  icon:'fa-check',                tip: t('rec.stock_all_ok')  },
+    low:     { color:'var(--amber)',   bg:'rgba(251,191,36,.12)',  border:'rgba(251,191,36,.3)',  icon:'fa-triangle-exclamation', tip: t('rec.stock_low')    },
+    missing: { color:'#f87171',        bg:'rgba(239,68,68,.12)',   border:'rgba(239,68,68,.3)',   icon:'fa-xmark',                tip: t('rec.stock_missing') },
+  }[status];
+  return `<span title="${cfg.tip}" style="display:inline-flex;align-items:center;gap:3px;font-size:.7rem;color:${cfg.color};background:${cfg.bg};border:1px solid ${cfg.border};border-radius:10px;padding:1px 7px;cursor:help"><i class="fas ${cfg.icon}"></i></span>`;
+}
+
+function _recipeBrewCount(r) {
+  if (!_recStockInvMap) return null;
+  const ings = r.ingredients || [];
+  if (!ings.length) return null;
+
+  // Accumulate needs per ingredient name (same key scheme as _recipeStockBadge)
+  const needs = new Map();
+  for (const ing of ings) {
+    const key = (ing.name || '').trim().toLowerCase();
+    if (!key) continue;
+    const b = _toBaseQty(parseFloat(ing.quantity) || 0, ing.unit);
+    if (b.val <= 0) continue; // qty=0 → not a constraint
+    if (!needs.has(key)) needs.set(key, { val: 0, base: b.base });
+    needs.get(key).val += b.val;
+  }
+  if (!needs.size) return null;
+
+  let minBrews = Infinity;
+  for (const [key, { val, base }] of needs) {
+    const inv = _recStockInvMap[key];
+    if (!inv) return null;               // ingredient not tracked → can't compute
+    const avail = inv[base] || 0;
+    const n = Math.floor(avail / val);
+    if (n < minBrews) minBrews = n;
+  }
+  return minBrews === Infinity ? null : minBrews;
+}
+
 function recipeCost(r) {
   let total = 0, has = false;
   (r.ingredients || []).forEach(ing => {
@@ -480,6 +548,21 @@ function _recipeItemHtml(r) {
   const starsHtml = r.rating
     ? `<span class="stars-sm">${Array.from({length:5},(_,i)=>`<span style="color:${i<r.rating?'var(--amber)':'var(--border)'}">\u2605</span>`).join('')}</span>`
     : '';
+  const stockBadge = _recipeStockBadge(r);
+  const versionBadge = (r.version_number > 1)
+    ? `<span title="${esc(r.version_notes || '')}" style="display:inline-flex;align-items:center;font-size:.7rem;font-weight:700;color:var(--info);background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:1px 7px">${esc(t('rec.version_badge').replace('${n}', r.version_number))}</span>`
+    : '';
+  const _brewN = _recipeBrewCount(r);
+  const brewCountBadge = _brewN === null ? '' : (() => {
+    const label = _brewN > 99 ? '×99+' : `×${_brewN}`;
+    const tip   = t('rec.brew_count_tip').replace('${n}', _brewN > 99 ? '99+' : _brewN);
+    const [color, bg, border] = _brewN === 0
+      ? ['#f87171',        'rgba(239,68,68,.1)',   'rgba(239,68,68,.3)']
+      : _brewN <= 2
+        ? ['var(--amber)',   'rgba(251,191,36,.12)', 'rgba(251,191,36,.3)']
+        : ['var(--success)', 'rgba(16,185,129,.12)', 'rgba(16,185,129,.3)'];
+    return `<span title="${tip}" style="display:inline-flex;align-items:center;font-size:.7rem;font-weight:700;color:${color};background:${bg};border:1px solid ${border};border-radius:10px;padding:1px 7px;cursor:help">${label}</span>`;
+  })();
   const activeBrews = S.brews.filter(b => b.recipe_id === r.id && !b.archived && b.status !== 'completed');
   const linkedBeers = S.beers.filter(b => b.recipe_id === r.id && !b.archived);
   const total33  = linkedBeers.reduce((s, b) => s + (b.stock_33cl   || 0), 0);
@@ -510,7 +593,9 @@ function _recipeItemHtml(r) {
           <i class="fas fa-wine-barrel"></i> ${totalKeg} L</button>`;
   }
   if (!activeBrews.length && !hasStock) {
-    statusHtml = `<span style="font-size:.72rem;color:var(--muted);font-style:italic"><i class="fas fa-circle-info"></i> ${t('rec.no_brew_no_stock')}</span>`;
+    statusHtml = r.version_notes
+      ? `<span style="font-size:.72rem;color:var(--muted);font-style:italic"><i class="fas fa-code-fork"></i> ${esc(r.version_notes)}</span>`
+      : `<span style="font-size:.72rem;color:var(--muted);font-style:italic"><i class="fas fa-circle-info"></i> ${t('rec.no_brew_no_stock')}</span>`;
   }
   const dragHandle = recSort === 'recent'
     ? `<span class="rec-drag-handle" onclick="event.stopPropagation()" title="${t('rec.drag_to_reorder')}"><i class="fas fa-grip-vertical"></i></span>`
@@ -522,6 +607,9 @@ function _recipeItemHtml(r) {
           <div class="recipe-item-meta" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <span>${r.batch_no ? '#' + r.batch_no + ' · ' : ''}${r.style ? esc(r.style) + ' · ' : ''}${r.volume}L · ${r.ingredients.length} ing.</span>
             ${starsHtml}
+            ${versionBadge}
+            ${stockBadge}
+            ${brewCountBadge}
             ${costBadge}
           </div>
           <div class="recipe-item-status">${statusHtml}</div>
@@ -537,6 +625,7 @@ let _recListAC = null;
 const renderRecipeListDebounced = debounce(renderRecipeList, 200);
 
 function renderRecipeList() {
+  _buildRecStockInvMap(); // rebuild inventory map for stock badges
   // Sync sort select
   const sortSel = document.getElementById('rec-sort-select');
   if (sortSel) sortSel.value = recSort;
@@ -1254,17 +1343,34 @@ async function saveRecipe(silent = false) {
     ferm_profile: _fermProfile.length ? JSON.stringify(_fermProfile) : null,
     notes:        document.getElementById('rec-notes').value.trim() || null,
     rating:      parseInt(document.getElementById('rec-rating').value) || null,
-    ingredients: recIngredients.map(i => ({
-      inventory_item_id: i.inventory_item_id || null,
-      name: i.name, category: i.category,
-      quantity: i.quantity, unit: i.unit,
-      hop_time: i.hop_time || null, hop_type: i.hop_type || null, hop_days: i.hop_days || null,
-      other_type: i.other_type || null, other_time: i.other_time || null,
-      ebc: i.ebc || null, alpha: i.alpha || null, notes: i.notes || null,
-    })),
+    ingredients: recIngredients.map(i => {
+      // Snapshot catalog values at save time so future catalog edits
+      // don't retroactively affect this recipe's calculations
+      let ebc   = i.ebc   ?? null;
+      let alpha = i.alpha ?? null;
+      if (ebc === null || alpha === null) {
+        const cat = S.catalog.find(c =>
+          c.name.toLowerCase() === (i.name || '').trim().toLowerCase()
+        );
+        if (cat) {
+          if (ebc   === null && cat.ebc   != null) ebc   = cat.ebc;
+          if (alpha === null && cat.alpha != null) alpha = cat.alpha;
+        }
+      }
+      return {
+        inventory_item_id: i.inventory_item_id || null,
+        name: i.name, category: i.category,
+        quantity: i.quantity, unit: i.unit,
+        hop_time: i.hop_time || null, hop_type: i.hop_type || null, hop_days: i.hop_days || null,
+        other_type: i.other_type || null, other_time: i.other_time || null,
+        ebc, alpha, notes: i.notes || null,
+      };
+    }),
   };
   try {
     if (recEditingId) {
+      const existingRec = S.recipes.find(r => r.id === recEditingId);
+      if (existingRec?.draft_id != null) payload.draft_id = existingRec.draft_id;
       const updated = await api('PUT', `/api/recipes/${recEditingId}`, payload);
       const idx = S.recipes.findIndex(r => r.id === recEditingId);
       if (idx !== -1) S.recipes[idx] = updated;
@@ -1297,8 +1403,7 @@ async function saveRecipe(silent = false) {
       if (!silent) toast(t('rec.saved'), 'success');
     }
     renderRecipeList();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     showRecAlert('');
     setRecipeMode('view');
   } catch(e) {
@@ -1308,7 +1413,25 @@ async function saveRecipe(silent = false) {
         brewhouse_efficiency:'rec.efficiency', ferm_temp:'rec.ferm_temp',
         ferm_time:'rec.ferm_time_label', mash_ratio:'rec.mash_ratio',
         evap_rate:'rec.evap', grain_absorption:'rec.absorption', volume:'rec.volume',
+        name:'rec.field_name',
       };
+      const _fieldIds = {
+        volume:'rec-volume', mash_temp:'rec-mash-temp', mash_time:'rec-mash-time',
+        boil_time:'rec-boil-time', brewhouse_efficiency:'rec-efficiency',
+        ferm_temp:'rec-ferm-temp', ferm_time:'rec-ferm-time',
+        mash_ratio:'rec-mash-ratio', evap_rate:'rec-evap', grain_absorption:'rec-absorption',
+        name:'rec-name',
+      };
+      document.querySelectorAll('.rec-field-error').forEach(el => el.classList.remove('rec-field-error'));
+      let firstEl = null;
+      Object.keys(e.fields).forEach(f => {
+        const el = _fieldIds[f] ? document.getElementById(_fieldIds[f]) : null;
+        if (!el) return;
+        el.classList.add('rec-field-error');
+        el.addEventListener('input', () => el.classList.remove('rec-field-error'), { once: true });
+        if (!firstEl) firstEl = el;
+      });
+      if (firstEl) firstEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const msgs = Object.entries(e.fields)
         .map(([f, msg]) => `${t(_labels[f] || f)} : ${msg}`)
         .join(' — ');
@@ -1320,14 +1443,19 @@ async function saveRecipe(silent = false) {
 }
 
 async function deleteRecipe(id) {
-  if (!await confirmModal(t('common.confirm_delete'), { danger: true })) return;
+  const rec = S.recipes.find(r => r.id === id);
+  const n = rec?.ingredients?.length ?? 0;
+  const name = rec?.name ?? '';
+  const msg = n > 0
+    ? t('rec.confirm_delete').replace('${name}', name).replace('${n}', n)
+    : t('common.confirm_delete');
+  if (!await confirmModal(msg, { danger: true })) return;
   try {
     await api('DELETE', `/api/recipes/${id}`);
     S.recipes = S.recipes.filter(r => r.id !== id);
     if (recEditingId === id) clearRecipeForm();
     else renderRecipeList();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('rec.deleted'), 'success');
   } catch(e) { toast(t('common.delete') + ' — ' + t('common.error'), 'error'); }
 }
@@ -1351,6 +1479,8 @@ function setRecipeMode(mode) {
           <button class="rec-menu-item" onclick="openBrewModal(recEditingId);closeRecActionsMenu()" style="color:var(--success)"><i class="fas fa-fire-burner" style="width:14px"></i> ${t('rec.brew_btn')}</button>
           <div class="rec-menu-sep"></div>
           <button class="rec-menu-item" onclick="openCloneModal();closeRecActionsMenu()"><i class="fas fa-copy" style="width:14px"></i> ${t('rec.clone_title')}</button>
+          <button class="rec-menu-item" onclick="openForkModal();closeRecActionsMenu()" style="color:var(--info)"><i class="fas fa-code-fork" style="width:14px"></i> ${t('rec.fork_btn')}</button>
+          ${(() => { const fam = recEditingId ? _recVersionFamily(S.recipes.find(x=>x.id===recEditingId)||{}) : []; return fam.length > 1 ? `<button class="rec-menu-item" onclick="openVersionCompare(${recEditingId});closeRecActionsMenu()" style="color:var(--info)"><i class="fas fa-table-columns" style="width:14px"></i> ${t('rec.compare_btn')}</button>` : ''; })()}
           <button class="rec-menu-item" onclick="checkRecipeStock();closeRecActionsMenu()" style="color:var(--info)"><i class="fas fa-boxes-stacked" style="width:14px"></i> ${t('rec.check_stock')}</button>
           <div class="rec-menu-sep"></div>
           <button class="rec-menu-item" onclick="printRecipe();closeRecActionsMenu()"><i class="fas fa-print" style="width:14px"></i> ${t('cave.print')}</button>
@@ -1392,7 +1522,8 @@ function _formatBaseQty(val, base) {
 }
 
 // ── Vérification disponibilité stock / liste de courses ──────────────────────
-let _shoppingText = '';
+let _shoppingText     = '';
+let _shoppingRawItems = []; // [{name, cat, rawQty, rawUnit}] pour l'ajout à la liste
 
 async function checkRecipeStock() {
   const r = S.recipes.find(x => x.id === recEditingId);
@@ -1500,55 +1631,67 @@ async function checkRecipeStock() {
     </div>`;
   }
 
+  // ── Agréger les quantités par ingrédient (même nom = même lot en stock) ──────
+  // Clé : nom normalisé. On somme toutes les additions dans l'unité de base.
+  const ingAgg = new Map(); // nameKey → { name, category, alpha, neededVal, base, count }
+  ings.forEach(ing => {
+    const needed  = toBase(parseFloat(ing.quantity) || 0, ing.unit);
+    const nameKey = (ing.name || '').trim().toLowerCase();
+    if (!ingAgg.has(nameKey)) {
+      ingAgg.set(nameKey, { name: ing.name, category: ing.category, alpha: ing.alpha, neededVal: 0, base: needed.base, count: 0 });
+    }
+    const entry = ingAgg.get(nameKey);
+    entry.neededVal += needed.val;
+    entry.count++;
+  });
+
   const shoppingItems = [];
   let allOk = true;
   let rows = '';
-  ings.forEach(ing => {
-    const needed     = toBase(parseFloat(ing.quantity) || 0, ing.unit);
-    const nameKey    = (ing.name || '').trim().toLowerCase();
+  ingAgg.forEach(({ name, category, alpha, neededVal, base, count }) => {
+    const nameKey    = name.trim().toLowerCase();
     const invQtyMap  = invMap[nameKey] || {};
-    const available  = invQtyMap[needed.base] || 0;
+    const available  = invQtyMap[base] || 0;
     const inInv      = Object.keys(invQtyMap).length > 0;
-    // Item is in inventory but stored in a different unit family (e.g. recipe in ml, inventory in g)
     const unitMismatch = inInv && available === 0;
-    const color      = CAT_COLOR[ing.category] || 'var(--text)';
-    const icon       = CAT_ICON[ing.category]  || 'box';
+    const color      = CAT_COLOR[category] || 'var(--text)';
+    const icon       = CAT_ICON[category]  || 'box';
+    const countLabel = count > 1 ? ` <span style="font-size:.72rem;color:var(--muted);font-weight:400">(${count}×)</span>` : '';
 
     let status, statusColor, detail;
     if (!inInv) {
       status      = `<span style="background:rgba(239,68,68,.12);color:#f87171;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_missing')}</span>`;
       statusColor = '#f87171';
-      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong></span>`;
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${formatBase(neededVal, base)}</strong></span>`;
       allOk = false;
-      shoppingItems.push({ name: ing.name, cat: ing.category, qty: ing.quantity, unit: ing.unit });
+      shoppingItems.push({ name, cat: category, qty: formatBase(neededVal, base), unit: '', rawQty: neededVal, rawUnit: base });
     } else if (unitMismatch) {
-      // Can't compare — units are in different families (mass vs volume)
       const altBase = Object.keys(invQtyMap)[0];
       const altQty  = invQtyMap[altBase];
       status      = `<span style="background:rgba(139,92,246,.12);color:#a78bfa;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">≈ unités diff.</span>`;
       statusColor = '#a78bfa';
-      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:#a78bfa">${formatBase(altQty, altBase)}</strong></span>`;
-    } else if (available >= needed.val) {
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${formatBase(neededVal, base)}</strong> · ${t('rec.stock_available')}: <strong style="color:#a78bfa">${formatBase(altQty, altBase)}</strong></span>`;
+    } else if (available >= neededVal) {
       status      = `<span style="background:rgba(16,185,129,.12);color:var(--success);padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_ok')}</span>`;
       statusColor = 'var(--success)';
-      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--success)">${formatBase(available, needed.base)}</strong></span>`;
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${formatBase(neededVal, base)}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--success)">${formatBase(available, base)}</strong></span>`;
     } else {
-      const shortVal = needed.val - available;
+      const shortVal = neededVal - available;
       status      = `<span style="background:rgba(251,191,36,.12);color:var(--amber);padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_low')}</span>`;
       statusColor = 'var(--amber)';
-      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--amber)">${formatBase(available, needed.base)}</strong> · <span style="color:#f87171">${t('rec.stock_short_by')} ${formatBase(shortVal, needed.base)}</span></span>`;
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${formatBase(neededVal, base)}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--amber)">${formatBase(available, base)}</strong> · <span style="color:#f87171">${t('rec.stock_short_by')} ${formatBase(shortVal, base)}</span></span>`;
       allOk = false;
-      shoppingItems.push({ name: ing.name, cat: ing.category, qty: formatBase(shortVal, needed.base), unit: '' });
+      shoppingItems.push({ name, cat: category, qty: formatBase(shortVal, base), unit: '', rawQty: shortVal, rawUnit: base });
     }
 
-    const needsSub = ing.category === 'houblon' && (!inInv || available < needed.val);
-    const subPanel = needsSub ? renderSubstitutePanel(ing.name, ing.alpha) : '';
+    const needsSub = category === 'houblon' && (!inInv || available < neededVal);
+    const subPanel = needsSub ? renderSubstitutePanel(name, alpha) : '';
 
     rows += `<div style="border-bottom:1px solid var(--border);padding:9px 0">
       <div style="display:flex;align-items:center;gap:10px">
         <i class="fas fa-${icon}" style="color:${color};width:14px;text-align:center;flex-shrink:0"></i>
         <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:.88rem">${esc(ing.name)}</div>
+          <div style="font-weight:600;font-size:.88rem">${esc(name)}${countLabel}</div>
           ${detail}
         </div>
         ${status}
@@ -1566,15 +1709,17 @@ async function checkRecipeStock() {
   _shoppingText = '';
   if (shoppingItems.length > 0) {
     const CAT_LBL = { malt: t('cat.malt'), houblon: t('cat.houblon'), levure: t('cat.levure'), autre: t('cat.autre') };
-    const shopRows = shoppingItems.map(s => {
+    const shopRows = shoppingItems.map((s, idx) => {
       const qtyStr = s.unit ? `${s.qty} ${s.unit}` : s.qty;
       _shoppingText += `☐  ${s.name.padEnd(28)} ${qtyStr.padStart(10)}   (${CAT_LBL[s.cat] || s.cat})\n`;
-      return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
-        <i class="far fa-square" style="color:var(--muted);font-size:.8rem;flex-shrink:0;width:14px;text-align:center"></i>
+      return `<label style="display:flex;align-items:center;gap:10px;padding:5px 2px;cursor:pointer;border-radius:6px">
+        <input type="checkbox" class="stock-shop-chk" data-idx="${idx}" checked
+          onchange="_updateStockAddBtn()"
+          style="width:15px;height:15px;flex-shrink:0;cursor:pointer;accent-color:var(--amber)">
         <span style="flex:1;font-weight:600;font-size:.88rem">${esc(s.name)}</span>
         <span style="color:var(--amber);font-weight:700;font-size:.9rem">${esc(qtyStr)}</span>
         <span style="font-size:.72rem;color:var(--muted);min-width:52px;text-align:right">${CAT_LBL[s.cat] || s.cat}</span>
-      </div>`;
+      </label>`;
     }).join('');
     _shoppingText = `${t('rec.stock_title')} — ${r.name}\n${'─'.repeat(44)}\n` + _shoppingText;
     shopHtml = `
@@ -1589,13 +1734,15 @@ async function checkRecipeStock() {
   }
 
   body.innerHTML = banner + `<div>${rows}</div>` + shopHtml;
+  _shoppingRawItems = shoppingItems;
 
   // Mettre à jour le pied de modal
   const foot = document.getElementById('stock-check-foot');
   if (foot) {
     foot.innerHTML = shoppingItems.length > 0
       ? `<button class="btn btn-ghost" onclick="closeModal('modal-stock-check')">${t('common.close')}</button>
-         <button class="btn btn-primary" onclick="_doCopyShoppingList()"><i class="fas fa-copy"></i> ${t('rec.stock_copy')}</button>`
+         <button class="btn btn-ghost" onclick="_doCopyShoppingList()"><i class="fas fa-copy"></i> ${t('rec.stock_copy')}</button>
+         <button class="btn btn-primary" id="stock-add-btn" onclick="withBtn(this,_doAddToShoppingList)"><i class="fas fa-cart-plus"></i> <span id="stock-add-lbl">${t('rec.stock_add_to_list')} (${shoppingItems.length})</span></button>`
       : `<button class="btn btn-ghost" onclick="closeModal('modal-stock-check')">${t('common.close')}</button>`;
   }
 
@@ -1604,18 +1751,69 @@ async function checkRecipeStock() {
 
 function _doCopyShoppingList() {
   if (!_shoppingText) return;
-  navigator.clipboard.writeText(_shoppingText).then(() => {
-    toast(t('rec.stock_copied'), 'success');
-  }).catch(() => {
-    // Fallback for browsers without clipboard API
+  const fallback = () => {
     const el = document.createElement('textarea');
     el.value = _shoppingText;
+    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
     document.body.appendChild(el);
+    el.focus();
     el.select();
-    document.execCommand('copy');
+    try { document.execCommand('copy'); toast(t('rec.stock_copied'), 'success'); }
+    catch(e) { toast(t('rec.stock_copied') + ' ✗', 'error'); }
     document.body.removeChild(el);
-    toast(t('rec.stock_copied'), 'success');
+  };
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    navigator.clipboard.writeText(_shoppingText)
+      .then(() => toast(t('rec.stock_copied'), 'success'))
+      .catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
+function _updateStockAddBtn() {
+  const n   = document.querySelectorAll('#stock-check-body .stock-shop-chk:checked').length;
+  const lbl = document.getElementById('stock-add-lbl');
+  const btn = document.getElementById('stock-add-btn');
+  if (lbl) lbl.textContent = `${t('rec.stock_add_to_list')} (${n})`;
+  if (btn) btn.disabled = n === 0;
+}
+
+async function _doAddToShoppingList() {
+  // Filtrer selon les cases cochées dans la modal
+  const selected = _shoppingRawItems.filter((_, idx) => {
+    const cb = document.querySelector(`.stock-shop-chk[data-idx="${idx}"]`);
+    return cb ? cb.checked : true;
   });
+  if (!selected.length) return;
+  // Construire une map inventaire pour lier les articles
+  await ensureInventoryLoaded();
+  const invByName = {};
+  (S.inventory || []).forEach(i => {
+    if (!i.deleted_at && !i.archived) invByName[i.name.trim().toLowerCase()] = i;
+  });
+  // Convertir valeurs base → unités lisibles (g/kg, ml/L)
+  const toDisplay = (rawQty, rawUnit) => {
+    if (rawUnit === 'g'  && rawQty >= 1000) return { qty: parseFloat((rawQty / 1000).toFixed(6).replace(/\.?0+$/, '')), unit: 'kg' };
+    if (rawUnit === 'ml' && rawQty >= 1000) return { qty: parseFloat((rawQty / 1000).toFixed(6).replace(/\.?0+$/, '')), unit: 'L' };
+    return { qty: parseFloat(rawQty.toFixed(6).replace(/\.?0+$/, '')), unit: rawUnit };
+  };
+  try {
+    const created = await Promise.all(selected.map(item => {
+      const inv = invByName[item.name.trim().toLowerCase()];
+      const { qty, unit } = toDisplay(item.rawQty, item.rawUnit);
+      return api('POST', '/api/shopping-list', {
+        name:              item.name,
+        category:          item.cat,
+        quantity:          qty,
+        unit:              unit,
+        inventory_item_id: inv ? inv.id : null,
+      });
+    }));
+    if (S.shoppingList) created.forEach(c => S.shoppingList.push(c));
+    closeModal('modal-stock-check');
+    toast(t('rec.stock_added_to_list').replace('${n}', created.length));
+  } catch(e) { toast(t('shop.err_save'), 'error'); }
 }
 
 function ebcToColor(ebc) {
@@ -1776,7 +1974,7 @@ function renderRecipeView() {
     ${malts.length ? `<div class="rec-view-section" style="color:var(--malt)"><i class="fas fa-wheat-awn"></i> ${t('rec.malts_full')}</div><div style="margin-bottom:12px">${maltHtml}</div>` : ''}
     ${hops.length  ? `<div class="rec-view-section" style="color:var(--hop)"><i class="fas fa-seedling"></i> ${t('cat.houblons')}</div><div style="margin-bottom:12px">${hopHtml}</div>` : ''}
     ${otherHtml}
-    ${r.notes ? `<div class="rec-view-section"><i class="fas fa-note-sticky"></i> Notes</div><div class="view-notes">${esc(r.notes)}</div>` : ''}
+    ${r.notes ? `<div class="rec-view-section"><i class="fas fa-note-sticky"></i> Notes</div><div class="view-notes">${renderMd(r.notes)}</div>` : ''}
 
     ${(() => {
       const linked = S.beers.filter(b => b.recipe_id === r.id && !b.archived && b.photo);
@@ -2166,10 +2364,162 @@ async function applyClone() {
     closeCloneModal();
     loadRecipeForm(created.id);
     renderRecipeList();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('rec.cloned').replace('${name}', name).replace('${vol}', to), 'success');
   } catch(e) { showRecAlert(t('common.error') + ' : ' + (e.detail || e.error || '')); }
+}
+
+// ── Variantes / versions ──────────────────────────────────────────────────────
+
+function openForkModal() {
+  if (!recEditingId) return;
+  const r = S.recipes.find(x => x.id === recEditingId);
+  if (!r) return;
+  document.getElementById('fork-name').value  = r.name;
+  document.getElementById('fork-notes').value = '';
+  openModal('modal-fork');
+  setTimeout(() => document.getElementById('fork-name').select(), 80);
+}
+
+async function applyFork() {
+  const name  = document.getElementById('fork-name').value.trim();
+  const notes = document.getElementById('fork-notes').value.trim();
+  if (!name) { document.getElementById('fork-name').focus(); return; }
+  try {
+    const created = await api('POST', `/api/recipes/${recEditingId}/fork`, { name, version_notes: notes });
+    S.recipes.unshift(created);
+    closeModal('modal-fork');
+    loadRecipeForm(created.id);
+    renderRecipeList();
+    syncNavBadges();
+    toast(t('rec.forked').replace('${n}', created.version_number), 'success');
+  } catch(e) { showRecAlert(t('common.error') + ' : ' + (e.detail || e.error || '')); }
+}
+
+/** Returns all recipes in the same version family as recipe r (including r itself). */
+function _recVersionFamily(r) {
+  const rootId = r.parent_recipe_id || r.id;
+  return S.recipes.filter(x => !x.archived && (x.id === rootId || x.parent_recipe_id === rootId))
+                  .sort((a, b) => (a.version_number || 1) - (b.version_number || 1));
+}
+
+function openVersionCompare(baseId) {
+  const base = S.recipes.find(x => x.id === baseId);
+  if (!base) return;
+  const family = _recVersionFamily(base);
+  if (family.length < 2) return;
+
+  document.getElementById('compare-left-label').textContent =
+    base.name + ' · ' + t('rec.version_badge').replace('${n}', base.version_number || 1);
+
+  const sel = document.getElementById('compare-right-select');
+  sel.innerHTML = family
+    .filter(x => x.id !== baseId)
+    .map(x => `<option value="${x.id}">${esc(x.name)} · ${esc(t('rec.version_badge').replace('${n}', x.version_number || 1))}${x.version_notes ? '  — ' + esc(x.version_notes) : ''}</option>`)
+    .join('');
+
+  sel.dataset.baseId = baseId;
+  renderRecipeCompare();
+  openModal('modal-compare');
+}
+
+function renderRecipeCompare() {
+  const sel    = document.getElementById('compare-right-select');
+  const baseId = parseInt(sel.dataset.baseId);
+  const otherId = parseInt(sel.value);
+  const body   = document.getElementById('compare-body');
+  if (!baseId || !otherId) { body.innerHTML = ''; return; }
+
+  const base  = S.recipes.find(x => x.id === baseId);
+  const other = S.recipes.find(x => x.id === otherId);
+  if (!base || !other) { body.innerHTML = ''; return; }
+
+  // ── Metadata diff ──────────────────────────────────────────────────────────
+  const metaFields = [
+    ['volume',               t('rec.volume') || 'Volume (L)'],
+    ['brewhouse_efficiency', t('rec.efficiency') || 'Efficacité (%)'],
+    ['mash_temp',            t('rec.mash_temp') || 'Empâtage (°C)'],
+    ['mash_time',            t('rec.mash_time') || 'Durée empâtage (min)'],
+    ['boil_time',            t('rec.boil_time') || 'Durée ébullition (min)'],
+    ['ferm_temp',            t('rec.ferm_temp') || 'T° fermentation (°C)'],
+    ['ferm_time',            t('rec.ferm_time') || 'Durée fermentation (j)'],
+  ];
+  const changedMeta = metaFields.filter(([k]) => base[k] !== other[k]);
+
+  // ── Ingredient diff keyed on name+category ─────────────────────────────────
+  const toKey  = i => (i.name || '').trim().toLowerCase() + '|' + (i.category || '');
+  const baseMap  = new Map((base.ingredients  || []).map(i => [toKey(i), i]));
+  const otherMap = new Map((other.ingredients || []).map(i => [toKey(i), i]));
+  const allKeys  = new Set([...baseMap.keys(), ...otherMap.keys()]);
+
+  const added    = [];
+  const removed  = [];
+  const changed  = [];
+  const same     = [];
+
+  for (const key of allKeys) {
+    const b = baseMap.get(key);
+    const o = otherMap.get(key);
+    if (!b)      { added.push(o);   continue; }
+    if (!o)      { removed.push(b); continue; }
+    const bBase = _toBaseQty(b.quantity || 0, b.unit);
+    const oBase = _toBaseQty(o.quantity || 0, o.unit);
+    if (Math.abs(bBase.val - oBase.val) > 0.001 || b.unit !== o.unit) {
+      changed.push({ base: b, other: o });
+    } else {
+      same.push(b);
+    }
+  }
+
+  const fmtQ = (q, u) => `${(+q || 0).toLocaleString()} ${u}`;
+  const row  = (icon, color, bg, left, right) =>
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:6px 10px;border-radius:6px;background:${bg};margin-bottom:4px">
+       <div style="color:${color};font-size:.83rem">${icon} ${left}</div>
+       <div style="color:${color};font-size:.83rem">${right}</div>
+     </div>`;
+
+  let html = '';
+
+  if (changedMeta.length) {
+    html += `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 6px">${t('rec.compare_meta_changed')}</div>`;
+    for (const [k, label] of changedMeta) {
+      html += row('⚙', 'var(--amber)', 'rgba(251,191,36,.08)',
+        `${esc(label)}: <strong>${base[k] ?? '—'}</strong>`,
+        `${esc(label)}: <strong>${other[k] ?? '—'}</strong>`);
+    }
+    html += `<div style="margin-bottom:12px"></div>`;
+  }
+
+  if (added.length) {
+    html += `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--success);margin:0 0 6px"><i class="fas fa-plus"></i> ${t('rec.compare_added')}</div>`;
+    for (const i of added)
+      html += row('＋', 'var(--success)', 'rgba(16,185,129,.08)', '—', `<strong>${esc(i.name)}</strong> ${fmtQ(i.quantity, i.unit)}`);
+    html += `<div style="margin-bottom:12px"></div>`;
+  }
+
+  if (removed.length) {
+    html += `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#f87171;margin:0 0 6px"><i class="fas fa-minus"></i> ${t('rec.compare_removed')}</div>`;
+    for (const i of removed)
+      html += row('－', '#f87171', 'rgba(239,68,68,.08)', `<strong>${esc(i.name)}</strong> ${fmtQ(i.quantity, i.unit)}`, '—');
+    html += `<div style="margin-bottom:12px"></div>`;
+  }
+
+  if (changed.length) {
+    html += `<div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin:0 0 6px"><i class="fas fa-arrows-rotate"></i> ${t('rec.compare_changed')}</div>`;
+    for (const { base: b, other: o } of changed)
+      html += row('~', 'var(--amber)', 'rgba(251,191,36,.08)',
+        `<strong>${esc(b.name)}</strong> ${fmtQ(b.quantity, b.unit)}`,
+        `<strong>${esc(o.name)}</strong> ${fmtQ(o.quantity, o.unit)}`);
+    html += `<div style="margin-bottom:12px"></div>`;
+  }
+
+  if (!html) {
+    html = `<div style="text-align:center;padding:24px;color:var(--muted);font-size:.88rem"><i class="fas fa-check-circle" style="color:var(--success)"></i> ${t('rec.compare_same')}</div>`;
+  } else if (same.length) {
+    html += `<div style="font-size:.72rem;color:var(--muted);margin-top:4px"><i class="fas fa-check"></i> ${same.length} ${t('rec.compare_unchanged').toLowerCase()}</div>`;
+  }
+
+  body.innerHTML = html;
 }
 
 async function duplicateRecipe() {
@@ -2215,8 +2565,7 @@ async function duplicateRecipe() {
     S.recipes.unshift(created);
     loadRecipeForm(created.id);
     renderRecipeList();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('rec.duplicated'), 'success');
   } catch(e) { showRecAlert(t('common.error') + ' : ' + (e.detail || e.error || '')); }
 }
@@ -2371,7 +2720,7 @@ function printRecipe() {
   });
 
   const notesHtml = r.notes
-    ? `<div class="notes"><strong>${t('common.notes')} :</strong><br>${esc(r.notes).replace(/\n/g,'<br>')}</div>` : '';
+    ? `<div class="notes"><strong>${t('common.notes')} :</strong><br>${renderMd(r.notes)}</div>` : '';
 
   const win = window.open('', '_blank', 'width=840,height=700');
   win.document.write(`<!DOCTYPE html><html lang="fr"><head>
@@ -2406,6 +2755,7 @@ function printRecipe() {
     .ebc-dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:middle;border:1px solid rgba(0,0,0,.15)}
     @media print{body{padding:16px}}
     @page{margin:12mm}
+    ${_MD_PRINT_CSS}
   </style></head><body>
   <div class="header">
     <h1>${esc(r.name)}</h1>
@@ -2519,6 +2869,7 @@ function printBrewingSheet() {
     .notes-area{border:1px solid #ccc;border-radius:6px;padding:10px;min-height:60px;margin-bottom:8px;font-size:11px;color:#888}
     .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     @media print{body{padding:12px}@page{size:A4 portrait;margin:10mm}}
+    ${_MD_PRINT_CSS}
   </style></head><body>
   <h1>${esc(r.name)}</h1>
   <div class="meta">
@@ -2576,7 +2927,7 @@ function printBrewingSheet() {
     <tr><td>ABV calculé</td><td style="border-bottom:1px solid #aaa">&nbsp;</td><td style="border-bottom:1px solid #aaa">&nbsp;</td></tr>
   </table>
 
-  ${r.notes ? `<h2>Notes</h2><div style="font-size:11px;line-height:1.6;padding:8px 10px;background:#f8f8f8;border-radius:6px">${esc(r.notes).replace(/\n/g,'<br>')}</div>` : ''}
+  ${r.notes ? `<h2>Notes</h2><div class="notes">${renderMd(r.notes)}</div>` : ''}
 
   <script>window.onload=function(){window.print()}<\/script>
 </body></html>`);
@@ -2699,7 +3050,7 @@ function printCombinedSheet() {
   if(!boilHops.length) schedHtml+=`<tr><td colspan="4" style="color:#aaa;text-align:center">–</td></tr>`;
   schedHtml+='</tbody></table>';
 
-  const notesHtml=r.notes?`<h3>${t('common.notes')}</h3><div class="notes">${esc(r.notes).replace(/\n/g,'<br>')}</div>`:'';
+  const notesHtml=r.notes?`<h3>${t('common.notes')}</h3><div class="notes">${renderMd(r.notes)}</div>`:'';
 
   const win=window.open('','_blank','width=1100,height=800');
   win.document.write(`<!DOCTYPE html><html lang="fr"><head>
@@ -2748,6 +3099,7 @@ function printCombinedSheet() {
       .col{overflow:hidden}
       @page{size:A4 landscape;margin:8mm}
     }
+    ${_MD_PRINT_CSS}
   </style></head><body>
   <div class="page">
     <div class="page-header">

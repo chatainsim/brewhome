@@ -426,6 +426,7 @@ const LOCALES = {
       priming_total: 'Total CO₂',
       priming_tip: 'Dissoudre le sucre dans ~200 mL d\'eau bouillie refroidie, ajouter avant le soutirage.',
       priming_warn_low: 'CO₂ cible inférieur au résiduel — bière déjà suffisamment carbonatée.',
+      dryhop_rate_lbl: 'Dry hop total :', dryhop_rate_tip: 'Grammage total des houblons en dry hop par litre',
     },
 
     // ── Calculateurs ──────────────────────────────────────────────────────────
@@ -506,6 +507,8 @@ const LOCALES = {
       att_in_range: 'dans la plage', att_low: 'sous la plage', att_high: 'au-dessus',
       eff_real: 'Rendement cuve', eff_target: 'Objectif : ${pct}%',
       eff_on_target: 'dans l\'objectif', eff_below: 'sous l\'objectif', eff_above: 'au-dessus',
+      yield_label: 'Rendement volume', yield_target: 'Cible : ${vol} L',
+      yield_on_target: 'dans l\'objectif', yield_below: 'sous l\'objectif', yield_above: 'au-dessus',
       add_reading: 'Ajouter une mesure', readings: 'Mesures de densité',
       col_date: 'Date', col_gravity: 'Densité', col_temp: 'Température',
       col_notes: 'Notes', col_name: 'Brassin', col_recipe: 'Recette',
@@ -707,7 +710,7 @@ const LOCALES = {
       label_copies: 'Exemplaires :', label_fmt: 'Format :',
       label_fmt_a4l: 'A4 Paysage', label_fmt_a4p: 'A4 Portrait',
       label_fmt_a5l: 'A5 Paysage', label_fmt_a5p: 'A5 Portrait',
-      label_qr: 'Inclure un QR code',
+      label_qr: 'Inclure un QR code', label_crop_marks: 'Marques de découpe',
       label_show: 'Afficher :', label_show_style: 'Style', label_show_ing: 'Ingrédients', label_show_dates: 'Dates',
       refermentation: 'Refermentation en cours',
       refermentation_days: 'Durée de refermentation (jours)',
@@ -1871,6 +1874,7 @@ const LOCALES = {
       priming_total: 'Total CO₂',
       priming_tip: 'Dissolve sugar in ~200 mL of cooled boiled water and add before racking.',
       priming_warn_low: 'Target CO₂ is below residual — beer is already sufficiently carbonated.',
+      dryhop_rate_lbl: 'Total dry hop:', dryhop_rate_tip: 'Total dry hop additions per litre',
     },
 
     ot: {
@@ -1949,6 +1953,8 @@ const LOCALES = {
       att_in_range: 'in range', att_low: 'below range', att_high: 'above range',
       eff_real: 'Brewhouse efficiency', eff_target: 'Target: ${pct}%',
       eff_on_target: 'on target', eff_below: 'below target', eff_above: 'above target',
+      yield_label: 'Volume yield', yield_target: 'Target: ${vol} L',
+      yield_on_target: 'on target', yield_below: 'below target', yield_above: 'above target',
       add_reading: 'Add a reading', readings: 'Gravity readings',
       col_date: 'Date', col_gravity: 'Gravity', col_temp: 'Temperature',
       col_notes: 'Notes', col_name: 'Brew', col_recipe: 'Recipe',
@@ -2149,7 +2155,7 @@ const LOCALES = {
       label_copies: 'Copies:', label_fmt: 'Format:',
       label_fmt_a4l: 'A4 Landscape', label_fmt_a4p: 'A4 Portrait',
       label_fmt_a5l: 'A5 Landscape', label_fmt_a5p: 'A5 Portrait',
-      label_qr: 'Include QR code',
+      label_qr: 'Include QR code', label_crop_marks: 'Crop marks',
       label_show: 'Show:', label_show_style: 'Style', label_show_ing: 'Ingredients', label_show_dates: 'Dates',
       refermentation: 'Refermentation in progress',
       refermentation_days: 'Refermentation duration (days)',

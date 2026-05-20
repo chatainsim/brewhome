@@ -44,7 +44,7 @@
           <option value="180" data-i18n="spin.purge_6m">6 mois</option>
           <option value="365" data-i18n="spin.purge_1y">1 an</option>
         </select>
-        <button class="btn btn-danger btn-sm" onclick="purgeReadings()">
+        <button class="btn btn-danger btn-sm" onclick="withBtn(this, purgeReadings)">
           <i class="fas fa-trash-can"></i> <span data-i18n="spin.purge_btn">Purger</span>
         </button>
       </div>
@@ -64,10 +64,10 @@
           <option value="180" data-i18n="spin.purge_6m">6 mois</option>
           <option value="365" data-i18n="spin.purge_1y">1 an</option>
         </select>
-        <button class="btn btn-danger btn-sm" onclick="purgeTempReadings()">
+        <button class="btn btn-danger btn-sm" onclick="withBtn(this, purgeTempReadings)">
           <i class="fas fa-trash-can"></i> <span data-i18n="spin.purge_btn">Purger</span>
         </button>
-        <button class="btn btn-danger btn-sm" onclick="purgeUnassignedTempReadings()" title="Supprimer les mesures des capteurs non assignés à un brassin">
+        <button class="btn btn-danger btn-sm" onclick="withBtn(this, purgeUnassignedTempReadings)" title="Supprimer les mesures des capteurs non assignés à un brassin">
           <i class="fas fa-link-slash"></i> <span data-i18n="spin.purge_unassigned_btn">Non-assignés</span>
         </button>
       </div>

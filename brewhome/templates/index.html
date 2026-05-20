@@ -36,6 +36,7 @@
 {% include 'parts/page_calendrier.html' %}
 {% include 'parts/page_brouillons.html' %}
 {% include 'parts/page_kegs.html' %}
+{% include 'parts/page_shopping.html' %}
 {% include 'parts/page_stats.html' %}
 {% include 'parts/page_dbadmin.html' %}
 {% include 'parts/page_outils.html' %}
@@ -48,9 +49,10 @@
 {% include 'parts/modals_spindles.html' %}
 {% include 'parts/modals_kegs.html' %}
 {% include 'parts/modals_checklist.html' %}
+{% include 'parts/modals_shopping.html' %}
 
 <!-- SCRIPTS — core (chargés immédiatement) -->
-<script>const _BH_STATIC_V = "{{ static_v }}";</script>
+<script>const _BH_STATIC_V = "{{ static_v }}"; const _BH_APP_VERSION = "{{ app_version }}"; const _BH_EXPORT_TOKEN = "{{ export_token }}";</script>
 <script src="/static/js/bh-state.js?v={{ static_v }}"></script>
 <script src="/static/js/bh-locales.js?v={{ static_v }}"></script>
 <script src="/static/js/bh-core.js?v={{ static_v }}"></script>

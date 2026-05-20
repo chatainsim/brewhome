@@ -303,7 +303,7 @@ function bjcpSearch(input) {
     types.forEach(t => { if (!q || t.toLowerCase().includes(q)) commonMatches.push(t); });
   }
   if (commonMatches.length) {
-    html += `<div class="ing-suggest-cat">Styles courants</div>`;
+    html += `<div class="ing-suggest-cat">${t('rec.common_styles')}</div>`;
     commonMatches.slice(0, q ? 30 : 10).forEach(t => {
       html += `<div class="ing-suggest-item" onmousedown="selectBjcp(${JSON.stringify(t).replace(/"/g,'&quot;')},0)"><span>${esc(t)}</span></div>`;
       count++;
@@ -387,7 +387,7 @@ let _spindleChartSeq = 0;  // anti-race : ignore les réponses obsolètes
 
 function spindleAge(dateStr) {
   if (!dateStr) return { color: 'var(--muted)', label: t('spin.age_no_data'), fresh: false };
-  const d = new Date(dateStr.replace(' ', 'T'));
+  const d = new Date(dateStr.replace(' ', 'T') + 'Z');
   if (isNaN(d.getTime())) return { color: 'var(--muted)', label: '—', fresh: false };
   const mins = (Date.now() - d.getTime()) / 60000;
   const hrs  = mins / 60;
@@ -1063,8 +1063,7 @@ async function saveKeg() {
     }
     closeModal('keg-modal');
     renderKegs();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
   } catch(e) { toast(t('keg.err_save'), 'error'); }
 }
 
@@ -1075,8 +1074,7 @@ async function deleteKeg(id) {
     await api('DELETE', `/api/soda-kegs/${id}`);
     S.sodaKegs = S.sodaKegs.filter(k => k.id !== id);
     renderKegs();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('keg.deleted'), 'success');
   } catch(e) { toast(t('common.err_delete') || 'Erreur', 'error'); }
 }
@@ -1406,6 +1404,7 @@ async function openBrewFermentationChart(brewId) {
 
     // Détection stabilité
     const stability = _detectFermStability(readings);
+    const isDone = brew?.status === 'completed';
 
     // OG = max des mesures de la fenêtre affichée (delta ABV cohérent avec le graphique visible)
     const og = Math.max(...gravities.filter(g => g != null));
@@ -1435,16 +1434,18 @@ async function openBrewFermentationChart(brewId) {
           { label: abvChartLabel, data: abvData, borderColor: '#22c55e',
             backgroundColor: 'rgba(34,197,94,.08)', yAxisID: 'yAbv',
             tension: 0.35, pointRadius: ptRadius, fill: false },
-          { label: `${t('spin.metric_temp')} (°C)`, data: temps, borderColor: '#3b82f6',
-            backgroundColor: 'rgba(59,130,246,.08)', yAxisID: 'yTemp',
-            tension: 0.35, pointRadius: ptRadius, fill: false },
-          ...(targetTempData ? [{
-            label: t('brew.target_temp_curve'),
-            data: targetTempData, borderColor: '#f59e0b',
-            backgroundColor: 'transparent', yAxisID: 'yTemp',
-            tension: 0, pointRadius: 0, fill: false,
-            borderWidth: 1.5, borderDash: [6, 3],
-          }] : []),
+          ...(!isDone ? [
+            { label: `${t('spin.metric_temp')} (°C)`, data: temps, borderColor: '#3b82f6',
+              backgroundColor: 'rgba(59,130,246,.08)', yAxisID: 'yTemp',
+              tension: 0.35, pointRadius: ptRadius, fill: false },
+            ...(targetTempData ? [{
+              label: t('brew.target_temp_curve'),
+              data: targetTempData, borderColor: '#f59e0b',
+              backgroundColor: 'transparent', yAxisID: 'yTemp',
+              tension: 0, pointRadius: 0, fill: false,
+              borderWidth: 1.5, borderDash: [6, 3],
+            }] : []),
+          ] : []),
           ...stableLineDataset,
         ],
       },
@@ -1453,7 +1454,7 @@ async function openBrewFermentationChart(brewId) {
         interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: { labels: { color: '#ccc', font: { size: 12 },
-            filter: item => item.datasetIndex < (3 + (targetTempData ? 1 : 0)) } },
+            filter: item => item.datasetIndex < (isDone ? 2 : 3 + (targetTempData ? 1 : 0)) } },
           tooltip: {
             callbacks: {
               label: ctx => {
@@ -1477,7 +1478,7 @@ async function openBrewFermentationChart(brewId) {
             grid: { drawOnChartArea: false },
             title: { display: true, text: 'ABV %', color: '#22c55e', font: { size: 11 } } },
           yTemp: { type: 'linear', position: 'right',
-            display: temps.some(v => v != null) || !!targetTempData,
+            display: !isDone && (temps.some(v => v != null) || !!targetTempData),
             ticks: { color: '#3b82f6', font: { size: 11 }, callback: v => v.toFixed(1) + '°' },
             grid: { drawOnChartArea: false },
             title: { display: true, text: '°C', color: '#3b82f6', font: { size: 11 } } },
@@ -2370,6 +2371,7 @@ async function linkSpindleBrew(spindleId, brewId) {
     const idx = S.spindles.findIndex(s => s.id === spindleId);
     if (idx !== -1) S.spindles[idx] = updated;
     renderSpindles();
+    renderBrassins();
     toast(brewId ? t('spin.linked') : t('spin.unlinked'), 'success');
   } catch(e) { toast(t('spin.err_link'), 'error'); }
 }

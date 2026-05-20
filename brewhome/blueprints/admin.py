@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import sqlite3
 import time
 import urllib.request
@@ -13,7 +14,54 @@ from helpers import api_error
 
 bp = Blueprint('admin', __name__)
 
-APP_VERSION = "0.0.7"
+APP_VERSION = "0.0.8"
+
+# Token généré à chaque démarrage du serveur — requis pour télécharger l'export SQL.
+# Injecté dans le HTML de la page principale (variable JS _BH_EXPORT_TOKEN).
+EXPORT_TOKEN = secrets.token_urlsafe(24)
+
+_PURGE_RETENTION_DEFAULT = 90  # fallback if not configured in app_settings
+
+
+def _get_purge_retention_days(conn):
+    """Read purge_retention_days from app_settings, defaulting to 90."""
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key='purge_retention_days'"
+    ).fetchone()
+    if row:
+        try:
+            days = int(row['value'])
+            if days > 0:
+                return days
+        except (ValueError, TypeError):
+            pass
+    return _PURGE_RETENTION_DEFAULT
+
+
+def auto_purge_soft_deleted():
+    """Purge soft-deleted rows older than the configured retention period.
+
+    Called daily by the APScheduler job registered in app.py.
+    foreign_keys=ON ensures recipe_ingredients.inventory_item_id is
+    NULL-ed automatically (ON DELETE SET NULL) when inventory items are purged.
+    """
+    tables = ['inventory_items', 'recipes', 'brews', 'beers']
+    try:
+        with get_db() as conn:
+            days = _get_purge_retention_days(conn)
+            cutoff = f"-{days} days"
+            for table in tables:
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE deleted_at IS NOT NULL"
+                    f" AND deleted_at < datetime('now', ?)",
+                    (cutoff,)
+                )
+                if cur.rowcount:
+                    current_app.logger.info(
+                        'auto_purge: removed %d row(s) from %s', cur.rowcount, table
+                    )
+    except Exception as e:
+        current_app.logger.warning('auto_purge_soft_deleted failed: %s', e)
 
 
 # ---------------------------------------------------------------------------
@@ -43,15 +91,17 @@ def get_bjcp():
 @bp.route('/api/trash')
 def get_trash():
     with get_db() as conn:
+        retention_days = _get_purge_retention_days(conn)
         recipes  = conn.execute("SELECT id, name, style, deleted_at FROM recipes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
         inv      = conn.execute("SELECT id, name, category, quantity, unit, deleted_at FROM inventory_items WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
         brews    = conn.execute("SELECT id, name, brew_date, status, deleted_at FROM brews WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
         beers    = conn.execute("SELECT id, name, type, abv, deleted_at FROM beers WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
     return jsonify({
-        'recipes':   [dict(r) for r in recipes],
-        'inventory': [dict(r) for r in inv],
-        'brews':     [dict(r) for r in brews],
-        'beers':     [dict(r) for r in beers],
+        'recipes':         [dict(r) for r in recipes],
+        'inventory':       [dict(r) for r in inv],
+        'brews':           [dict(r) for r in brews],
+        'beers':           [dict(r) for r in beers],
+        'retention_days':  retention_days,
     })
 
 
@@ -71,7 +121,8 @@ def get_stats():
             'brews_count':     scalar('SELECT COUNT(*) FROM brews      WHERE archived=0'),
             'brews_active':    scalar(f'SELECT COUNT(*) FROM brews WHERE archived=0 AND status IN ({_active_ph})', BrewStatus.ACTIVE),
             'beers_count':     scalar('SELECT COUNT(*) FROM beers      WHERE archived=0'),
-            'kegs_count':      scalar('SELECT COUNT(*) FROM soda_kegs  WHERE archived=0'),
+            'kegs_count':      scalar('SELECT COUNT(*) FROM soda_kegs    WHERE archived=0'),
+            'shopping_count':  scalar('SELECT COUNT(*) FROM shopping_list WHERE checked=0'),
             'total_33cl':      scalar('SELECT COALESCE(SUM(stock_33cl),0) FROM beers WHERE archived=0'),
             'total_75cl':      scalar('SELECT COALESCE(SUM(stock_75cl),0) FROM beers WHERE archived=0'),
             'total_liters':    scalar(
@@ -274,7 +325,11 @@ def get_brew_checklist(brew_id):
         row = conn.execute('SELECT * FROM brew_checklists WHERE brew_id=?', (brew_id,)).fetchone()
         if not row:
             return jsonify({'brew_id': brew_id, 'template_id': None, 'checked_items': []})
-        return jsonify({**dict(row), 'checked_items': json.loads(row['checked_items'] or '[]')})
+        try:
+            checked_items = json.loads(row['checked_items'] or '[]')
+        except (json.JSONDecodeError, ValueError):
+            checked_items = []
+        return jsonify({**dict(row), 'checked_items': checked_items})
 
 
 @bp.route('/api/brews/<int:brew_id>/checklist', methods=['POST'])
@@ -293,30 +348,56 @@ def save_brew_checklist(brew_id):
             (brew_id, template_id, checked)
         )
         row = conn.execute('SELECT * FROM brew_checklists WHERE brew_id=?', (brew_id,)).fetchone()
-        return jsonify({**dict(row), 'checked_items': json.loads(row['checked_items'] or '[]')})
+        try:
+            checked_items = json.loads(row['checked_items'] or '[]')
+        except (json.JSONDecodeError, ValueError):
+            checked_items = []
+        return jsonify({**dict(row), 'checked_items': checked_items})
 
 
 # ---------------------------------------------------------------------------
 # DB admin
 # ---------------------------------------------------------------------------
 
+def _table_stats(conn):
+    """Return {table_name: {count, size_bytes}} sorted by size descending.
+    Uses the dbstat virtual table for byte-level sizes; falls back to row-count-only
+    if dbstat is unavailable.
+    """
+    names = [r['name'] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).fetchall()]
+    counts = {}
+    for name in names:
+        counts[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+    sizes = {}
+    try:
+        for row in conn.execute(
+            "SELECT name, SUM(pgsize) AS sz FROM dbstat GROUP BY name"
+        ).fetchall():
+            sizes[row['name']] = row['sz'] or 0
+    except Exception:
+        pass  # dbstat not compiled in — sizes stay empty
+    result = {}
+    for name in names:
+        result[name] = {'count': counts[name], 'size': sizes.get(name, 0)}
+    return dict(sorted(result.items(), key=lambda x: x[1]['size'], reverse=True))
+
+
 @bp.route('/api/admin/db-stats')
 def admin_db_stats():
     main_size     = os.path.getsize(DB_PATH)          if os.path.exists(DB_PATH)          else 0
     readings_size = os.path.getsize(READINGS_DB_PATH) if os.path.exists(READINGS_DB_PATH) else 0
-    main_tables = {}
+    purge_retention_days = _PURGE_RETENTION_DEFAULT
     with get_db() as conn:
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall():
-            name = row['name']
-            main_tables[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
-    readings_tables = {}
+        main_tables = _table_stats(conn)
+        purge_retention_days = _get_purge_retention_days(conn)
     with get_readings_db() as conn:
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall():
-            name = row['name']
-            readings_tables[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+        readings_tables = _table_stats(conn)
     return jsonify({
         'main':     {'size': main_size,     'tables': main_tables},
         'readings': {'size': readings_size, 'tables': readings_tables},
+        'purge_retention_days': purge_retention_days,
     })
 
 
@@ -337,8 +418,36 @@ def admin_vacuum():
         return api_error('internal_error', 500)
 
 
+@bp.route('/api/admin/purge-deleted', methods=['POST'])
+def admin_purge_deleted():
+    """Trigger an immediate purge of soft-deleted rows (same logic as the daily job)."""
+    tables = ['inventory_items', 'recipes', 'brews', 'beers']
+    result = {}
+    try:
+        with get_db() as conn:
+            days = _get_purge_retention_days(conn)
+            cutoff = f"-{days} days"
+            for table in tables:
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE deleted_at IS NOT NULL"
+                    f" AND deleted_at < datetime('now', ?)",
+                    (cutoff,)
+                )
+                if cur.rowcount:
+                    result[table] = cur.rowcount
+        total = sum(result.values())
+        current_app.logger.info('manual purge: %d row(s) deleted — %s', total, result)
+        return jsonify({'deleted': result, 'total': total, 'retention_days': days})
+    except Exception as e:
+        current_app.logger.exception("manual purge failed")
+        return api_error('internal_error', 500)
+
+
 @bp.route('/api/admin/export-sql')
 def admin_export_sql():
+    token = request.args.get('token', '')
+    if not secrets.compare_digest(token, EXPORT_TOKEN):
+        return api_error('forbidden', 403, detail='Invalid or missing export token')
     lines = []
     conn = sqlite3.connect(DB_PATH)
     try:

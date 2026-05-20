@@ -1,10 +1,69 @@
 import json
+import os
+import uuid
 from datetime import date
-from flask import Blueprint, jsonify, request, current_app
-from db import get_db, _log
-from helpers import validate, api_error
+from flask import Blueprint, jsonify, request, current_app, send_from_directory
+from db import get_db, _log, PHOTOS_DIR
+from helpers import validate, api_error, _image_too_large, _shrink_image_b64, _b64_to_jpeg_file
 
 bp = Blueprint('beers', __name__)
+
+_BEER_PHOTO_PREFIX = '/api/beer-photos/'
+
+
+def _beer_photo_url(filename):
+    return f'{_BEER_PHOTO_PREFIX}{filename}'
+
+
+def _delete_beer_photo_file(filename):
+    if not filename:
+        return
+    try:
+        os.remove(os.path.join(PHOTOS_DIR, filename))
+    except OSError:
+        pass
+
+
+def _process_beer_photo(photo_raw, old_file=None):
+    """Convert a beer photo from a request to a (photo_db, photo_file) pair.
+
+    - base64 data URL  → save to disk, return (None, filename)
+    - /api/beer-photos/ URL  → already on disk, return (None, filename)
+    - None/empty  → clear photo, delete old file, return (None, None)
+    On save failure falls back to (base64, old_file) so the image isn't lost.
+    """
+    if not photo_raw:
+        _delete_beer_photo_file(old_file)
+        return None, None
+
+    if photo_raw.startswith('data:'):
+        try:
+            if _image_too_large(photo_raw):
+                photo_raw = _shrink_image_b64(photo_raw)
+            os.makedirs(PHOTOS_DIR, exist_ok=True)
+            fname = f'beer_{uuid.uuid4().hex}.jpg'
+            _b64_to_jpeg_file(photo_raw, os.path.join(PHOTOS_DIR, fname))
+            if old_file:
+                _delete_beer_photo_file(old_file)
+            return None, fname
+        except Exception as e:
+            current_app.logger.warning('beer photo save failed: %s', e)
+            return photo_raw, old_file  # fallback: keep base64
+
+    if photo_raw.startswith(_BEER_PHOTO_PREFIX):
+        fname = os.path.basename(photo_raw)
+        return None, fname
+
+    return photo_raw, old_file
+
+
+def _beer_row_to_dict(row):
+    """Convert a beers row to dict, replacing photo_file with a display URL in `photo`."""
+    d = dict(row)
+    if d.get('photo_file'):
+        d['photo'] = _beer_photo_url(d['photo_file'])
+    d.pop('photo_file', None)
+    return d
 
 _BEER_SCHEMA = {
     'name':        {'type': str,          'max_len': 200},
@@ -30,7 +89,7 @@ def get_beers():
                WHERE b.deleted_at IS NULL
                ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC'''
         ).fetchall()
-        return jsonify([dict(r) for r in rows])
+        return jsonify([_beer_row_to_dict(r) for r in rows])
 
 
 @bp.route('/api/beers/reorder', methods=['PUT'])
@@ -46,6 +105,15 @@ def reorder_beers():
     return jsonify({'success': True})
 
 
+def _check_refermentation(d):
+    """Retourne une erreur si refermentation est activée sans refermentation_days."""
+    if d.get('refermentation') and not d.get('refermentation_days'):
+        return api_error('validation', 400, fields={
+            'refermentation_days': 'required when refermentation is enabled'
+        })
+    return None
+
+
 @bp.route('/api/beers', methods=['POST'])
 def create_beer():
     d = request.json or {}
@@ -54,18 +122,23 @@ def create_beer():
     errors = validate(d, _BEER_SCHEMA)
     if errors:
         return api_error('validation', 400, fields=errors)
+    err = _check_refermentation(d)
+    if err:
+        return err
+    photo_db, photo_file = _process_beer_photo(d.get('photo'))
     with get_db() as conn:
         s33 = d.get('stock_33cl', 0)
         s75 = d.get('stock_75cl', 0)
         keg = d.get('keg_liters')
         cur = conn.execute(
-            '''INSERT INTO beers (name,type,abv,stock_33cl,stock_75cl,initial_33cl,initial_75cl,keg_liters,keg_initial_liters,origin,description,photo,brew_id,recipe_id,brew_date,bottling_date,refermentation,refermentation_days)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            '''INSERT INTO beers (name,type,abv,stock_33cl,stock_75cl,initial_33cl,initial_75cl,keg_liters,keg_initial_liters,origin,description,photo,photo_file,brew_id,recipe_id,brew_date,bottling_date,refermentation,refermentation_days)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (d.get('name'), d.get('type'), d.get('abv'), s33, s75,
              d.get('initial_33cl', s33), d.get('initial_75cl', s75),
              keg, d.get('keg_initial_liters', keg),
              d.get('origin'), d.get('description'),
-             d.get('photo'), d.get('brew_id'), d.get('recipe_id'),
+             photo_db, photo_file,
+             d.get('brew_id'), d.get('recipe_id'),
              d.get('brew_date'), d.get('bottling_date'),
              1 if d.get('refermentation') else 0,
              int(d['refermentation_days']) if d.get('refermentation_days') else None)
@@ -80,7 +153,7 @@ def create_beer():
             _tg_fire_bottling(d.get('name'), s33, s75, keg, d.get('bottling_date'))
         except Exception as e:
             current_app.logger.warning('tg bottling notification failed: %s', e)
-    return jsonify(dict(row)), 201
+    return jsonify(_beer_row_to_dict(row)), 201
 
 
 @bp.route('/api/beers/<int:beer_id>', methods=['PUT'])
@@ -89,28 +162,45 @@ def update_beer(beer_id):
     errors = validate(d, _BEER_SCHEMA)
     if errors:
         return api_error('validation', 400, fields=errors)
+    err = _check_refermentation(d)
+    if err:
+        return err
     with get_db() as conn:
-        existing = conn.execute('SELECT initial_33cl, initial_75cl, keg_initial_liters FROM beers WHERE id=?', (beer_id,)).fetchone()
+        existing = conn.execute(
+            'SELECT initial_33cl, initial_75cl, keg_initial_liters, photo_file FROM beers WHERE id=?',
+            (beer_id,)
+        ).fetchone()
         if not existing:
             return api_error('not_found', 404)
         init33 = d['initial_33cl'] if 'initial_33cl' in d else existing['initial_33cl']
         init75 = d['initial_75cl'] if 'initial_75cl' in d else existing['initial_75cl']
         keg_init = d['keg_initial_liters'] if 'keg_initial_liters' in d else existing['keg_initial_liters']
+        photo_db, photo_file = _process_beer_photo(d.get('photo'), existing['photo_file'])
         conn.execute(
             '''UPDATE beers SET name=?,type=?,abv=?,stock_33cl=?,stock_75cl=?,
-               initial_33cl=?,initial_75cl=?,keg_liters=?,keg_initial_liters=?,origin=?,description=?,photo=?,
+               initial_33cl=?,initial_75cl=?,keg_liters=?,keg_initial_liters=?,origin=?,description=?,
+               photo=?,photo_file=?,
                brew_date=?,bottling_date=?,refermentation=?,refermentation_days=? WHERE id=?''',
             (d.get('name'), d.get('type'), d.get('abv'), d.get('stock_33cl', 0),
              d.get('stock_75cl', 0), init33, init75,
              d.get('keg_liters'), keg_init,
              d.get('origin'), d.get('description'),
-             d.get('photo'), d.get('brew_date'), d.get('bottling_date'),
+             photo_db, photo_file,
+             d.get('brew_date'), d.get('bottling_date'),
              1 if d.get('refermentation') else 0,
              int(d['refermentation_days']) if d.get('refermentation_days') else None,
              beer_id)
         )
-        row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
-        return jsonify(dict(row))
+        row = conn.execute(
+            '''SELECT b.*, br.brew_date AS brew_date, br.photos_url AS brew_photos_url,
+                      r.name AS recipe_name
+               FROM beers b
+               LEFT JOIN brews br ON b.brew_id = br.id
+               LEFT JOIN recipes r ON b.recipe_id = r.id
+               WHERE b.id = ?''',
+            (beer_id,)
+        ).fetchone()
+        return jsonify(_beer_row_to_dict(row))
 
 
 @bp.route('/api/beers/<int:beer_id>/tasting', methods=['PUT'])
@@ -135,7 +225,7 @@ def update_beer_tasting(beer_id):
         if cur.rowcount == 0:
             return api_error('not_found', 404)
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
-        return jsonify(dict(row))
+        return jsonify(_beer_row_to_dict(row))
 
 
 @bp.route('/api/beers/<int:beer_id>', methods=['DELETE'])
@@ -163,9 +253,13 @@ def restore_beer(beer_id):
 @bp.route('/api/beers/<int:beer_id>/purge', methods=['DELETE'])
 def purge_beer(beer_id):
     with get_db() as conn:
-        cur = conn.execute('DELETE FROM beers WHERE id=? AND deleted_at IS NOT NULL', (beer_id,))
-        if cur.rowcount == 0:
+        row = conn.execute(
+            'SELECT photo_file FROM beers WHERE id=? AND deleted_at IS NOT NULL', (beer_id,)
+        ).fetchone()
+        if not row:
             return api_error('not_found', 404)
+        _delete_beer_photo_file(row['photo_file'])
+        conn.execute('DELETE FROM beers WHERE id=?', (beer_id,))
         return jsonify({'success': True})
 
 
@@ -200,7 +294,7 @@ def patch_beer_stock(beer_id):
                 (beer_id, cur['name'], d33, d75, dkeg, today_local)
             )
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
-        return jsonify(dict(row))
+        return jsonify(_beer_row_to_dict(row))
 
 
 @bp.route('/api/consumption/depletion')
@@ -280,4 +374,62 @@ def patch_beer(beer_id):
         if cur.rowcount == 0:
             return api_error('not_found', 404)
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
-        return jsonify(dict(row))
+        return jsonify(_beer_row_to_dict(row))
+
+
+@bp.route('/api/beer-photos/<path:filename>')
+def serve_beer_photo(filename):
+    safe = os.path.basename(filename)
+    return send_from_directory(PHOTOS_DIR, safe)
+
+
+@bp.route('/api/admin/migrate-beer-images', methods=['POST'])
+def migrate_beer_images():
+    """Migrate legacy base64 photos in beers table to filesystem files.
+
+    Two cases:
+    - photo_file is NULL + photo has base64  → save file, set photo_file, clear photo
+    - photo_file is set + photo still has base64  → just clear photo (orphaned base64)
+    Safe to call multiple times.
+    """
+    migrated = 0
+    purged   = 0
+    skipped  = 0
+    errors   = 0
+    with get_db() as conn:
+        rows = conn.execute(
+            'SELECT id, photo, photo_file FROM beers ORDER BY id'
+        ).fetchall()
+        for row in rows:
+            has_b64 = row['photo'] and str(row['photo']).startswith('data:')
+
+            if row['photo_file']:
+                if has_b64:
+                    conn.execute('UPDATE beers SET photo=NULL WHERE id=?', (row['id'],))
+                    purged += 1
+                else:
+                    skipped += 1
+                continue
+
+            if not has_b64:
+                skipped += 1
+                continue
+
+            try:
+                photo_raw = row['photo']
+                if _image_too_large(photo_raw):
+                    photo_raw = _shrink_image_b64(photo_raw)
+                os.makedirs(PHOTOS_DIR, exist_ok=True)
+                fname = f'beer_{uuid.uuid4().hex}.jpg'
+                _b64_to_jpeg_file(photo_raw, os.path.join(PHOTOS_DIR, fname))
+            except Exception as e:
+                current_app.logger.warning('migrate_beer_images: beer %s: %s', row['id'], e)
+                errors += 1
+                continue
+
+            conn.execute(
+                'UPDATE beers SET photo_file=?, photo=NULL WHERE id=?',
+                (fname, row['id'])
+            )
+            migrated += 1
+    return jsonify({'migrated': migrated, 'purged': purged, 'skipped': skipped, 'errors': errors})

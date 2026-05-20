@@ -768,7 +768,7 @@
             <div style="background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:14px">
               <h4 style="font-size:.82rem;font-weight:700;margin-bottom:12px;color:#818cf8;text-transform:uppercase;letter-spacing:.05em"><i class="fas fa-book"></i> <span data-i18n="settings.import.catalog_title">Catalogue</span></h4>
               <div style="display:flex;flex-direction:column;gap:8px">
-                <button class="btn btn-ghost btn-sm" onclick="exportCatalog()"><i class="fas fa-file-export"></i> <span data-i18n="settings.import.btn_export">Exporter (JSON)</span></button>
+                <button class="btn btn-ghost btn-sm" onclick="withBtn(this, exportCatalog)"><i class="fas fa-file-export"></i> <span data-i18n="settings.import.btn_export">Exporter (JSON)</span></button>
                 <button class="btn btn-ghost btn-sm" onclick="triggerImport('import-catalog-file')"><i class="fas fa-file-import"></i> <span data-i18n="settings.import.btn_import">Importer (JSON)</span></button>
                 <input type="file" id="import-catalog-file" accept=".json" style="display:none" onchange="importCatalog(this)">
                 <button class="btn btn-ghost btn-sm" id="btn-import-hopsteiner" onclick="withBtn(this, importHopsDb)" style="border-color:rgba(99,102,241,.4)"><i class="fas fa-cloud-arrow-down"></i> <span data-i18n="settings.import.btn_import_hopsteiner">Importer depuis Hopsteiner</span></button>
@@ -975,5 +975,16 @@
       <button class="btn btn-primary" id="ai-save-btn"        onclick="withBtn(this, saveAISettings)"       style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_ai">Enregistrer la config IA</span></button>
       <button class="btn btn-primary" id="notif-save-btn"     onclick="withBtn(this, saveTelegramSettings)" style="display:none"><i class="fas fa-floppy-disk"></i> <span data-i18n="settings.footer.save_notif">Enregistrer les notifications</span></button>
     </div>
+  </div>
+</div>
+
+<!-- ── Catalog history modal ─────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-catalog-history" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal" style="max-width:540px;width:95vw">
+    <div class="modal-head">
+      <span class="modal-catalog-history-title" style="font-weight:600"></span>
+      <button class="btn btn-icon btn-ghost btn-sm" onclick="document.getElementById('modal-catalog-history').classList.remove('open')"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="modal-body modal-catalog-history-body" style="max-height:65vh;overflow-y:auto;padding:1rem 1.25rem"></div>
   </div>
 </div>

@@ -4,6 +4,9 @@
 // ══════════════════════════════════════════════════════════════════════════════
 let _currentDraftId        = null;
 let _draftSort             = 'manual';
+let _draftStatusFilter     = 'all';
+let _draftImages           = [];   // array of image URLs (base64 data URLs or /api/draft-images/ server URLs)
+let _draftSelectedIdx      = 0;    // index of the active/main image
 let _currentDraftTargetDate = null;
 let _currentDraftEventLabel = null;
 let _draftSaveTimer        = null;
@@ -29,7 +32,7 @@ function setDraftMode(mode) {
       <button class="btn btn-ghost btn-sm draft-back-btn" onclick="_showEditor(false)" title="${t('common.back')}"><i class="fas fa-arrow-left"></i></button>
       <button class="btn btn-primary" onclick="setDraftMode('edit')"><i class="fas fa-pen"></i> ${t('draft.mode_edit')}</button>
       <button class="btn btn-ghost" onclick="draftToRecipe()"><i class="fas fa-scroll"></i> ${t('draft.to_recipe')}</button>
-      <button class="btn btn-ghost" id="draft-ai-btn" onclick="askGeminiForDraft()"
+      <button class="btn btn-ghost" id="draft-ai-btn" onclick="withBtn(this, askGeminiForDraft)"
         style="color:#8b5cf6;border-color:rgba(139,92,246,.4)">
         <i class="fas fa-wand-magic-sparkles"></i> ${t('draft.ai_suggest')}
       </button>
@@ -47,7 +50,7 @@ function setDraftMode(mode) {
     actions.innerHTML = `
       <button class="btn btn-ghost btn-sm draft-back-btn" onclick="_showEditor(false)" title="${t('common.back')}"><i class="fas fa-arrow-left"></i></button>
       <button class="btn btn-ghost" onclick="setDraftMode('view')"><i class="fas fa-eye"></i> ${t('draft.mode_view')}</button>
-      <button class="btn btn-ghost" id="draft-ai-btn" onclick="askGeminiForDraft()"
+      <button class="btn btn-ghost" id="draft-ai-btn" onclick="withBtn(this, askGeminiForDraft)"
         style="color:#8b5cf6;border-color:rgba(139,92,246,.4)">
         <i class="fas fa-wand-magic-sparkles"></i> ${t('draft.ai_suggest')}
       </button>
@@ -124,20 +127,34 @@ function renderDraftView() {
     </div>`;
   });
 
-  // Image
-  const imgHtml = d.image
-    ? `<img src="${d.image}" style="width:100%;max-width:320px;border-radius:12px;object-fit:cover;display:block;margin-bottom:16px">`
+  // Galerie images (vue lecture)
+  const imgHtml = _draftImages.length > 0
+    ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+        ${_draftImages.map((src, idx) => {
+          const sel = idx === _draftSelectedIdx;
+          return `<div style="position:relative;border-radius:10px;overflow:hidden;
+            border:2px solid ${sel ? 'var(--accent)' : 'transparent'};flex-shrink:0">
+            <img src="${src}" style="width:100px;height:100px;object-fit:cover;display:block;
+              cursor:zoom-in" onclick="openDraftLightbox(${idx})"
+              title="${esc(t('common.zoom_in'))}">
+            ${sel ? `<span style="position:absolute;bottom:3px;right:3px;background:var(--accent);color:#fff;
+              border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;
+              font-size:.5rem;pointer-events:none"><i class="fas fa-check"></i></span>` : ''}
+          </div>`;
+        }).join('')}
+       </div>`
     : '';
 
   panel.innerHTML = `
     <!-- En-tête -->
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span style="width:14px;height:14px;border-radius:50%;background:${color};flex-shrink:0"></span>
-      <h3 style="margin:0;font-size:1.25rem;font-weight:700">${esc(d.title || 'Sans titre')}</h3>
+      <h3 style="margin:0;font-size:1.25rem;font-weight:700">${esc(d.title || t('draft.untitled'))}</h3>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
       ${d.style  ? `<span class="badge" style="background:rgba(245,158,11,.15);color:var(--amber)">${esc(d.style)}</span>` : ''}
       ${d.volume ? `<span class="badge" style="background:var(--card2);color:var(--muted)">${d.volume} L</span>` : ''}
+      ${(() => { const s = d.status || 'idea'; const c = _DRAFT_STATUS_COLOR[s]; return `<span class="badge" style="background:color-mix(in srgb,${c} 15%,transparent);color:${c};border:1px solid color-mix(in srgb,${c} 30%,transparent)"><i class="fas ${_DRAFT_STATUS_ICON[s]}" style="font-size:.65rem"></i> ${esc(_draftStatusLabel(s))}</span>`; })()}
     </div>
 
     ${bannerHtml}
@@ -145,16 +162,44 @@ function renderDraftView() {
 
     ${ings.some(i => i.name) ? `
     <div style="margin-bottom:16px">
-      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">Ingrédients</div>
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px">${t('draft.ingredients')}</div>
       ${ingHtml}
     </div>` : ''}
 
     ${d.notes ? `
     <div style="margin-bottom:8px">
-      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px">Notes & idées</div>
-      <div style="font-size:.88rem;line-height:1.6;white-space:pre-wrap;color:var(--text)">${esc(d.notes)}</div>
+      <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px">${t('draft.field_notes')}</div>
+      <div class="view-notes">${renderMd(d.notes)}</div>
     </div>` : ''}
   `;
+}
+
+// ── Statut helpers ────────────────────────────────────────────────────────────
+const _DRAFT_STATUSES = ['idea', 'in_progress', 'ready'];
+const _DRAFT_STATUS_COLOR = { idea: 'var(--muted)', in_progress: 'var(--amber)', ready: '#10b981' };
+const _DRAFT_STATUS_ICON  = { idea: 'fa-lightbulb', in_progress: 'fa-pen-ruler', ready: 'fa-check-circle' };
+
+function _draftStatusLabel(s) {
+  if (s === 'in_progress') return t('draft.status_in_progress');
+  if (s === 'ready')       return t('draft.status_ready');
+  return t('draft.status_idea');
+}
+
+function _renderDraftStatusFilter() {
+  const bar = document.getElementById('draft-status-filter');
+  if (!bar) return;
+  const all = ['all', ..._DRAFT_STATUSES];
+  bar.innerHTML = all.map(s => {
+    const active = s === _draftStatusFilter;
+    const label  = s === 'all' ? t('draft.filter_all') : _draftStatusLabel(s);
+    const color  = s === 'all' ? 'var(--text)' : _DRAFT_STATUS_COLOR[s];
+    return `<button onclick="_draftStatusFilter='${s}';_renderDraftStatusFilter();renderBrouillons()"
+      style="font-size:.72rem;padding:3px 9px;border-radius:20px;border:1px solid ${active ? color : 'var(--border)'};
+        background:${active ? `color-mix(in srgb,${color} 15%,transparent)` : 'transparent'};
+        color:${active ? color : 'var(--muted)'};cursor:pointer;white-space:nowrap;transition:.15s">
+      ${s !== 'all' ? `<i class="fas ${_DRAFT_STATUS_ICON[s]}" style="font-size:.65rem"></i> ` : ''}${esc(label)}
+    </button>`;
+  }).join('');
 }
 
 // ── Liste ─────────────────────────────────────────────────────────────────────
@@ -163,13 +208,14 @@ function renderBrouillons() {
   const empty = document.getElementById('draft-list-empty');
   if (!list) return;
 
+  _renderDraftStatusFilter();
   const q = (document.getElementById('draft-search')?.value || '').toLowerCase();
   const total = S.drafts.length;
-  let shown = q
-    ? S.drafts.filter(d =>
-        (d.title || '').toLowerCase().includes(q) ||
-        (d.style  || '').toLowerCase().includes(q))
-    : [...S.drafts];
+  let shown = S.drafts.filter(d => {
+    if (_draftStatusFilter !== 'all' && (d.status || 'idea') !== _draftStatusFilter) return false;
+    if (q && !(d.title || '').toLowerCase().includes(q) && !(d.style || '').toLowerCase().includes(q)) return false;
+    return true;
+  });
 
   _draftSort = document.getElementById('draft-sort')?.value || _draftSort;
   const isManual = _draftSort === 'manual';
@@ -203,6 +249,13 @@ function renderBrouillons() {
       const color  = d.color || '#ff9500';
       const modDate = d.updated_at ? new Date(d.updated_at).toLocaleDateString(_lang || 'fr', { day:'2-digit', month:'short' }) : '';
       const active = d.id === _currentDraftId ? 'border-color:var(--accent)' : '';
+      const dStatus = d.status || 'idea';
+      const statusBadge = dStatus !== 'idea'
+        ? `<span style="font-size:.65rem;padding:1px 6px;border-radius:10px;flex-shrink:0;
+             background:color-mix(in srgb,${_DRAFT_STATUS_COLOR[dStatus]} 15%,transparent);
+             color:${_DRAFT_STATUS_COLOR[dStatus]};border:1px solid color-mix(in srgb,${_DRAFT_STATUS_COLOR[dStatus]} 35%,transparent)">
+            <i class="fas ${_DRAFT_STATUS_ICON[dStatus]}" style="font-size:.6rem"></i> ${esc(_draftStatusLabel(dStatus))}
+           </span>` : '';
       let ingCount = 0;
       try { ingCount = JSON.parse(d.ingredients || '[]').length; } catch(e) {}
 
@@ -246,6 +299,7 @@ function renderBrouillons() {
           </span>` : ''}
           <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
           <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.title || t('draft.untitled'))}</span>
+          ${statusBadge}
           <button class="btn btn-ghost btn-sm" style="padding:2px 6px;color:var(--danger);flex-shrink:0"
             onclick="event.stopPropagation();deleteDraft(${d.id})" title="${t('common.delete')}">
             <i class="fas fa-trash"></i>
@@ -301,15 +355,11 @@ function renderBrouillons() {
   updateBrouillonsBadge();
 }
 
-let _saveDraftOrderTimer = null;
-function saveDraftOrder() {
-  clearTimeout(_saveDraftOrderTimer);
-  _saveDraftOrderTimer = setTimeout(async () => {
-    try {
-      await api('PUT', '/api/drafts/reorder',
-        S.drafts.map((d, i) => ({ id: d.id, sort_order: i })));
-    } catch(e) { toast(t('inv.err_save_order'), 'error'); }
-  }, 600);
+async function saveDraftOrder() {
+  try {
+    await api('PUT', '/api/drafts/reorder',
+      S.drafts.map((d, i) => ({ id: d.id, sort_order: i })));
+  } catch(e) { toast(t('inv.err_save_order'), 'error'); }
 }
 
 function _showEditor(show) {
@@ -330,10 +380,19 @@ async function openDraft(id) {
   document.getElementById('draft-volume').value = d.volume || '';
   document.getElementById('draft-notes').value  = d.notes  || '';
   document.getElementById('draft-color').value  = d.color  || '#ff9500';
+  document.getElementById('draft-status').value = d.status || 'idea';
   document.getElementById('draft-save-status').textContent = '';
   _renderDraftEventLink(d.target_date || null, d.event_label || null);
-  // Image : affiche ce qui est en cache (null si pas encore chargé)
-  _setDraftImage(d.image || null, false);
+  // Galerie images — images incluses dans la réponse de liste depuis get_drafts
+  _draftImages = [];
+  _draftSelectedIdx = 0;
+  try { _draftImages = JSON.parse(d.images || '[]'); } catch(e) { _draftImages = []; }
+  if (!Array.isArray(_draftImages)) _draftImages = [];
+  if (d.image && _draftImages.length) {
+    const si = _draftImages.indexOf(d.image);
+    _draftSelectedIdx = si >= 0 ? si : 0;
+  }
+  renderDraftImageGallery();
   // Deserialize ingredients
   try { _draftIngredients = JSON.parse(d.ingredients || '[]'); } catch(e) { _draftIngredients = []; }
   _draftIngredients.forEach((ing, i) => { ing._rid = ing._rid || ++_draftIngRowId; });
@@ -341,17 +400,6 @@ async function openDraft(id) {
   _showEditor(true);
   setDraftMode('view');
   renderBrouillons(); // highlight selected card
-  // Lazy-load image si pas encore en cache (image exclue de la liste API)
-  if (!('image' in d)) {
-    try {
-      const full = await api('GET', `/api/drafts/${id}`);
-      d.image = full.image ?? null;
-      if (_currentDraftId === id) {
-        _setDraftImage(d.image || null, false);
-        if (_draftMode === 'view') renderDraftView();
-      }
-    } catch(e) { d.image = null; }
-  }
 }
 
 async function newDraft() {
@@ -379,8 +427,6 @@ function scheduleDraftSave() {
 
 async function saveDraft() {
   if (!_currentDraftId) return;
-  const imgEl  = document.getElementById('draft-img-preview');
-  const imgVal = (imgEl && imgEl.style.display !== 'none') ? (imgEl.src || null) : null;
   const payload = {
     title:       document.getElementById('draft-title').value.trim() || t('draft.new'),
     style:       document.getElementById('draft-style').value.trim() || null,
@@ -392,13 +438,22 @@ async function saveDraft() {
     color:       document.getElementById('draft-color').value || null,
     target_date: _currentDraftTargetDate  || null,
     event_label: _currentDraftEventLabel  || null,
-    image:       imgVal,
+    images:      JSON.stringify(_draftImages),
+    status:      document.getElementById('draft-status').value || 'idea',
   };
   try {
     const updated = await api('PUT', `/api/drafts/${_currentDraftId}`, payload);
     const idx = S.drafts.findIndex(d => d.id === _currentDraftId);
     if (idx !== -1) S.drafts[idx] = updated;
     S.drafts.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    // Sync _draftImages with server URLs (replaces any base64 blobs with /api/draft-images/ URLs)
+    try {
+      const serverImgs = JSON.parse(updated.images || '[]');
+      if (Array.isArray(serverImgs)) {
+        _draftImages = serverImgs;
+        renderDraftImageGallery();
+      }
+    } catch(_) {}
     const el = document.getElementById('draft-save-status');
     if (el) el.textContent = t('draft.auto_saved') + ' ✓';
     setTimeout(() => { const e = document.getElementById('draft-save-status'); if (e) e.textContent = ''; }, 2000);
@@ -559,7 +614,7 @@ function draftStyleSearch(input) {
     types.forEach(t => { if (!q || t.toLowerCase().includes(q)) commonMatches.push(t); });
   }
   if (commonMatches.length) {
-    html += `<div class="ing-suggest-cat">Styles courants</div>`;
+    html += `<div class="ing-suggest-cat">${t('rec.common_styles')}</div>`;
     commonMatches.slice(0, q ? 30 : 10).forEach(t => {
       html += `<div class="ing-suggest-item" onmousedown="selectDraftStyle(${JSON.stringify(t).replace(/"/g,'&quot;')})"><span>${esc(t)}</span></div>`;
       count++;
@@ -780,37 +835,130 @@ async function draftToRecipe() {
   }, 300);
 }
 
-// ── Image brouillon ───────────────────────────────────────────────────────────
-function _setDraftImage(dataUrl, save = true) {
-  const preview  = document.getElementById('draft-img-preview');
-  const empty    = document.getElementById('draft-img-empty');
-  const removeBtn = document.getElementById('draft-img-remove-btn');
-  if (!preview) return;
-  if (dataUrl) {
-    preview.src          = dataUrl;
-    preview.style.display = 'block';
-    if (empty)     empty.style.display     = 'none';
-    if (removeBtn) removeBtn.style.display = '';
-  } else {
-    preview.src          = '';
-    preview.style.display = 'none';
-    if (empty)     empty.style.display     = 'flex';
-    if (removeBtn) removeBtn.style.display = 'none';
+// ── Lightbox images brouillon ────────────────────────────────────────────────
+let _draftLbIdx = 0;
+
+function openDraftLightbox(idx) {
+  _draftLbIdx = idx;
+  _updateDraftLightbox();
+  const lb = document.getElementById('draft-lightbox');
+  if (!lb) return;
+  lb.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDraftLightbox() {
+  const lb = document.getElementById('draft-lightbox');
+  if (lb) lb.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function draftLbNav(dir) {
+  if (!_draftImages.length) return;
+  _draftLbIdx = (_draftLbIdx + dir + _draftImages.length) % _draftImages.length;
+  _updateDraftLightbox();
+}
+
+function _updateDraftLightbox() {
+  const img     = document.getElementById('draft-lb-img');
+  const counter = document.getElementById('draft-lb-counter');
+  const prev    = document.getElementById('draft-lb-prev');
+  const next    = document.getElementById('draft-lb-next');
+  if (!img) return;
+  img.src = _draftImages[_draftLbIdx] || '';
+  const multi = _draftImages.length > 1;
+  if (counter) counter.textContent = multi ? `${_draftLbIdx + 1} / ${_draftImages.length}` : '';
+  if (prev) prev.style.display = multi ? 'flex' : 'none';
+  if (next) next.style.display = multi ? 'flex' : 'none';
+}
+
+document.addEventListener('keydown', e => {
+  const lb = document.getElementById('draft-lightbox');
+  if (!lb || lb.style.display === 'none') return;
+  if (e.key === 'Escape')      { e.stopPropagation(); closeDraftLightbox(); }
+  else if (e.key === 'ArrowLeft')  draftLbNav(-1);
+  else if (e.key === 'ArrowRight') draftLbNav(1);
+}, true);
+
+// ── Galerie d'images du brouillon ─────────────────────────────────────────────
+function renderDraftImageGallery() {
+  const gallery = document.getElementById('draft-img-gallery');
+  if (!gallery) return;
+  const S = 88; // tile size px
+  const tiles = _draftImages.map((src, idx) => {
+    const sel = idx === _draftSelectedIdx;
+    return `<div style="position:relative;width:${S}px;height:${S}px;flex-shrink:0;border-radius:8px;
+              overflow:hidden;border:2px solid ${sel ? 'var(--accent)' : 'var(--border)'};
+              cursor:pointer;transition:border-color .15s"
+              onclick="selectDraftImage(${idx})" title="${esc(t('draft.img_select'))}">
+      <img src="${src}" style="width:100%;height:100%;object-fit:cover;display:block" draggable="false">
+      ${sel ? `<span style="position:absolute;bottom:3px;right:3px;background:var(--accent);color:#fff;
+        border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;
+        font-size:.55rem;pointer-events:none"><i class="fas fa-check"></i></span>` : ''}
+      <button onclick="event.stopPropagation();openDraftLightbox(${idx})"
+        title="${esc(t('common.zoom_in') || '🔍')}"
+        style="position:absolute;top:3px;left:3px;background:rgba(0,0,0,.6);border:none;border-radius:50%;
+          width:20px;height:20px;display:flex;align-items:center;justify-content:center;
+          cursor:zoom-in;padding:0;color:#fff;font-size:.6rem">
+        <i class="fas fa-magnifying-glass-plus"></i>
+      </button>
+      <button onclick="event.stopPropagation();removeDraftImageAt(${idx})"
+        title="${esc(t('draft.img_remove'))}"
+        style="position:absolute;top:3px;right:3px;background:rgba(0,0,0,.6);border:none;border-radius:50%;
+          width:20px;height:20px;display:flex;align-items:center;justify-content:center;
+          cursor:pointer;padding:0;color:#fff;font-size:.6rem">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>`;
+  });
+  // Tile "ajouter"
+  tiles.push(`<div onclick="document.getElementById('draft-img-input').click()"
+    title="${esc(t('draft.img_click_add'))}"
+    style="width:${S}px;height:${S}px;flex-shrink:0;border-radius:8px;border:2px dashed var(--border);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+      color:var(--muted);cursor:pointer;transition:border-color .15s"
+    onmouseenter="this.style.borderColor='var(--accent)'"
+    onmouseleave="this.style.borderColor='var(--border)'">
+    <i class="fas fa-plus" style="font-size:1.1rem;opacity:.4"></i>
+    <span style="font-size:.65rem;opacity:.5">${esc(t('draft.img_click_add'))}</span>
+  </div>`);
+  gallery.innerHTML = tiles.join('');
+}
+
+function selectDraftImage(idx) {
+  if (idx === _draftSelectedIdx) return;
+  _draftSelectedIdx = idx;
+  renderDraftImageGallery();
+  if (_draftMode === 'view') renderDraftView();
+  scheduleDraftSave();
+}
+
+function addDraftImage(dataUrl) {
+  if (!dataUrl) return;
+  _draftImages.push(dataUrl);
+  _draftSelectedIdx = _draftImages.length - 1;
+  renderDraftImageGallery();
+  if (_draftMode === 'view') renderDraftView();
+  scheduleDraftSave();
+}
+
+function removeDraftImageAt(idx) {
+  _draftImages.splice(idx, 1);
+  if (_draftSelectedIdx >= _draftImages.length) {
+    _draftSelectedIdx = Math.max(0, _draftImages.length - 1);
   }
-  if (save) scheduleDraftSave();
+  renderDraftImageGallery();
+  if (_draftMode === 'view') renderDraftView();
+  scheduleDraftSave();
 }
 
 function loadDraftImageFile(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => _setDraftImage(e.target.result);
+  reader.onload = e => addDraftImage(e.target.result);
   reader.readAsDataURL(file);
   input.value = '';
-}
-
-function removeDraftImage() {
-  _setDraftImage(null);
 }
 
 async function generateDraftImage() {
@@ -845,7 +993,7 @@ async function generateDraftImage() {
     } else {
       b64 = await _aiGenerateOpenAI(imgApiKey, ai.model || 'gpt-image-1', '1024x1024', ai.quality || 'auto', prompt);
     }
-    _setDraftImage(`data:${mime};base64,${b64}`);
+    addDraftImage(`data:${mime};base64,${b64}`);
     toast(t('settings.ai.img_generated'), 'success');
   } catch(e) {
     toast(t('settings.ai.img_err') + ' ' + (e.message || String(e)), 'error');
@@ -958,7 +1106,7 @@ Types autorisés : "malt", "houblon", "levure", "autre". Adapte les quantités p
       }
       const result = await resp.json();
       if (!result.candidates?.length) {
-        throw new Error(result.promptFeedback?.blockReason || 'Réponse vide');
+        throw new Error(result.promptFeedback?.blockReason || t('draft.ai_empty_response'));
       }
       recipe = JSON.parse(result.candidates[0].content.parts[0].text);
     }
@@ -983,7 +1131,7 @@ Types autorisés : "malt", "houblon", "levure", "autre". Adapte les quantités p
     if (recipe.notes) {
       const notesEl  = document.getElementById('draft-notes');
       const existing = notesEl.value.trim();
-      notesEl.value  = existing ? `${existing}\n\n— Suggestion IA (${provLabel}) —\n${recipe.notes}` : recipe.notes;
+      notesEl.value  = existing ? `${existing}\n\n${t('draft.ai_notes_sep').replace('${prov}', provLabel)}\n${recipe.notes}` : recipe.notes;
     }
 
     scheduleDraftSave();

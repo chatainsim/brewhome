@@ -64,6 +64,12 @@ def create_catalog_item():
         return jsonify(dict(row)), 201
 
 
+_TRACKED_FIELDS = ('name', 'alpha', 'ebc', 'gu', 'subcategory', 'yeast_type',
+                   'temp_min', 'temp_max', 'dosage_per_liter',
+                   'attenuation_min', 'attenuation_max', 'alcohol_tolerance',
+                   'max_usage_pct', 'aroma_spec', 'default_unit')
+
+
 @bp.route('/api/catalog/<int:item_id>', methods=['PUT'])
 def update_catalog_item(item_id):
     d = request.json or {}
@@ -71,7 +77,23 @@ def update_catalog_item(item_id):
     if errors:
         return api_error('validation', 400, fields=errors)
     with get_db() as conn:
-        cur = conn.execute(
+        old = conn.execute('SELECT * FROM ingredient_catalog WHERE id=?', (item_id,)).fetchone()
+        if not old:
+            return api_error('not_found', 404)
+
+        # Record only fields that are present in the request AND have changed value
+        changes = [
+            {'field': f, 'old': old[f], 'new': d[f]}
+            for f in _TRACKED_FIELDS
+            if f in d and d[f] != old[f]
+        ]
+        if changes:
+            conn.execute(
+                'INSERT INTO catalog_history (catalog_item_id, item_name, changes) VALUES (?, ?, ?)',
+                (item_id, old['name'], json.dumps(changes))
+            )
+
+        conn.execute(
             '''UPDATE ingredient_catalog
                SET name=?, subcategory=?, ebc=?, gu=?, alpha=?, yeast_type=?, default_unit=?,
                    temp_min=?, temp_max=?, dosage_per_liter=?,
@@ -84,10 +106,27 @@ def update_catalog_item(item_id):
              d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
              d.get('max_usage_pct'), d.get('aroma_spec'), item_id)
         )
-        if cur.rowcount == 0:
-            return api_error('not_found', 404)
         row = conn.execute('SELECT * FROM ingredient_catalog WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
+
+
+@bp.route('/api/catalog/<int:item_id>/history')
+def get_catalog_item_history(item_id):
+    """Retourne les 50 dernières modifications d'un élément du catalogue."""
+    with get_db() as conn:
+        if not conn.execute('SELECT 1 FROM ingredient_catalog WHERE id=?', (item_id,)).fetchone():
+            return api_error('not_found', 404)
+        rows = conn.execute(
+            'SELECT id, item_name, changes, changed_at FROM catalog_history'
+            ' WHERE catalog_item_id=? ORDER BY changed_at DESC LIMIT 50',
+            (item_id,)
+        ).fetchall()
+        result = []
+        for r in rows:
+            entry = dict(r)
+            entry['changes'] = json.loads(entry['changes'])
+            result.append(entry)
+        return jsonify(result)
 
 
 @bp.route('/api/catalog/<int:item_id>', methods=['DELETE'])

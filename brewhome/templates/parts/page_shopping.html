@@ -1,0 +1,61 @@
+<div class="page" id="page-shopping">
+  <div class="section-head">
+    <h2 data-i18n="shop.title">Liste de courses</h2>
+    <div class="actions" style="gap:8px">
+      <button class="btn btn-ghost" id="shop-clear-checked-btn" onclick="withBtn(this, shopClearChecked)" style="display:none">
+        <i class="fas fa-trash-can"></i> <span id="shop-clear-label" data-i18n="shop.clear_checked">Supprimer les cochés</span>
+      </button>
+      <button class="btn btn-primary" id="shop-buy-btn" onclick="withBtn(this, shopBuyChecked)" style="display:none">
+        <i class="fas fa-basket-shopping"></i> <span id="shop-buy-label" data-i18n="shop.buy_checked">Valider les achats</span>
+      </button>
+      <button class="btn btn-ghost" onclick="shopExport()" title="" data-i18n-title="shop.export">
+        <i class="fas fa-share-nodes"></i>
+      </button>
+      <button class="btn btn-ghost" onclick="openShopRecipeModal()">
+        <i class="fas fa-book-open"></i> <span data-i18n="shop.from_recipe">Depuis une recette</span>
+      </button>
+      <button class="btn btn-primary" onclick="openShopModal()">
+        <i class="fas fa-plus"></i> <span data-i18n="shop.add">Ajouter</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Bannière alertes stock (#14) -->
+  <div id="shop-alert-banner"></div>
+
+  <!-- Filtres + recherche -->
+  <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-ghost shop-filter-btn active" data-filter="all" onclick="setShopFilter('all')" data-i18n="shop.filter_all">Tout</button>
+    <button class="btn btn-ghost shop-filter-btn" data-filter="pending" onclick="setShopFilter('pending')" data-i18n="shop.filter_pending">À acheter</button>
+    <button class="btn btn-ghost shop-filter-btn" data-filter="checked" onclick="setShopFilter('checked')" data-i18n="shop.filter_checked">Achetés</button>
+  </div>
+  <div style="position:relative;margin-bottom:14px">
+    <input type="text" id="shop-search-input" autocomplete="off"
+      style="width:100%;padding-right:32px"
+      oninput="setShopSearch(this.value)"
+      data-i18n-placeholder="shop.search_ph" placeholder="Rechercher dans la liste…">
+    <button id="shop-search-clear" onclick="clearShopSearch()"
+      style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:1.1rem;line-height:1;padding:0">×</button>
+  </div>
+
+  <div id="shopping-list-container"></div>
+
+  <div id="shopping-empty" style="display:none">
+    <div class="empty-state">
+      <div class="empty-state-icon" style="background:rgba(245,158,11,.12)"><i class="fas fa-cart-shopping" style="color:var(--amber)"></i></div>
+      <div class="empty-state-title" data-i18n="shop.empty_title">Liste de courses vide</div>
+      <div class="empty-state-sub" data-i18n="shop.empty_sub">Ajoutez les ingrédients à acheter pour votre prochaine bière</div>
+      <div class="empty-state-actions">
+        <button class="btn btn-primary" onclick="openShopModal()"><i class="fas fa-plus"></i> <span data-i18n="shop.add">Ajouter</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Historique des achats (#12) -->
+  <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--border)">
+    <button class="btn btn-ghost" id="shop-history-btn" onclick="toggleShopHistory()" style="font-size:.82rem;color:var(--muted)">
+      <i class="fas fa-clock-rotate-left"></i> <span data-i18n="shop.history_show">Voir l'historique</span>
+    </button>
+    <div id="shop-history-panel" style="display:none;margin-top:12px"></div>
+  </div>
+</div>

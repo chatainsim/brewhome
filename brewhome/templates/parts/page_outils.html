@@ -148,6 +148,36 @@
       <div id="ot-strike-note" style="display:none;margin-top:10px;font-size:.8rem;color:var(--muted);background:var(--card2);border-radius:8px;padding:10px 14px"></div>
     </div>
 
+    <!-- ── Calculateur de bouteilles ────────────────────────────────────────── -->
+    <div class="card">
+      <div class="section-label" style="margin-bottom:8px">
+        <i class="fas fa-wine-bottle" style="color:var(--hop)"></i>
+        <span data-i18n="ot.bottles_title">Nombre de bouteilles</span>
+      </div>
+      <div class="ot-hint" data-i18n="ot.bottles_hint">
+        Modifiez un nombre pour recalculer l'autre automatiquement.
+      </div>
+      <div class="field" style="margin-bottom:16px">
+        <label data-i18n="ot.bottles_vol">Volume (L)</label>
+        <input type="number" id="ot-bottles-vol" step="0.5" min="0.5" max="5000" placeholder="20" oninput="calcBottles(null)">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+        <div style="background:var(--card2);border-radius:10px;padding:12px 14px">
+          <div style="font-size:.75rem;color:var(--hop);font-weight:600;margin-bottom:8px;text-align:center" data-i18n="ot.bottles_33">33 cl</div>
+          <input type="number" id="ot-bottles-n33" min="0" step="1" placeholder="—"
+                 style="width:100%;text-align:center;font-size:1.5rem;font-weight:700;color:var(--hop);background:transparent;border:none;border-bottom:1px solid color-mix(in srgb,var(--hop) 30%,transparent);outline:none;padding:4px 0"
+                 oninput="calcBottles('33')">
+        </div>
+        <div style="background:var(--card2);border-radius:10px;padding:12px 14px">
+          <div style="font-size:.75rem;color:var(--amber);font-weight:600;margin-bottom:8px;text-align:center" data-i18n="ot.bottles_75">75 cl</div>
+          <input type="number" id="ot-bottles-n75" min="0" step="1" placeholder="—"
+                 style="width:100%;text-align:center;font-size:1.5rem;font-weight:700;color:var(--amber);background:transparent;border:none;border-bottom:1px solid color-mix(in srgb,var(--amber) 30%,transparent);outline:none;padding:4px 0"
+                 oninput="calcBottles('75')">
+        </div>
+      </div>
+      <div id="ot-bottles-summary" style="font-size:.82rem;text-align:center;min-height:1.2em;color:var(--muted)"></div>
+    </div>
+
     <!-- ── Calculateur de primage ───────────────────────────────────────────── -->
     <div class="card" style="grid-column:1/-1;max-width:560px;justify-self:center;width:100%">
       <div class="section-label" style="margin-bottom:16px">

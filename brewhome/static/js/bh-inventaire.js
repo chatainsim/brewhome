@@ -885,11 +885,12 @@ function renderDashboard() {
   }
 
   // ── Colonne gauche : Top recettes + Top bières + Stats styles ─────────────
+  const recByIdDash = new Map(S.recipes.map(r => [r.id, r]));
   const rated = [...recipes].filter(r => r.rating).sort((a,b) => b.rating-a.rating).slice(0,5);
   const ratedBeers = [...beers].filter(b => b.taste_rating).sort((a,b) => b.taste_rating - a.taste_rating).slice(0,5);
   const styleCounts = {};
   brews.forEach(b => {
-    const r = S.recipes.find(x => x.id === b.recipe_id);
+    const r = recByIdDash.get(b.recipe_id);
     if (r?.style) styleCounts[r.style] = (styleCounts[r.style]||0) + 1;
   });
   const topStyles = Object.entries(styleCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -1052,6 +1053,7 @@ function _destroyStatsCharts() {
 function renderStatsPage() {
   _destroyStatsCharts();
   const allCompleted = S.brews.filter(b => !b.archived && b.status === 'completed' && b.brew_date);
+  const recById = new Map(S.recipes.map(r => [r.id, r]));
 
   // Build year list
   const years = [...new Set(allCompleted.map(b => b.brew_date.slice(0,4)))].sort().reverse();
@@ -1127,7 +1129,7 @@ function renderStatsPage() {
   // ── Styles chart ──
   const styleCounts = {};
   filtered.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     const style = rec?.style || (b.recipe_style) || null;
     if (style) styleCounts[style] = (styleCounts[style]||0) + 1;
   });
@@ -1345,7 +1347,7 @@ function renderStatsPage() {
   // ── Fermentation moyenne par année ─────────────────────────────────────────
   const fermByYear = {};
   allCompleted.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     if (rec?.ferm_time) {
       const y = b.brew_date.slice(0,4);
       if (!fermByYear[y]) fermByYear[y] = [];
@@ -1369,8 +1371,8 @@ function renderStatsPage() {
   const fgBrews  = filtered.filter(b => b.fg);
   const avgOg    = ogBrews.length  ? ogBrews.reduce((s,b)  => s + b.og, 0)  / ogBrews.length  : null;
   const avgFg    = fgBrews.length  ? fgBrews.reduce((s,b)  => s + b.fg, 0)  / fgBrews.length  : null;
-  const effBrews = filtered.filter(b => { const r = S.recipes.find(r => r.id === b.recipe_id); return r?.brewhouse_efficiency; });
-  const avgEff   = effBrews.length ? effBrews.reduce((s,b) => { const r = S.recipes.find(r => r.id === b.recipe_id); return s + r.brewhouse_efficiency; }, 0) / effBrews.length : null;
+  const effBrews = filtered.filter(b => recById.get(b.recipe_id)?.brewhouse_efficiency);
+  const avgEff   = effBrews.length ? effBrews.reduce((s,b) => s + recById.get(b.recipe_id).brewhouse_efficiency, 0) / effBrews.length : null;
   const cplBrews = filtered.filter(b => { const c = brewCost(b); return c?.total > 0 && b.volume_brewed > 0; });
   const avgCpl   = cplBrews.length ? cplBrews.reduce((s,b) => { const c = brewCost(b); return s + c.total / b.volume_brewed; }, 0) / cplBrews.length : null;
 
@@ -1386,7 +1388,7 @@ function renderStatsPage() {
   // ── Top malts ─────────────────────────────────────────────────────────────
   const maltUsage = {}, hopUsage = {};
   filtered.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     if (!rec?.ingredients) return;
     rec.ingredients.forEach(ing => {
       const qg = ing.unit === 'kg' ? ing.quantity * 1000 : (ing.quantity || 0);
@@ -1425,7 +1427,7 @@ function renderStatsPage() {
   // ── Efficacité par année ──────────────────────────────────────────────────
   const effByYear = {};
   filtered.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     if (rec?.brewhouse_efficiency) {
       const y = b.brew_date.slice(0,4);
       if (!effByYear[y]) effByYear[y] = [];
@@ -1472,7 +1474,7 @@ function renderStatsPage() {
   // ── Top levures ───────────────────────────────────────────────────────────
   const yeastUsage = {};
   filtered.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     if (!rec?.ingredients) return;
     rec.ingredients.filter(i => i.category === 'levure').forEach(i => {
       yeastUsage[i.name] = (yeastUsage[i.name] || 0) + 1;
@@ -1524,7 +1526,7 @@ function renderStatsPage() {
     // IBU + EBC moyens
     let ibuSum = 0, ibuCount = 0, ebcSum = 0, ebcCount = 0;
     filtered.forEach(b => {
-      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      const rec = recById.get(b.recipe_id);
       if (!rec) return;
       const { ibu, ebc } = _labelIbuEbc(rec);
       if (ibu != null) { ibuSum += ibu; ibuCount++; }
@@ -1533,7 +1535,7 @@ function renderStatsPage() {
     const avgIbu = ibuCount ? Math.round(ibuSum / ibuCount) : null;
     const avgEbc = ebcCount ? Math.round(ebcSum / ebcCount) : null;
     // Styles distincts
-    const stylesSet = new Set(filtered.map(b => { const r = S.recipes.find(r => r.id === b.recipe_id); return r?.style||null; }).filter(Boolean));
+    const stylesSet = new Set(filtered.map(b => recById.get(b.recipe_id)?.style || null).filter(Boolean));
 
     brewKpisEl.innerHTML =
       `<div class="stat"><div class="stat-val" style="color:var(--info)">${cadence != null ? cadence+'j' : '—'}</div>` +
@@ -1658,7 +1660,7 @@ function renderStatsPage() {
           '<th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">' + t('stat.tbl_rating') + '</th>' +
         '</tr></thead><tbody>' +
         tableRows.map((b, i) => {
-          const rec = S.recipes.find(r => r.id === b.recipe_id);
+          const rec = recById.get(b.recipe_id);
           return '<tr style="border-bottom:1px solid var(--border);' + (i%2===1?'background:rgba(255,255,255,.02)':'') + '">' +
             '<td style="padding:6px 8px;font-weight:600">' + esc(b.name||'—') + '</td>' +
             '<td style="padding:6px 8px;color:var(--muted);white-space:nowrap">' + (b.brew_date||'—') + '</td>' +
@@ -1680,7 +1682,7 @@ function renderStatsPage() {
       .filter(b => b.brew_date)
       .sort((a, b) => a.brew_date.localeCompare(b.brew_date))
       .map(b => {
-        const rec = S.recipes.find(r => r.id === b.recipe_id);
+        const rec = recById.get(b.recipe_id);
         const { ibu } = _labelIbuEbc(rec);
         const label = b.name.length > 18 ? b.name.slice(0, 16) + '…' : b.name;
         return { label, abv: b.abv || null, ibu: ibu ?? null };
@@ -1728,7 +1730,7 @@ function renderStatsPage() {
     const UTIL_COLORS = { malt: 'var(--malt)', houblon: 'var(--hop)', levure: 'var(--yeast)', autre: 'var(--other)' };
     const usedNames = { malt: new Set(), houblon: new Set(), levure: new Set(), autre: new Set() };
     allCompleted.forEach(b => {
-      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      const rec = recById.get(b.recipe_id);
       if (!rec?.ingredients) return;
       rec.ingredients.forEach(ing => {
         if (usedNames[ing.category] != null) usedNames[ing.category].add(ing.name.toLowerCase());
@@ -1869,14 +1871,14 @@ function renderStatsPage() {
 
     // ── Efficacité réelle vs prévue ──────────────────────────────────────────
     const effActual  = advBrews.map(b => {
-      const rec    = S.recipes.find(r => r.id === b.recipe_id);
+      const rec    = recById.get(b.recipe_id);
       if (!rec || !b.og || !(b.volume_brewed > 0)) return null;
       const maxPts = typeof _recMaxExtract === 'function' ? _recMaxExtract(rec) : 0;
       if (!maxPts) return null;
       return +((b.og - 1) * 1000 * b.volume_brewed / maxPts * 100).toFixed(1);
     });
     const effPlanned = advBrews.map(b => {
-      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      const rec = recById.get(b.recipe_id);
       return rec?.brewhouse_efficiency ?? null;
     });
     const brewEffCanvas = document.getElementById('stats-brew-eff-chart');
@@ -1960,7 +1962,7 @@ function renderStatsPage() {
     const advTableEl = document.getElementById('stats-adv-table');
     if (advTableEl) {
       const rows = advBrews.slice().reverse().map(b => {
-        const rec    = S.recipes.find(r => r.id === b.recipe_id);
+        const rec    = recById.get(b.recipe_id);
         const maxPts = (rec && typeof _recMaxExtract === 'function') ? _recMaxExtract(rec) : 0;
         const theo   = (rec && typeof _recTheoretical === 'function') ? _recTheoretical(rec) : null;
         const actEff = maxPts && b.og && b.volume_brewed

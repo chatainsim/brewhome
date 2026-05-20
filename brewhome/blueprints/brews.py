@@ -3,12 +3,15 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime
-from flask import Blueprint, jsonify, request, send_from_directory
+from flask import Blueprint, jsonify, make_response, request, send_from_directory
 from db import get_db, _log, _log_inv, PHOTOS_DIR
-from helpers import _to_base, _from_base, _make_thumb, _image_too_large, _shrink_image_b64, _b64_to_jpeg_file, _make_thumb_file, validate, api_error
+from helpers import _to_base, _from_base, _to_kg, _make_thumb, _image_too_large, _shrink_image_b64, _b64_to_jpeg_file, _make_thumb_file, validate, api_error
 from constants import BrewStatus
 
 bp = Blueprint('brews', __name__)
+
+_BREWS_DEFAULT_LIMIT = 200
+_BREWS_MAX_LIMIT     = 500
 
 
 def _compute_efficiency(conn, recipe_id, og, volume_brewed):
@@ -26,10 +29,7 @@ def _compute_efficiency(conn, recipe_id, og, volume_brewed):
              AND ic.gu IS NOT NULL''',
         (recipe_id,)
     ).fetchall()
-    max_pts = sum(
-        (r['quantity'] if r['unit'] == 'kg' else r['quantity'] / 1000) * r['gu']
-        for r in rows
-    )
+    max_pts = sum(_to_kg(r['quantity'], r['unit']) * r['gu'] for r in rows)
     if max_pts <= 0:
         return None
     eff = round((og - 1) * 1000 * volume_brewed / max_pts * 100, 1)
@@ -50,22 +50,30 @@ _BREW_SCHEMA = {
 
 @bp.route('/api/brews', methods=['GET'])
 def get_brews():
+    try:
+        limit  = min(max(1, int(request.args.get('limit',  _BREWS_DEFAULT_LIMIT))), _BREWS_MAX_LIMIT)
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (ValueError, TypeError):
+        return api_error('validation', 400, detail='limit and offset must be integers')
     with get_db() as conn:
+        total = conn.execute(
+            'SELECT COUNT(*) FROM brews WHERE deleted_at IS NULL'
+        ).fetchone()[0]
         rows = conn.execute(
             '''WITH
-                 ferm_cnt AS (
+                 ferm_cnt AS MATERIALIZED (
                    SELECT brew_id, COUNT(*) AS fermentation_count
                    FROM brew_fermentation_readings GROUP BY brew_id
                  ),
-                 photo_cnt AS (
+                 photo_cnt AS MATERIALIZED (
                    SELECT brew_id, COUNT(*) AS photo_count
                    FROM brew_photos GROUP BY brew_id
                  ),
-                 log_cnt AS (
+                 log_cnt AS MATERIALIZED (
                    SELECT brew_id, COUNT(*) AS log_count
                    FROM brew_log GROUP BY brew_id
                  ),
-                 beer_agg AS (
+                 beer_agg AS MATERIALIZED (
                    SELECT brew_id,
                           MIN(CASE WHEN bottling_date IS NOT NULL THEN bottling_date END) AS bottling_date,
                           SUM(CASE WHEN archived=0
@@ -73,7 +81,7 @@ def get_brews():
                                    ELSE 0 END) AS cave_liters
                    FROM beers WHERE brew_id IS NOT NULL GROUP BY brew_id
                  ),
-                 cons_agg AS (
+                 cons_agg AS MATERIALIZED (
                    SELECT bx.brew_id,
                           MIN(c.ts) AS first_consumption,
                           MAX(c.ts) AS last_consumption
@@ -100,9 +108,13 @@ def get_brews():
                LEFT JOIN beer_agg  ba   ON ba.brew_id=b.id
                LEFT JOIN cons_agg  ca   ON ca.brew_id=b.id
                WHERE b.deleted_at IS NULL
-               ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC'''
+               ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC
+               LIMIT ? OFFSET ?''',
+            (limit, offset)
         ).fetchall()
-        return jsonify([dict(r) for r in rows])
+        resp = make_response(jsonify([dict(r) for r in rows]))
+        resp.headers['X-Total-Count'] = total
+        return resp
 
 
 @bp.route('/api/brews/reorder', methods=['PUT'])
@@ -133,124 +145,123 @@ def _do_create_brew():
         return api_error('validation', 400, fields=errors)
     deduct = d.get('deduct_stock', True)
 
-    conn = get_db()
+    with get_db() as conn:
+        # ── Pre-flight stock check (read-only, no lock needed) ────────────────
+        ings = []
+        if deduct:
+            ings = conn.execute(
+                '''SELECT ri.*, ii.quantity as stock_qty, ii.unit as inv_unit
+                   FROM recipe_ingredients ri
+                   LEFT JOIN inventory_items ii ON ri.inventory_item_id=ii.id
+                   WHERE ri.recipe_id=?''',
+                (recipe_id,)
+            ).fetchall()
 
-    # ── Pre-flight stock check (read-only, no lock needed) ────────────────────
-    ings = []
-    if deduct:
-        ings = conn.execute(
-            '''SELECT ri.*, ii.quantity as stock_qty, ii.unit as inv_unit
-               FROM recipe_ingredients ri
-               LEFT JOIN inventory_items ii ON ri.inventory_item_id=ii.id
-               WHERE ri.recipe_id=?''',
-            (recipe_id,)
-        ).fetchall()
+            insufficient = []
+            for i in ings:
+                if not i['inventory_item_id']:
+                    continue
+                inv_unit    = i['inv_unit'] or i['unit']
+                needed_base = _to_base(i['quantity'], i['unit'])
+                stock_base  = _to_base(i['stock_qty'] or 0, inv_unit)
+                if stock_base < needed_base:
+                    available_disp = round(_from_base(stock_base, i['unit']), 6)
+                    insufficient.append({
+                        'name': i['name'],
+                        'needed': i['quantity'],
+                        'available': available_disp,
+                        'unit': i['unit'],
+                        'category': i['category'],
+                    })
 
-        insufficient = []
-        for i in ings:
-            if not i['inventory_item_id']:
-                continue
-            inv_unit    = i['inv_unit'] or i['unit']
-            needed_base = _to_base(i['quantity'], i['unit'])
-            stock_base  = _to_base(i['stock_qty'] or 0, inv_unit)
-            if stock_base < needed_base:
-                available_disp = round(_from_base(stock_base, i['unit']), 6)
-                insufficient.append({
-                    'name': i['name'],
-                    'needed': i['quantity'],
-                    'available': available_disp,
-                    'unit': i['unit'],
-                    'category': i['category'],
-                })
+            if insufficient and not d.get('force', False):
+                return api_error('stock_insuffisant', 409, items=insufficient)
 
-        if insufficient and not d.get('force', False):
-            return api_error('stock_insuffisant', 409, items=insufficient)
-
-    # ── Batch number uniqueness check (non-archived, non-deleted brews only) ──
-    batch_num = d.get('batch_number') if d.get('batch_number') else None
-    if batch_num is not None:
-        dup = conn.execute(
-            'SELECT id FROM brews WHERE batch_number=? AND deleted_at IS NULL AND archived=0',
-            (batch_num,)
-        ).fetchone()
-        if dup:
-            return api_error('duplicate_batch_number', 409, detail=str(batch_num))
-
-    # ── Atomic write: stock deduction + brew creation in one transaction ──────
-    # BEGIN IMMEDIATE takes the write lock upfront — no TOCTOU between the
-    # stock check above and the UPDATE below, and no partial state on error.
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        # Re-read all stocks under the write lock before any deduction (TOCTOU fix)
-        locked_insufficient = []
-        locked_stocks = {}  # inventory_item_id -> (stock_base, inv_unit)
-        for ing in ings:
-            if not ing['inventory_item_id']:
-                continue
-            inv_unit    = ing['inv_unit'] or ing['unit']
-            needed_base = _to_base(ing['quantity'], ing['unit'])
-            fresh = conn.execute(
-                'SELECT quantity FROM inventory_items WHERE id=?',
-                (ing['inventory_item_id'],)
+        # ── Batch number uniqueness check ─────────────────────────────────────
+        batch_num = d.get('batch_number') if d.get('batch_number') else None
+        if batch_num is not None:
+            dup = conn.execute(
+                'SELECT id FROM brews WHERE batch_number=? AND deleted_at IS NULL AND archived=0',
+                (batch_num,)
             ).fetchone()
-            stock_base = _to_base(fresh['quantity'] if fresh else 0, inv_unit)
-            locked_stocks[ing['inventory_item_id']] = (stock_base, inv_unit)
-            if stock_base < needed_base:
-                locked_insufficient.append({
-                    'name':      ing['name'],
-                    'needed':    ing['quantity'],
-                    'available': round(_from_base(stock_base, ing['unit']), 6),
-                    'unit':      ing['unit'],
-                    'category':  ing['category'],
-                })
+            if dup:
+                return api_error('duplicate_batch_number', 409, detail=str(batch_num))
 
-        if locked_insufficient and not d.get('force', False):
-            conn.execute("ROLLBACK")
-            return api_error('stock_insuffisant', 409, items=locked_insufficient)
+        # ── Atomic write: stock deduction + brew creation in one transaction ──
+        # BEGIN IMMEDIATE takes the write lock upfront — no TOCTOU between the
+        # stock check above and the UPDATE below, and no partial state on error.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Re-read all stocks under the write lock before any deduction (TOCTOU fix)
+            locked_insufficient = []
+            locked_stocks = {}  # inventory_item_id -> (stock_base, inv_unit)
+            for ing in ings:
+                if not ing['inventory_item_id']:
+                    continue
+                inv_unit    = ing['inv_unit'] or ing['unit']
+                needed_base = _to_base(ing['quantity'], ing['unit'])
+                fresh = conn.execute(
+                    'SELECT quantity FROM inventory_items WHERE id=?',
+                    (ing['inventory_item_id'],)
+                ).fetchone()
+                stock_base = _to_base(fresh['quantity'] if fresh else 0, inv_unit)
+                locked_stocks[ing['inventory_item_id']] = (stock_base, inv_unit)
+                if stock_base < needed_base:
+                    locked_insufficient.append({
+                        'name':      ing['name'],
+                        'needed':    ing['quantity'],
+                        'available': round(_from_base(stock_base, ing['unit']), 6),
+                        'unit':      ing['unit'],
+                        'category':  ing['category'],
+                    })
 
-        _inv_log_pending = []
-        for ing in ings:
-            if not ing['inventory_item_id']:
-                continue
-            inv_unit    = ing['inv_unit'] or ing['unit']
-            needed_base = _to_base(ing['quantity'], ing['unit'])
-            stock_base, _ = locked_stocks[ing['inventory_item_id']]
-            new_base = max(0.0, stock_base - needed_base)
-            new_qty  = round(_from_base(new_base, inv_unit), 6)
-            old_qty  = round(_from_base(stock_base, inv_unit), 6)
-            conn.execute(
-                'UPDATE inventory_items SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                (new_qty, ing['inventory_item_id'])
+            if locked_insufficient and not d.get('force', False):
+                conn.execute("ROLLBACK")
+                return api_error('stock_insuffisant', 409, items=locked_insufficient)
+
+            _inv_log_pending = []
+            for ing in ings:
+                if not ing['inventory_item_id']:
+                    continue
+                inv_unit    = ing['inv_unit'] or ing['unit']
+                needed_base = _to_base(ing['quantity'], ing['unit'])
+                stock_base, _ = locked_stocks[ing['inventory_item_id']]
+                new_base = max(0.0, stock_base - needed_base)
+                new_qty  = round(_from_base(new_base, inv_unit), 6)
+                old_qty  = round(_from_base(stock_base, inv_unit), 6)
+                conn.execute(
+                    'UPDATE inventory_items SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                    (new_qty, ing['inventory_item_id'])
+                )
+                _inv_log_pending.append((ing['inventory_item_id'], new_qty - old_qty, old_qty, new_qty))
+
+            actual_eff = _compute_efficiency(conn, recipe_id, d.get('og'), d.get('volume_brewed'))
+            cur = conn.execute(
+                '''INSERT INTO brews (recipe_id,name,batch_number,brew_date,volume_brewed,og,fg,abv,notes,status,actual_efficiency,cost_snapshot,cost_per_liter_snapshot)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (recipe_id, d.get('name'),
+                 d.get('batch_number') if d.get('batch_number') else None,
+                 d.get('brew_date'), d.get('volume_brewed'),
+                 d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
+                 d.get('status', BrewStatus.COMPLETED), actual_eff,
+                 d.get('cost_snapshot'), d.get('cost_per_liter_snapshot'))
             )
-            _inv_log_pending.append((ing['inventory_item_id'], new_qty - old_qty, old_qty, new_qty))
-
-        actual_eff = _compute_efficiency(conn, recipe_id, d.get('og'), d.get('volume_brewed'))
-        cur = conn.execute(
-            '''INSERT INTO brews (recipe_id,name,batch_number,brew_date,volume_brewed,og,fg,abv,notes,status,actual_efficiency,cost_snapshot,cost_per_liter_snapshot)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (recipe_id, d.get('name'),
-             d.get('batch_number') if d.get('batch_number') else None,
-             d.get('brew_date'), d.get('volume_brewed'),
-             d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
-             d.get('status', BrewStatus.COMPLETED), actual_eff,
-             d.get('cost_snapshot'), d.get('cost_per_liter_snapshot'))
-        )
-        brew_id = cur.lastrowid
-        brew_name = d.get('name', '')
-        for (item_id, delta, old_q, new_q) in _inv_log_pending:
-            _log_inv(item_id, delta, old_q, new_q, 'brew_deduction',
-                     'brew', brew_id, brew_name, conn)
-        row = conn.execute(
-            '''SELECT b.*, r.name as recipe_name FROM brews b
-               LEFT JOIN recipes r ON b.recipe_id=r.id WHERE b.id=?''',
-            (brew_id,)
-        ).fetchone()
-        _log('brew', 'created', json.dumps({'_i18n':'act.brew_created','name':d.get('name','')}), brew_id, conn)
-        conn.execute("COMMIT")
-        return jsonify(dict(row)), 201
-    except sqlite3.Error:
-        conn.execute("ROLLBACK")
-        raise
+            brew_id = cur.lastrowid
+            brew_name = d.get('name', '')
+            for (item_id, delta, old_q, new_q) in _inv_log_pending:
+                _log_inv(item_id, delta, old_q, new_q, 'brew_deduction',
+                         'brew', brew_id, brew_name, conn)
+            row = conn.execute(
+                '''SELECT b.*, r.name as recipe_name FROM brews b
+                   LEFT JOIN recipes r ON b.recipe_id=r.id WHERE b.id=?''',
+                (brew_id,)
+            ).fetchone()
+            _log('brew', 'created', json.dumps({'_i18n':'act.brew_created','name':d.get('name','')}), brew_id, conn)
+            conn.execute("COMMIT")
+            return jsonify(dict(row)), 201
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
 
 @bp.route('/api/brews/<int:brew_id>', methods=['PUT'])
@@ -261,7 +272,9 @@ def update_brew(brew_id):
         return api_error('validation', 400, fields=errors)
     with get_db() as conn:
         brew_row = conn.execute('SELECT status, recipe_id, fermenting_since FROM brews WHERE id=?', (brew_id,)).fetchone()
-        old_status = brew_row['status'] if brew_row else None
+        if not brew_row:
+            return api_error('not_found', 404)
+        old_status = brew_row['status']
         new_status = d.get('status', BrewStatus.COMPLETED)
         batch_num = d.get('batch_number') if d.get('batch_number') else None
         if batch_num is not None:
@@ -272,18 +285,16 @@ def update_brew(brew_id):
             if dup:
                 return api_error('duplicate_batch_number', 409, detail=str(batch_num))
         actual_eff = _compute_efficiency(
-            conn,
-            brew_row['recipe_id'] if brew_row else None,
-            d.get('og'), d.get('volume_brewed')
+            conn, brew_row['recipe_id'], d.get('og'), d.get('volume_brewed')
         )
         if new_status == 'fermenting' and old_status != 'fermenting':
             fermenting_since = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         elif new_status != 'fermenting':
             fermenting_since = None
         else:
-            fermenting_since = brew_row['fermenting_since'] if brew_row else None
+            fermenting_since = brew_row['fermenting_since']
         cur = conn.execute(
-            'UPDATE brews SET name=?,brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,notes=?,status=?,ferm_time=?,photos_url=?,actual_efficiency=?,cost_snapshot=?,cost_per_liter_snapshot=?,fermenting_since=? WHERE id=?',
+            'UPDATE brews SET name=?,brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,notes=?,status=?,ferm_time=?,photos_url=?,actual_efficiency=?,cost_snapshot=?,cost_per_liter_snapshot=?,fermenting_since=?,batch_number=? WHERE id=?',
             (d.get('name'), d.get('brew_date'), d.get('volume_brewed'),
              d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
              new_status,
@@ -292,6 +303,7 @@ def update_brew(brew_id):
              actual_eff,
              d.get('cost_snapshot'), d.get('cost_per_liter_snapshot'),
              fermenting_since,
+             batch_num,
              brew_id)
         )
         if cur.rowcount == 0:
@@ -399,6 +411,8 @@ def mark_dryhop_done(brew_id):
             return api_error('not_found', 404)
         try:
             done = json.loads(row['dryhop_done_dates'] or '[]')
+            if not isinstance(done, list):
+                done = []
         except (json.JSONDecodeError, TypeError):
             done = []
         if date_str not in done:
@@ -434,12 +448,26 @@ def get_brew_fermentation(brew_id):
                 'SELECT * FROM brew_fermentation_readings WHERE brew_id=? AND source=? ORDER BY recorded_at',
                 (brew_id, source)
             ).fetchall()
-        else:
-            rows = conn.execute(
-                'SELECT * FROM brew_fermentation_readings WHERE brew_id=? ORDER BY recorded_at',
-                (brew_id,)
+            return jsonify([dict(r) for r in rows])
+
+        stored = conn.execute(
+            'SELECT * FROM brew_fermentation_readings WHERE brew_id=? ORDER BY recorded_at',
+            (brew_id,)
+        ).fetchall()
+
+        # Pour les brassins actifs avec un densimètre lié, inclure les lectures live
+        sp = conn.execute('SELECT id FROM spindles WHERE brew_id=?', (brew_id,)).fetchone()
+        if sp:
+            live = conn.execute(
+                'SELECT recorded_at, gravity, temperature, battery, angle FROM rdb.spindle_readings WHERE spindle_id=? ORDER BY recorded_at',
+                (sp['id'],)
             ).fetchall()
-        return jsonify([dict(r) for r in rows])
+            stored_ts = {r['recorded_at'] for r in stored}
+            combined = [dict(r) for r in stored] + [dict(r) for r in live if r['recorded_at'] not in stored_ts]
+            combined.sort(key=lambda r: r['recorded_at'])
+            return jsonify(combined)
+
+        return jsonify([dict(r) for r in stored])
 
 
 @bp.route('/api/brews/<int:brew_id>/fermentation', methods=['POST'])
@@ -516,6 +544,85 @@ def delete_brew_log(brew_id, entry_id):
         if not row:
             return api_error('not_found', 404)
         conn.execute('DELETE FROM brew_log WHERE id=?', (entry_id,))
+        return jsonify({'ok': True})
+
+
+# ---------------------------------------------------------------------------
+# Brew steps (étapes planifiées : cold crash, température, etc.)
+# ---------------------------------------------------------------------------
+
+@bp.route('/api/brew-steps', methods=['GET'])
+def get_all_brew_steps():
+    """Retourne toutes les étapes des brassins non-archivés (pour le calendrier)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            '''SELECT bs.* FROM brew_steps bs
+               JOIN brews b ON b.id = bs.brew_id
+               WHERE b.archived = 0 AND b.deleted_at IS NULL
+               ORDER BY bs.scheduled_date ASC, bs.id ASC'''
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+
+@bp.route('/api/brews/<int:brew_id>/steps', methods=['GET'])
+def get_brew_steps(brew_id):
+    with get_db() as conn:
+        if not conn.execute('SELECT 1 FROM brews WHERE id=?', (brew_id,)).fetchone():
+            return api_error('not_found', 404)
+        rows = conn.execute(
+            'SELECT * FROM brew_steps WHERE brew_id=? ORDER BY scheduled_date ASC, id ASC',
+            (brew_id,)
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+
+@bp.route('/api/brews/<int:brew_id>/steps', methods=['POST'])
+def add_brew_step(brew_id):
+    with get_db() as conn:
+        if not conn.execute('SELECT 1 FROM brews WHERE id=?', (brew_id,)).fetchone():
+            return api_error('not_found', 404)
+    d = request.json or {}
+    scheduled_date = (d.get('scheduled_date') or '').strip()
+    title          = (d.get('title') or '').strip()
+    if not scheduled_date or not title:
+        return api_error('missing_field', 400, detail='scheduled_date and title are required')
+    with get_db() as conn:
+        cur = conn.execute(
+            'INSERT INTO brew_steps (brew_id, scheduled_date, title, notes, telegram_notify) VALUES (?,?,?,?,?)',
+            (brew_id, scheduled_date, title,
+             d.get('notes') or None,
+             1 if d.get('telegram_notify', True) else 0)
+        )
+        row = conn.execute('SELECT * FROM brew_steps WHERE id=?', (cur.lastrowid,)).fetchone()
+        return jsonify(dict(row)), 201
+
+
+@bp.route('/api/brew-steps/<int:step_id>', methods=['PUT'])
+def update_brew_step(step_id):
+    d = request.json or {}
+    with get_db() as conn:
+        row = conn.execute('SELECT * FROM brew_steps WHERE id=?', (step_id,)).fetchone()
+        if not row:
+            return api_error('not_found', 404)
+        scheduled_date = (d.get('scheduled_date') or row['scheduled_date']).strip()
+        title          = (d.get('title') or row['title']).strip()
+        notes          = d.get('notes') if 'notes' in d else row['notes']
+        done           = int(bool(d.get('done'))) if 'done' in d else row['done']
+        tg_notify      = int(bool(d.get('telegram_notify'))) if 'telegram_notify' in d else row['telegram_notify']
+        conn.execute(
+            'UPDATE brew_steps SET scheduled_date=?, title=?, notes=?, done=?, telegram_notify=? WHERE id=?',
+            (scheduled_date, title, notes or None, done, tg_notify, step_id)
+        )
+        row = conn.execute('SELECT * FROM brew_steps WHERE id=?', (step_id,)).fetchone()
+        return jsonify(dict(row))
+
+
+@bp.route('/api/brew-steps/<int:step_id>', methods=['DELETE'])
+def delete_brew_step(step_id):
+    with get_db() as conn:
+        cur = conn.execute('DELETE FROM brew_steps WHERE id=?', (step_id,))
+        if cur.rowcount == 0:
+            return api_error('not_found', 404)
         return jsonify({'ok': True})
 
 

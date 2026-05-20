@@ -13,7 +13,7 @@ from flask import Blueprint, jsonify, request, current_app, Response
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.base import JobLookupError
 
-from db import get_db, get_readings_db, _log
+from db import get_db, get_readings_db, _log, PHOTOS_DIR
 from constants import BrewStatus
 from helpers import api_error
 from scheduler import _scheduler
@@ -21,6 +21,8 @@ from scheduler import _scheduler
 bp = Blueprint('integrations', __name__)
 
 STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static'))
+
+_reschedule_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -51,38 +53,54 @@ def _tg_get_settings():
     return s.get('telegram_token'), s.get('telegram_chat_id'), notifs, s.get('telegram_tz', 'UTC')
 
 
-def _tg_send(token, chat_id, text):
+def _tg_send(token, chat_id, text, _retries=1, _backoff=5):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     data = urllib.parse.urlencode({
         'chat_id': chat_id,
         'text': text,
         'parse_mode': 'HTML',
     }).encode()
-    req = urllib.request.Request(url, data=data, method='POST')
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
+    last_exc = None
+    for attempt in range(1 + _retries):
+        if attempt:
+            time.sleep(_backoff)
+        try:
+            req = urllib.request.Request(url, data=data, method='POST')
+            with urllib.request.urlopen(req, timeout=10) as r:
+                try:
+                    return json.loads(r.read())
+                except (json.JSONDecodeError, ValueError):
+                    return {}
+        except urllib.error.HTTPError as e:
+            # 429 Too Many Requests ou 5xx : retenter ; 4xx autre : inutile
+            if e.code == 429 or e.code >= 500:
+                last_exc = e
+                continue
+            raise
+        except OSError as e:
+            last_exc = e
+            continue
+    raise last_exc
 
 
 def _tg_build_brews():
     with get_db() as conn:
         _active_ph = ','.join('?' * len(BrewStatus.ACTIVE))
         brews = conn.execute(
-            f"SELECT id, name, status, og, fg, abv, brew_date FROM brews "
-            f"WHERE archived=0 AND status IN ({_active_ph}) ORDER BY brew_date DESC",
+            f"""SELECT b.id, b.name, b.status, b.og, b.fg, b.abv, b.brew_date,
+                       lr.gravity, lr.temperature, lr.recorded_at
+                FROM brews b
+                LEFT JOIN (
+                    SELECT s.brew_id,
+                           r.gravity, r.temperature, r.recorded_at,
+                           ROW_NUMBER() OVER (PARTITION BY s.brew_id ORDER BY r.recorded_at DESC) AS rn
+                    FROM spindles s
+                    JOIN rdb.spindle_readings r ON r.spindle_id = s.id
+                ) lr ON lr.brew_id = b.id AND lr.rn = 1
+                WHERE b.archived=0 AND b.status IN ({_active_ph})
+                ORDER BY b.brew_date DESC""",
             BrewStatus.ACTIVE
         ).fetchall()
-        spindle_data = {}
-        for b in brews:
-            row = conn.execute(
-                "SELECT r.gravity, r.temperature, r.recorded_at "
-                "FROM spindles s "
-                "JOIN rdb.spindle_readings r ON r.spindle_id = s.id "
-                "WHERE s.brew_id = ? "
-                "ORDER BY r.recorded_at DESC LIMIT 1",
-                (b['id'],)
-            ).fetchone()
-            if row:
-                spindle_data[b['id']] = row
     if not brews:
         return "🍺 <b>Brassins en cours</b>\n\nAucun brassin actif en ce moment."
     st_map = {
@@ -105,7 +123,7 @@ def _tg_build_brews():
             line += f"  |  ABV est. : ~{est_abv:.1f} %"
         if b['brew_date']:
             line += f"\n  Brassé le {b['brew_date']}"
-        sr = spindle_data.get(b['id'])
+        sr = b if b['recorded_at'] else None
         if sr:
             grav_str = f"{float(sr['gravity']):.3f}" if sr['gravity'] is not None else "—"
             temp_str = f"{float(sr['temperature']):.1f} °C" if sr['temperature'] is not None else "—"
@@ -172,7 +190,10 @@ def _tg_fire_low_stock(item_name, qty, unit, threshold):
         f"• {item_name} : <b>{qty} {unit}</b>\n"
         f"Seuil d'alerte : {threshold} {unit}"
     )
-    _tg_send(token, chat_id, text)
+    try:
+        _tg_send(token, chat_id, text)
+    except Exception as e:
+        current_app.logger.warning('_tg_fire_low_stock: failed to send notification: %s', e)
 
 
 def _tg_build_inventory():
@@ -226,18 +247,19 @@ def _tg_build_ferm_reminders():
             BrewStatus.ACTIVE
         ).fetchall()
         dry_hops = conn.execute(
-            f'''SELECT b.name, b.brew_date, COALESCE(b.ferm_time, r.ferm_time) AS ferm_time,
-                       b.dryhop_done_dates,
-                       ri.name AS hop_name, ri.hop_days, ri.quantity, ri.unit
-                FROM brews b
-                LEFT JOIN recipes r ON r.id = b.recipe_id
-                JOIN recipe_ingredients ri
-                    ON ri.recipe_id = b.recipe_id
-                    AND ri.category = 'houblon' AND ri.hop_type = 'dryhop' AND ri.hop_days > 0
-                WHERE b.archived = 0 AND b.status IN ({_active_ph})
-                  AND b.brew_date IS NOT NULL AND b.recipe_id IS NOT NULL
-                  AND COALESCE(b.ferm_time, r.ferm_time) IS NOT NULL''',
-            BrewStatus.ACTIVE
+            '''SELECT b.name, b.brew_date, b.fermenting_since,
+                      COALESCE(b.ferm_time, r.ferm_time) AS ferm_time,
+                      b.dryhop_done_dates,
+                      ri.name AS hop_name, ri.hop_days, ri.quantity, ri.unit
+               FROM brews b
+               LEFT JOIN recipes r ON r.id = b.recipe_id
+               JOIN recipe_ingredients ri
+                   ON ri.recipe_id = b.recipe_id
+                   AND ri.category = 'houblon' AND ri.hop_type = 'dryhop' AND ri.hop_days > 0
+               WHERE b.archived = 0 AND b.status = ?
+                 AND b.recipe_id IS NOT NULL
+                 AND COALESCE(b.ferm_time, r.ferm_time) IS NOT NULL''',
+            (BrewStatus.FERMENTING,)
         ).fetchall()
     messages = []
     for b in brews:
@@ -253,7 +275,7 @@ def _tg_build_ferm_reminders():
             elif delta == 0:
                 vol = b['volume_brewed']
                 bottle_hint = ""
-                if vol:
+                if vol and float(vol) > 0:
                     net = float(vol) * 0.9
                     s33 = int(net * 1000 / 330)
                     s75 = int(net * 1000 / 750)
@@ -273,7 +295,10 @@ def _tg_build_ferm_reminders():
             offset = ferm - days
             if offset < 0:
                 continue
-            dh_date = date.fromisoformat(dh['brew_date']) + timedelta(days=offset)
+            ferm_start = (dh['fermenting_since'] or '')[:10] or dh['brew_date']
+            if not ferm_start:
+                continue
+            dh_date = date.fromisoformat(ferm_start) + timedelta(days=offset)
             key = (dh['name'], dh_date.isoformat())
             if key not in dh_by_key:
                 dh_by_key[key] = {'brew': dh['name'], 'date': dh_date, 'hops': [],
@@ -284,6 +309,8 @@ def _tg_build_ferm_reminders():
     for entry in dh_by_key.values():
         try:
             done_dates = json.loads(entry.get('dryhop_done_dates') or '[]')
+            if not isinstance(done_dates, list):
+                done_dates = []
         except (json.JSONDecodeError, TypeError):
             done_dates = []
         if entry['date'].isoformat() in done_dates:
@@ -569,6 +596,32 @@ def _tg_brewing_events_fire():
                     current_app.logger.warning(f"_tg_brewing_events_fire: send error (custom remind {label!r}): {e}")
 
 
+def _tg_check_brew_steps():
+    """Envoie une notification Telegram pour chaque étape de brassin planifiée aujourd'hui."""
+    token, chat_id, _, _ = _tg_get_settings()
+    if not token or not chat_id:
+        return
+    today_str = date.today().isoformat()
+    with get_db() as conn:
+        steps = conn.execute(
+            '''SELECT bs.id, bs.title, bs.notes, bs.brew_id, b.name AS brew_name
+               FROM brew_steps bs
+               JOIN brews b ON b.id = bs.brew_id
+               WHERE bs.scheduled_date = ? AND bs.done = 0 AND bs.telegram_notify = 1
+                 AND b.archived = 0 AND b.deleted_at IS NULL''',
+            (today_str,)
+        ).fetchall()
+    for step in steps:
+        notes_line = f'\n📝 {step["notes"]}' if step['notes'] else ''
+        try:
+            _tg_send(token, chat_id,
+                f'🔔 <b>Étape brassage</b> — {step["brew_name"]}\n\n'
+                f'<b>{step["title"]}</b> est prévu aujourd\'hui !'
+                f'{notes_line}')
+        except Exception as e:
+            current_app.logger.warning(f"_tg_check_brew_steps: send error (step {step['id']!r}): {e}")
+
+
 def _tg_check_spindle_stability():
     """Vérifie si des spindles actifs ont une densité stable depuis N jours et envoie une notif Telegram."""
     token, chat_id, notifs, _ = _tg_get_settings()
@@ -601,7 +654,7 @@ def _tg_check_spindle_stability():
             if sp['fermenting_since']:
                 try:
                     since = datetime.strptime(sp['fermenting_since'][:19], '%Y-%m-%d %H:%M:%S')
-                    if (datetime.utcnow() - since) < _grace:
+                    if (datetime.now() - since) < _grace:
                         continue  # période de grâce — pas encore de vérification
                 except (ValueError, TypeError):
                     pass
@@ -630,7 +683,7 @@ def _tg_check_spindle_stability():
                 if sp['fermenting_since']:
                     try:
                         since = datetime.strptime(sp['fermenting_since'][:19], '%Y-%m-%d %H:%M:%S')
-                        ferm_days = (datetime.utcnow() - since).days
+                        ferm_days = (datetime.now() - since).days
                         ferm_days_str = f"\n⏱ Fermentation : <b>{ferm_days} jour{'s' if ferm_days != 1 else ''}</b>"
                     except (ValueError, TypeError):
                         pass
@@ -663,8 +716,13 @@ def _tg_check_spindle_stability():
 
 def reschedule_telegram():
     """Recharge la config depuis la DB et re-planifie les jobs Telegram."""
+    with _reschedule_lock:
+        _reschedule_telegram_locked()
+
+
+def _reschedule_telegram_locked():
     token, chat_id, notifs, tz_str = _tg_get_settings()
-    for jid in ('tg_brews', 'tg_cave', 'tg_inventory', 'tg_brew_events', 'tg_ferm', 'tg_spindle_stable'):
+    for jid in ('tg_brews', 'tg_cave', 'tg_inventory', 'tg_brew_events', 'tg_ferm', 'tg_spindle_stable', 'tg_brew_steps'):
         try:
             _scheduler.remove_job(jid)
         except JobLookupError:
@@ -697,6 +755,11 @@ def reschedule_telegram():
     if notifs.get('spindle_stable', {}).get('enabled') and token and chat_id:
         _scheduler.add_job(_tg_check_spindle_stability, CronTrigger(hour='*/4', timezone=tz),
                            id='tg_spindle_stable', replace_existing=True)
+
+    # Étapes brassins : job quotidien à 8h (même heure que brew_events par défaut)
+    if token and chat_id:
+        _scheduler.add_job(_tg_check_brew_steps, CronTrigger(hour=8, minute=0, timezone=tz),
+                           id='tg_brew_steps', replace_existing=True)
 
     try:
         with get_db() as conn:
@@ -790,13 +853,28 @@ def _npm_latest(package):
     url = f'https://registry.npmjs.org/{urllib.parse.quote(package, safe="@/")}/latest'
     req = urllib.request.Request(url, headers={'Accept': 'application/json', 'User-Agent': 'BrewHome'})
     with urllib.request.urlopen(req, timeout=8) as resp:
-        return json.loads(resp.read().decode())['version']
+        try:
+            return json.loads(resp.read().decode())['version']
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            raise RuntimeError(f'NPM registry returned invalid response for {package}: {e}') from e
 
 
-def _download(url, dest_path):
+_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024  # 50 MB — protège contre les CDN malveillants
+
+def _download(url, dest_path, max_size=_DOWNLOAD_MAX_BYTES):
     req = urllib.request.Request(url, headers={'User-Agent': 'BrewHome'})
     with urllib.request.urlopen(req, timeout=20) as resp:
-        data = resp.read()
+        chunks = []
+        total = 0
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_size:
+                raise ValueError(f'Download size exceeded {max_size} bytes')
+            chunks.append(chunk)
+    data = b''.join(chunks)
     with open(dest_path, 'wb') as f:
         f.write(data)
     return len(data)
@@ -896,7 +974,12 @@ def _git_proxy_url_allowed(url: str) -> bool:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != 'https':
             return False
-        host = parsed.netloc.lower().split(':')[0]
+        # Reject any userinfo (e.g. https://allowed@evil.com/) — urlopen uses the real host
+        if parsed.username is not None:
+            return False
+        host = (parsed.hostname or '').lower()
+        if not host:
+            return False
         if host in _GIT_PROXY_ALLOWED_HOSTS:
             return True
         with get_db() as conn:
@@ -906,7 +989,7 @@ def _git_proxy_url_allowed(url: str) -> bool:
         for r in rows:
             val = (r['value'] or '').strip().rstrip('/')
             if val:
-                allowed_host = urllib.parse.urlparse(val).netloc.lower().split(':')[0]
+                allowed_host = (urllib.parse.urlparse(val).hostname or '').lower()
                 if host == allowed_host:
                     return True
         return False
@@ -958,8 +1041,12 @@ def git_proxy():
 # ---------------------------------------------------------------------------
 
 def _gh_push_file(repo, pat, branch, file_path, content_str, message, api_base='https://api.github.com'):
-    """Pousse un fichier texte vers un dépôt Git via l'API. Retourne True si modifié."""
-    encoded = base64.b64encode(content_str.encode('utf-8')).decode('ascii')
+    """Pousse un fichier vers un dépôt Git via l'API. Retourne True si modifié.
+
+    content_str peut être str (encodé UTF-8) ou bytes (binaire).
+    """
+    raw = content_str if isinstance(content_str, bytes) else content_str.encode('utf-8')
+    encoded = base64.b64encode(raw).decode('ascii')
     api_base = (api_base or 'https://api.github.com').rstrip('/')
     base_url = f'{api_base}/repos/{repo}/contents/{file_path}'
     is_github = api_base == 'https://api.github.com'
@@ -987,6 +1074,9 @@ def _gh_push_file(repo, pat, branch, file_path, content_str, message, api_base='
             try: body_hint = e.read().decode()[:200]
             except Exception: pass
             current_app.logger.warning(f'_gh_push_file GET {file_path} HTTP {e.code}: {body_hint}')
+            raise
+        except (json.JSONDecodeError, ValueError) as e:
+            current_app.logger.warning(f'_gh_push_file GET {file_path} invalid JSON: {e}')
             raise
 
     sha, unchanged = _fetch_sha()
@@ -1040,8 +1130,11 @@ def _gh_get_file(repo, pat, branch, file_path, api_base='https://api.github.com'
         'User-Agent': 'BrewHome',
     }
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        result = json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+    except (json.JSONDecodeError, ValueError) as e:
+        raise RuntimeError(f'Git API returned invalid JSON for {file_path}: {e}') from e
     content_b64 = (result.get('content') or '').replace('\n', '')
     return base64.b64decode(content_b64).decode('utf-8')
 
@@ -1088,7 +1181,7 @@ def _github_data_backup():
                 brew['fermentation'] = [dict(f) for f in conn.execute(
                     'SELECT * FROM brew_fermentation_readings WHERE brew_id=? ORDER BY recorded_at', (b['id'],)).fetchall()]
                 brews.append(brew)
-            beers = [dict(r) for r in conn.execute('SELECT * FROM beers ORDER BY name').fetchall()]
+            beers_rows = conn.execute('SELECT * FROM beers ORDER BY name').fetchall()
             spindles = [dict(r) for r in conn.execute('SELECT * FROM spindles ORDER BY name').fetchall()]
             catalog = [dict(r) for r in conn.execute(
                 'SELECT * FROM ingredient_catalog ORDER BY category, name').fetchall()]
@@ -1097,6 +1190,21 @@ def _github_data_backup():
             calendar = [dict(r) for r in conn.execute(
                 'SELECT * FROM custom_calendar_events ORDER BY event_date').fetchall()]
             settings_rows = conn.execute('SELECT key, value FROM app_settings').fetchall()
+        # Build beers list: photo column stays null, photo_file kept for restore reference.
+        # Actual image files are pushed separately as backup_auto/beer_photos/<filename>.
+        beers = []
+        beer_photos = {}  # filename → bytes, for separate push
+        for r in beers_rows:
+            b = dict(r)
+            fname = b.get('photo_file')
+            if fname:
+                try:
+                    with open(os.path.join(PHOTOS_DIR, fname), 'rb') as fh:
+                        beer_photos[fname] = fh.read()
+                except OSError:
+                    pass
+            b.pop('photo', None)  # never include base64 in JSON backup
+            beers.append(b)
         settings_out = {r['key']: r['value'] for r in settings_rows}
         for k in ('gh_data_pat', 'gh_vitrine_pat', 'ai_api_key', 'telegram_token'):
             settings_out.pop(k, None)
@@ -1111,6 +1219,8 @@ def _github_data_backup():
             ('brouillons.json',  drafts),
             ('calendrier.json',  calendar),
             ('parametres.json',  settings_out),
+            # Beer photos as separate binary files alongside cave.json
+            *[(f'beer_photos/{fname}', data) for fname, data in beer_photos.items()],
         ]
         total_pushed = total_skipped = total_errors = 0
         push_errors = []
@@ -1123,9 +1233,12 @@ def _github_data_backup():
                 continue
             for name, data in files:
                 try:
+                    content = data if isinstance(data, bytes) \
+                              else json.dumps(data, ensure_ascii=False, indent=2)
+                    msg_key = name.split('/')[0].replace('.json', '')
                     changed = _gh_push_file(t_repo, t_pat, t_branch, f'backup_auto/{name}',
-                                            json.dumps(data, ensure_ascii=False, indent=2),
-                                            f'backup auto: {name.replace(".json","")} {date_str}',
+                                            content,
+                                            f'backup auto: {msg_key} {date_str}',
                                             api_base=t_api)
                     if changed:
                         total_pushed += 1

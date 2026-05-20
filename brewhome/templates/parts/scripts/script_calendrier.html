@@ -151,25 +151,28 @@ function renderAgendaView() {
       const d = new Date(b.brew_date + 'T00:00:00'); d.setDate(d.getDate() + b.ferm_time);
       add(_ymd(d), 'ferm', b.name || '?', 'var(--info)', '🌡️', b.id);
     }
-    // Dry hops
-    if (b.brew_date && b.ferm_time && b.recipe_id) {
-      const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
-      if (recipe?.ingredients) {
-        const dhByDay = {};
-        recipe.ingredients
-          .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
-          .forEach(dh => {
-            const k = dh.hop_days;
-            if (!dhByDay[k]) dhByDay[k] = [];
-            dhByDay[k].push(`${dh.quantity}\u202f${dh.unit} ${dh.name}`);
+    // Dry hops — départ du comptage depuis le début de la fermentation seulement
+    if (b.ferm_time && b.recipe_id && (b.status === 'fermenting' || b.status === 'completed')) {
+      const fermStart = (b.fermenting_since || '').slice(0, 10) || b.brew_date;
+      if (fermStart) {
+        const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
+        if (recipe?.ingredients) {
+          const dhByDay = {};
+          recipe.ingredients
+            .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
+            .forEach(dh => {
+              const k = dh.hop_days;
+              if (!dhByDay[k]) dhByDay[k] = [];
+              dhByDay[k].push(`${dh.quantity}\u202f${dh.unit} ${dh.name}`);
+            });
+          Object.entries(dhByDay).forEach(([days, hops]) => {
+            const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
+            if (offset < 0) return;
+            const d = new Date(fermStart + 'T00:00:00');
+            d.setDate(d.getDate() + offset);
+            add(_ymd(d), 'dryhop', `${b.name || '?'} — 🌿 Dry Hop (J${offset}) : ${hops.join(', ')}`, 'var(--hop)', '🌿', b.id);
           });
-        Object.entries(dhByDay).forEach(([days, hops]) => {
-          const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
-          if (offset < 0) return;
-          const d = new Date(b.brew_date + 'T00:00:00');
-          d.setDate(d.getDate() + offset);
-          add(_ymd(d), 'dryhop', `${b.name || '?'} — 🌿 Dry Hop (J${offset}) : ${hops.join(', ')}`, 'var(--hop)', '🌿', b.id);
-        });
+        }
       }
     }
   });
@@ -319,25 +322,28 @@ function renderCalendar() {
       d.setDate(d.getDate() + (b.ferm_time | 0));
       addEv(_ymd(d), { type: 'ferm', label: `${label} ${t('cal.ferm_abbr')}`, id: b.id });
     }
-    // Dry hops
-    if (b.brew_date && b.ferm_time && b.recipe_id) {
-      const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
-      if (recipe?.ingredients) {
-        const dhByDay = {};
-        recipe.ingredients
-          .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
-          .forEach(dh => {
-            const k = dh.hop_days;
-            if (!dhByDay[k]) dhByDay[k] = [];
-            dhByDay[k].push(dh.name);
+    // Dry hops — départ du comptage depuis le début de la fermentation seulement
+    if (b.ferm_time && b.recipe_id && (b.status === 'fermenting' || b.status === 'completed')) {
+      const fermStart = (b.fermenting_since || '').slice(0, 10) || b.brew_date;
+      if (fermStart) {
+        const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
+        if (recipe?.ingredients) {
+          const dhByDay = {};
+          recipe.ingredients
+            .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
+            .forEach(dh => {
+              const k = dh.hop_days;
+              if (!dhByDay[k]) dhByDay[k] = [];
+              dhByDay[k].push(dh.name);
+            });
+          Object.entries(dhByDay).forEach(([days, hops]) => {
+            const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
+            if (offset < 0) return;
+            const d = new Date(fermStart + 'T00:00:00');
+            d.setDate(d.getDate() + offset);
+            addEv(_ymd(d), { type: 'dryhop', label: `${label} 🌿 DH`, color: 'var(--hop)', id: b.id });
           });
-        Object.entries(dhByDay).forEach(([days, hops]) => {
-          const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
-          if (offset < 0) return;
-          const d = new Date(b.brew_date + 'T00:00:00');
-          d.setDate(d.getDate() + offset);
-          addEv(_ymd(d), { type: 'dryhop', label: `${label} 🌿 DH`, color: 'var(--hop)', id: b.id });
-        });
+        }
       }
     }
   });
@@ -353,6 +359,17 @@ function renderCalendar() {
   // Brouillons planifiés
   (S.drafts || []).filter(d => d.target_date).forEach(d => {
     addEv(d.target_date, { type: 'draft', label: d.title || 'Brouillon', color: d.color || '#8b5cf6', draftId: d.id });
+  });
+
+  // Étapes planifiées des brassins
+  (S.brewSteps || []).filter(s => !s.done).forEach(s => {
+    const brew = (S.brews || []).find(b => b.id === s.brew_id);
+    const brewName = brew ? brew.name : `#${s.brew_id}`;
+    addEv(s.scheduled_date, {
+      type: 'brew_step', label: `⚙️ ${brewName} — ${s.title}`,
+      notes: s.notes || null, stepId: s.id, brewId: s.brew_id,
+      color: '#06b6d4',
+    });
   });
 
   // Événements personnalisés + leur rappel J-45
@@ -429,6 +446,13 @@ function renderCalendar() {
         return `<div class="cal-event" style="background:${c}22;color:${c};border:1px solid ${c}44"
           onclick="calEvClick(event,${idx})">
           <i class="fas fa-book-open" style="flex-shrink:0;font-size:.65rem"></i>
+          <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
+        </div>`;
+      }
+      if (ev.type === 'brew_step') {
+        return `<div class="cal-event" style="background:#06b6d422;color:#06b6d4;border:1px solid #06b6d444"
+          onclick="openBrewStepsModal(${ev.brewId})">
+          <i class="fas fa-gear" style="flex-shrink:0;font-size:.65rem"></i>
           <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
         </div>`;
       }
@@ -1014,7 +1038,7 @@ function ceStyleSearch(input) {
   for (const types of Object.values(BEER_TYPES))
     types.forEach(t => { if (!q || t.toLowerCase().includes(q)) commonMatches.push(t); });
   if (commonMatches.length) {
-    html += `<div class="ing-suggest-cat">Styles courants</div>`;
+    html += `<div class="ing-suggest-cat">${t('rec.common_styles')}</div>`;
     commonMatches.slice(0, q ? 30 : 10).forEach(t => {
       html += `<div class="ing-suggest-item" onmousedown="selectCeStyle(${JSON.stringify(t).replace(/"/g,'&quot;')})"><span>${esc(t)}</span></div>`;
       count++;

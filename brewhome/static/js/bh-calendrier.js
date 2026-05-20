@@ -150,25 +150,28 @@ function renderAgendaView() {
       const d = new Date(b.brew_date + 'T00:00:00'); d.setDate(d.getDate() + b.ferm_time);
       add(_ymd(d), 'ferm', b.name || '?', 'var(--info)', '🌡️', b.id);
     }
-    // Dry hops
-    if (b.brew_date && b.ferm_time && b.recipe_id) {
-      const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
-      if (recipe?.ingredients) {
-        const dhByDay = {};
-        recipe.ingredients
-          .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
-          .forEach(dh => {
-            const k = dh.hop_days;
-            if (!dhByDay[k]) dhByDay[k] = [];
-            dhByDay[k].push(`${dh.quantity}\u202f${dh.unit} ${dh.name}`);
+    // Dry hops — départ du comptage depuis le début de la fermentation seulement
+    if (b.ferm_time && b.recipe_id && (b.status === 'fermenting' || b.status === 'completed')) {
+      const fermStart = (b.fermenting_since || '').slice(0, 10) || b.brew_date;
+      if (fermStart) {
+        const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
+        if (recipe?.ingredients) {
+          const dhByDay = {};
+          recipe.ingredients
+            .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
+            .forEach(dh => {
+              const k = dh.hop_days;
+              if (!dhByDay[k]) dhByDay[k] = [];
+              dhByDay[k].push(`${dh.quantity}\u202f${dh.unit} ${dh.name}`);
+            });
+          Object.entries(dhByDay).forEach(([days, hops]) => {
+            const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
+            if (offset < 0) return;
+            const d = new Date(fermStart + 'T00:00:00');
+            d.setDate(d.getDate() + offset);
+            add(_ymd(d), 'dryhop', `${b.name || '?'} — 🌿 Dry Hop (J${offset}) : ${hops.join(', ')}`, 'var(--hop)', '🌿', b.id);
           });
-        Object.entries(dhByDay).forEach(([days, hops]) => {
-          const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
-          if (offset < 0) return;
-          const d = new Date(b.brew_date + 'T00:00:00');
-          d.setDate(d.getDate() + offset);
-          add(_ymd(d), 'dryhop', `${b.name || '?'} — 🌿 Dry Hop (J${offset}) : ${hops.join(', ')}`, 'var(--hop)', '🌿', b.id);
-        });
+        }
       }
     }
   });
@@ -318,25 +321,28 @@ function renderCalendar() {
       d.setDate(d.getDate() + (b.ferm_time | 0));
       addEv(_ymd(d), { type: 'ferm', label: `${label} ${t('cal.ferm_abbr')}`, id: b.id });
     }
-    // Dry hops
-    if (b.brew_date && b.ferm_time && b.recipe_id) {
-      const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
-      if (recipe?.ingredients) {
-        const dhByDay = {};
-        recipe.ingredients
-          .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
-          .forEach(dh => {
-            const k = dh.hop_days;
-            if (!dhByDay[k]) dhByDay[k] = [];
-            dhByDay[k].push(dh.name);
+    // Dry hops — départ du comptage depuis le début de la fermentation seulement
+    if (b.ferm_time && b.recipe_id && (b.status === 'fermenting' || b.status === 'completed')) {
+      const fermStart = (b.fermenting_since || '').slice(0, 10) || b.brew_date;
+      if (fermStart) {
+        const recipe = (S.recipes || []).find(r => r.id === b.recipe_id);
+        if (recipe?.ingredients) {
+          const dhByDay = {};
+          recipe.ingredients
+            .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop' && i.hop_days > 0)
+            .forEach(dh => {
+              const k = dh.hop_days;
+              if (!dhByDay[k]) dhByDay[k] = [];
+              dhByDay[k].push(dh.name);
+            });
+          Object.entries(dhByDay).forEach(([days, hops]) => {
+            const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
+            if (offset < 0) return;
+            const d = new Date(fermStart + 'T00:00:00');
+            d.setDate(d.getDate() + offset);
+            addEv(_ymd(d), { type: 'dryhop', label: `${label} 🌿 DH`, color: 'var(--hop)', id: b.id });
           });
-        Object.entries(dhByDay).forEach(([days, hops]) => {
-          const offset = (b.ferm_time | 0) - (parseInt(days) | 0);
-          if (offset < 0) return;
-          const d = new Date(b.brew_date + 'T00:00:00');
-          d.setDate(d.getDate() + offset);
-          addEv(_ymd(d), { type: 'dryhop', label: `${label} 🌿 DH`, color: 'var(--hop)', id: b.id });
-        });
+        }
       }
     }
   });

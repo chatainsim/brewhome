@@ -6,6 +6,69 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Markdown minimal (notes recettes / brouillons) ────────────────────────────
+// Supporte : # titres, **gras**, *italique*, ~~barré~~, `code`,
+//            - / * listes, 1. listes numérotées, > citation, ---
+function renderMd(raw) {
+  if (!raw) return '';
+  const he = s => String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const il = s => he(s)
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/~~(.+?)~~/g,'<del>$1</del>')
+    .replace(/`([^`\n]+)`/g,'<code>$1</code>');
+
+  const lines = raw.split('\n');
+  const chunks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const ln = lines[i].trimEnd();
+    let m;
+    if ((m = ln.match(/^(#{1,3}) (.+)/))) {
+      chunks.push({ t:'h', lvl:m[1].length, s:m[2] }); i++;
+    } else if (/^[-*_]{3,}$/.test(ln.trim())) {
+      chunks.push({ t:'hr' }); i++;
+    } else if ((m = ln.match(/^> ?(.*)/))) {
+      const bq = [];
+      while (i < lines.length && /^> ?/.test(lines[i].trimEnd()))
+        bq.push(lines[i++].trimEnd().replace(/^> ?/,''));
+      chunks.push({ t:'bq', lines:bq });
+    } else if (/^[-*] /.test(ln)) {
+      const items = [];
+      while (i < lines.length && /^[-*] /.test(lines[i].trimEnd()))
+        items.push(lines[i++].trimEnd().replace(/^[-*] /,''));
+      chunks.push({ t:'ul', items });
+    } else if (/^\d+\. /.test(ln)) {
+      const items = [];
+      while (i < lines.length && /^\d+\. /.test(lines[i].trimEnd()))
+        items.push(lines[i++].trimEnd().replace(/^\d+\. /,''));
+      chunks.push({ t:'ol', items });
+    } else if (!ln.trim()) {
+      chunks.push({ t:'blank' }); i++;
+    } else {
+      const ps = [];
+      while (i < lines.length) {
+        const l = lines[i].trimEnd();
+        if (!l.trim() || /^(#{1,3} |[-*_]{3,}$|[-*] |\d+\. |> )/.test(l)) break;
+        ps.push(l); i++;
+      }
+      chunks.push({ t:'p', lines:ps });
+    }
+  }
+  return chunks.filter(c=>c.t!=='blank').map(c => {
+    if (c.t==='h')  return `<h${c.lvl} class="mdn-h">${il(c.s)}</h${c.lvl}>`;
+    if (c.t==='hr') return `<hr class="mdn-hr">`;
+    if (c.t==='ul') return `<ul class="mdn-ul">${c.items.map(s=>`<li>${il(s)}</li>`).join('')}</ul>`;
+    if (c.t==='ol') return `<ol class="mdn-ol">${c.items.map(s=>`<li>${il(s)}</li>`).join('')}</ol>`;
+    if (c.t==='bq') return `<blockquote class="mdn-bq">${c.lines.map(l=>il(l)||'&nbsp;').join('<br>')}</blockquote>`;
+    if (c.t==='p')  return `<p class="mdn-p">${c.lines.map(l=>il(l)).join('<br>')}</p>`;
+    return '';
+  }).join('');
+}
+// CSS markdown pour les fenêtres d'impression (new window)
+const _MD_PRINT_CSS = `.mdn-p{margin:0 0 5px}.mdn-h{font-weight:700;margin:8px 0 3px;font-family:sans-serif}h1.mdn-h{font-size:1.1em}h2.mdn-h{font-size:1em}h3.mdn-h{font-size:.92em}.mdn-ul,.mdn-ol{margin:3px 0;padding-left:18px}.mdn-ul li,.mdn-ol li{margin-bottom:1px}.mdn-bq{margin:4px 0;padding:2px 8px;border-left:3px solid #aaa;font-style:italic;color:#555}.mdn-hr{border:none;border-top:1px solid #ddd;margin:6px 0}code{background:rgba(0,0,0,.07);padding:1px 3px;border-radius:2px;font-family:monospace;font-size:.88em}`;
+
 // ══════════════════════════════════════════════════════════════════════════════
 // API
 // ══════════════════════════════════════════════════════════════════════════════
@@ -62,7 +125,7 @@ const _PAGE_LAZY_SCRIPTS = {
   // Scripts pré-chargés au boot (dans loadAll) : recettes, cave, calendrier, spindles, settings
   // Les entrées ci-dessous garantissent le chargement même si navigate() est appelé
   // avant que loadAll() ait fini (ex: lien direct ou navigation rapide).
-  recettes:   ['bh-recettes.js'],
+  recettes:   ['bh-recettes.js', 'bh-brassins.js'], // openBrewingGuide() lives in bh-brassins
   brassins:   ['bh-brassins.js'],
   cave:       ['bh-cave.js'],
   spindles:   ['bh-spindles.js', 'bh-settings.js', 'bh-recettes.js'], // ingCost/ebcToColor/brewCost in recettes
@@ -86,6 +149,12 @@ function _ensureScript(name) {
     _lazyScriptPromises.set(name, p);
   }
   return _lazyScriptPromises.get(name);
+}
+
+function _showSkeleton(id, n, rowClass) {
+  const el = document.getElementById(id);
+  if (!el || el.querySelector('[data-id]')) return; // already has real items
+  el.innerHTML = Array.from({length: n || 5}, () => `<div class="${rowClass || 'skel-row'} skel"></div>`).join('');
 }
 
 async function navigate(page) {
@@ -118,6 +187,7 @@ async function _refreshPage(page) {
       S.inventory = await api('GET', '/api/inventory');
       renderInventaire();
     } else if (page === 'recettes') {
+      _showSkeleton('recipe-list-container', 6, 'skel-row');
       S.recipes = await api('GET', '/api/recipes');
       renderRecipeList();
     } else if (page === 'brassins') {
@@ -129,6 +199,7 @@ async function _refreshPage(page) {
       ]);
       renderBrassins();
     } else if (page === 'cave') {
+      _showSkeleton('cave-grid', 4, 'skel-card');
       [S.beers, S.sodaKegs, S.depletion] = await Promise.all([
         api('GET', '/api/beers'),
         api('GET', '/api/soda-kegs'),
@@ -356,7 +427,15 @@ async function openSettings() {
   await _ensureScript('bh-settings.js');
   renderSettingsCatalog(settingsCat);
   settingsTab('catalogue');
-  document.getElementById('modal-settings').classList.add('open');
+  const el = document.getElementById('modal-settings');
+  // Reset any buttons left in spinner state (same logic as openModal)
+  el.querySelectorAll('button[data-orig-html]').forEach(btn => {
+    if (btn.querySelector('.fa-spinner')) {
+      btn.disabled = false;
+      btn.innerHTML = btn.dataset.origHtml;
+    }
+  });
+  el.classList.add('open');
   _sizeSettingsBody();
   setTimeout(_sizeSettingsBody, 100);
 }

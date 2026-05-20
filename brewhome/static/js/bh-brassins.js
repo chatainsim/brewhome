@@ -1182,6 +1182,7 @@ function renderBrassins() {
 
   if (!shown.length) { list.innerHTML = ''; }
   else {
+    const recById = new Map(S.recipes.map(r => [r.id, r]));
     const STATUS_ORDER = ['planned', 'in_progress', 'fermenting', 'completed'];
     const STATUS_ICONS = {
       planned:     'fas fa-calendar-plus',
@@ -1202,7 +1203,7 @@ function renderBrassins() {
         let attColor = 'var(--muted)';
         let attIcon  = '';
         let attTip   = t('brew.att_real');
-        const rec = b.recipe_id ? S.recipes.find(r => r.id === b.recipe_id) : null;
+        const rec = b.recipe_id ? recById.get(b.recipe_id) : null;
         if (rec) {
           const yeast = (rec.ingredients || []).find(i => i.category === 'levure');
           if (yeast) {
@@ -1235,7 +1236,7 @@ function renderBrassins() {
       const storedEff  = b.actual_efficiency;
       const effResult  = storedEff != null ? null : _calcBrewEff(b.og, b.volume_brewed, b.recipe_id);
       const eff        = storedEff ?? effResult?.eff ?? null;
-      const recipeEff  = effResult?.recipeEff ?? (b.recipe_id ? (S.recipes.find(r=>r.id===b.recipe_id)?.brewhouse_efficiency ?? null) : null);
+      const recipeEff  = effResult?.recipeEff ?? (b.recipe_id ? (recById.get(b.recipe_id)?.brewhouse_efficiency ?? null) : null);
       if (eff != null) {
         let effColor = 'var(--muted)', effIcon = '';
         let effTip = t('brew.eff_real');
@@ -1296,7 +1297,14 @@ function renderBrassins() {
           <div class="brew-card-meta">
             ${b.recipe_name ? `<i class="fas fa-scroll"></i> ${esc(b.recipe_name)} · ` : ''}
             ${b.brew_date ? `<i class="fas fa-calendar"></i> ${b.brew_date} · ` : ''}
-            ${b.volume_brewed ? `${b.volume_brewed}L · ` : ''}
+            ${b.volume_brewed ? (() => {
+              const _yRecipe = b.recipe_id ? recById.get(b.recipe_id) : null;
+              const _yTarget = _yRecipe?.volume;
+              if (!_yTarget) return `${b.volume_brewed}L · `;
+              const _yPct = Math.round(b.volume_brewed / _yTarget * 100);
+              const _yColor = Math.abs(_yPct - 100) <= 5 ? 'var(--success)' : _yPct < 90 ? 'var(--amber)' : 'var(--info)';
+              return `${b.volume_brewed}L <span style="color:${_yColor};font-size:.78rem" title="${t('brew.yield_target').replace('${vol}', _yTarget)}">(${_yPct}%)</span> · `;
+            })() : ''}
             ${b.abv ? `<strong style="color:var(--amber)">${b.abv}% ABV</strong>` : ''}
             ${b.og ? ` · OG ${b.og}` : ''}${b.fg ? ` → FG ${b.fg}` : ''}
             ${attHtml}${effHtml}${costHtml}
@@ -1411,15 +1419,11 @@ function renderBrassins() {
   }
 }
 
-let _saveBrewOrderTimer = null;
-function saveBrewOrder() {
-  clearTimeout(_saveBrewOrderTimer);
-  _saveBrewOrderTimer = setTimeout(async () => {
-    try {
-      await api('PUT', '/api/brews/reorder',
-        S.brews.map((b, i) => ({ id: b.id, sort_order: i })));
-    } catch(e) { toast(t('brew.err_save_order'), 'error'); }
-  }, 600);
+async function saveBrewOrder() {
+  try {
+    await api('PUT', '/api/brews/reorder',
+      S.brews.map((b, i) => ({ id: b.id, sort_order: i })));
+  } catch(e) { toast(t('brew.err_save_order'), 'error'); }
 }
 
 function openBrewModal(recipeId = null) {
@@ -1570,6 +1574,7 @@ function _bewRecompute() {
   const brewId   = parseInt(document.getElementById('bew-id').value);
   const recipeId = S.brews.find(b => b.id === brewId)?.recipe_id ?? null;
   _updateBewEffRow(og, vol, recipeId);
+  _updateBewYieldRow(vol, recipeId);
   _updateBewOGAnalysis(og, vol, recipeId);
 }
 document.getElementById('bew-og').oninput  = _bewRecompute;
@@ -1662,6 +1667,33 @@ function _updateBewEffRow(og, vol, recipeId) {
   document.getElementById('bew-eff-badge').innerHTML    = badgeHtml;
   document.getElementById('bew-eff-badge').style.color  = effColor;
   document.getElementById('bew-eff-target').textContent = targetHtml;
+  row.style.display = 'flex';
+}
+
+function _updateBewYieldRow(vol, recipeId) {
+  const row = document.getElementById('bew-yield-row');
+  if (!row) return;
+  const recipe = recipeId ? S.recipes.find(r => r.id === recipeId) : null;
+  if (!vol || !recipe?.volume) { row.style.display = 'none'; return; }
+  const target   = recipe.volume;
+  const yieldPct = (vol / target) * 100;
+  const delta    = yieldPct - 100;
+  let color, badgeHtml;
+  if (Math.abs(delta) <= 5) {
+    color     = 'var(--success)';
+    badgeHtml = `<i class="fas fa-circle-check"></i> ${t('brew.yield_on_target')}`;
+  } else if (delta < 0) {
+    color     = 'var(--amber)';
+    badgeHtml = `<i class="fas fa-triangle-exclamation"></i> ${t('brew.yield_below')}`;
+  } else {
+    color     = 'var(--info)';
+    badgeHtml = `<i class="fas fa-circle-arrow-up"></i> ${t('brew.yield_above')}`;
+  }
+  document.getElementById('bew-yield-val').textContent   = `${vol} L (${yieldPct.toFixed(0)}%)`;
+  document.getElementById('bew-yield-val').style.color   = color;
+  document.getElementById('bew-yield-badge').innerHTML   = badgeHtml;
+  document.getElementById('bew-yield-badge').style.color = color;
+  document.getElementById('bew-yield-target').textContent = t('brew.yield_target').replace('${vol}', target);
   row.style.display = 'flex';
 }
 
@@ -1926,6 +1958,7 @@ function openBrewEditModal(id) {
     : '';
   _updateBewAttRow(b.og, b.fg);
   _updateBewEffRow(b.og, b.volume_brewed, b.recipe_id ?? null);
+  _updateBewYieldRow(b.volume_brewed, b.recipe_id ?? null);
   showBrewEditAlert('');
   openModal('brew-edit-modal');
 }

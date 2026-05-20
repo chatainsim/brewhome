@@ -22,6 +22,7 @@
         <option value="alpha"   data-i18n="draft.sort_alpha">A → Z</option>
         <option value="target"  data-i18n="draft.sort_target">Date cible</option>
       </select>
+      <div id="draft-status-filter" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px"></div>
       <div style="position:relative;display:flex;align-items:center">
         <input type="text" id="draft-search"
           style="width:100%;padding-right:24px;font-size:.85rem"
@@ -82,6 +83,17 @@
               <span id="draft-banner-date" style="color:var(--muted);flex-shrink:0"></span>
               <span id="draft-banner-countdown" style="font-size:.75rem;font-weight:700;flex-shrink:0"></span>
             </div>
+          </div>
+
+          <!-- Statut -->
+          <div style="margin-bottom:14px">
+            <label class="form-label" data-i18n="draft.status_label">Statut</label>
+            <select id="draft-status" class="form-control" style="font-size:.875rem"
+              onchange="scheduleDraftSave()">
+              <option value="idea"        data-i18n="draft.status_idea">Idée</option>
+              <option value="in_progress" data-i18n="draft.status_in_progress">En cours</option>
+              <option value="ready"       data-i18n="draft.status_ready">Prêt à brasser</option>
+            </select>
           </div>
 
           <!-- Style + Volume -->
@@ -166,47 +178,21 @@
               oninput="scheduleDraftSave()"></textarea>
           </div>
 
-          <!-- Image -->
+          <!-- Images (galerie) -->
           <div style="margin-bottom:8px">
-            <label class="form-label" data-i18n="draft.image">Image</label>
-            <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-              <!-- Aperçu -->
-              <div style="flex-shrink:0">
-                <div id="draft-img-empty" onclick="document.getElementById('draft-img-input').click()"
-                  style="width:160px;height:160px;border:2px dashed var(--border);border-radius:12px;
-                    display:flex;flex-direction:column;align-items:center;justify-content:center;
-                    gap:8px;color:var(--muted);font-size:.8rem;cursor:pointer;transition:border-color .2s"
-                  onmouseenter="this.style.borderColor='var(--accent)'"
-                  onmouseleave="this.style.borderColor='var(--border)'">
-                  <i class="fas fa-image" style="font-size:1.8rem;opacity:.35"></i>
-                  <span data-i18n="draft.img_click_add" style="text-align:center;line-height:1.3;white-space:pre-line">Cliquer pour&#10;ajouter</span>
-                </div>
-                <img id="draft-img-preview" src="" alt="aperçu"
-                  style="display:none;width:160px;height:160px;object-fit:cover;border-radius:12px;cursor:pointer"
-                  onclick="document.getElementById('draft-img-input').click()"
-                  title="Cliquer pour changer l'image">
-                <input type="file" id="draft-img-input" accept="image/*" style="display:none"
-                  onchange="loadDraftImageFile(this)">
-              </div>
-              <!-- Boutons + prompt -->
-              <div style="display:flex;flex-direction:column;gap:8px;padding-top:4px;flex:1;min-width:160px">
-                <textarea id="draft-img-extra" class="form-control" rows="3"
-                  placeholder="Instructions supplémentaires pour l'IA (style artistique, couleurs, ambiance…)"
-                  style="resize:vertical;font-size:.82rem;font-family:inherit"></textarea>
-                <div style="display:flex;gap:6px;flex-wrap:wrap">
-                  <button class="btn btn-ghost btn-sm" id="draft-img-ai-btn" onclick="generateDraftImage()"
-                    style="color:#8b5cf6;border-color:rgba(139,92,246,.4)">
-                    <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="draft.img_generate">Générer avec IA</span>
-                  </button>
-                  <button class="btn btn-ghost btn-sm" onclick="document.getElementById('draft-img-input').click()">
-                    <i class="fas fa-upload"></i> <span data-i18n="draft.img_import">Importer</span>
-                  </button>
-                  <button id="draft-img-remove-btn" class="btn btn-ghost btn-sm"
-                    style="display:none;color:var(--danger)" onclick="removeDraftImage()">
-                    <i class="fas fa-trash"></i> <span data-i18n="draft.img_remove">Supprimer</span>
-                  </button>
-                </div>
-              </div>
+            <label class="form-label" data-i18n="draft.images">Images</label>
+            <div id="draft-img-gallery"
+              style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;min-height:88px;align-items:flex-start"></div>
+            <input type="file" id="draft-img-input" accept="image/*" style="display:none"
+              onchange="loadDraftImageFile(this)">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <textarea id="draft-img-extra" class="form-control" rows="2"
+                data-i18n-placeholder="draft.img_extra_hint"
+                style="resize:vertical;font-size:.82rem;font-family:inherit"></textarea>
+              <button class="btn btn-ghost btn-sm" id="draft-img-ai-btn" onclick="withBtn(this, generateDraftImage)"
+                style="color:#8b5cf6;border-color:rgba(139,92,246,.4);align-self:flex-start">
+                <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="draft.img_generate">Générer avec IA</span>
+              </button>
             </div>
           </div>
 
@@ -238,3 +224,32 @@
   }).observe(ed, { attributes: true, attributeFilter: ['style'] });
 })();
 </script>
+
+<!-- ── Lightbox images brouillon ─────────────────────────────────────────── -->
+<div id="draft-lightbox" onclick="closeDraftLightbox()"
+  style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.93);
+    cursor:zoom-out;align-items:center;justify-content:center">
+  <button onclick="event.stopPropagation();closeDraftLightbox()"
+    style="position:absolute;top:14px;right:18px;background:rgba(255,255,255,.12);border:none;
+      color:#fff;font-size:1.3rem;width:38px;height:38px;border-radius:50%;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;z-index:1">✕</button>
+  <button id="draft-lb-prev" onclick="event.stopPropagation();draftLbNav(-1)"
+    style="display:none;position:absolute;left:14px;background:rgba(255,255,255,.12);border:none;
+      color:#fff;font-size:1.1rem;width:38px;height:38px;border-radius:50%;cursor:pointer;
+      align-items:center;justify-content:center;z-index:1">
+    <i class="fas fa-chevron-left"></i>
+  </button>
+  <img id="draft-lb-img" src="" alt=""
+    onclick="event.stopPropagation()"
+    style="max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;
+      box-shadow:0 8px 48px rgba(0,0,0,.7);cursor:default">
+  <button id="draft-lb-next" onclick="event.stopPropagation();draftLbNav(1)"
+    style="display:none;position:absolute;right:14px;background:rgba(255,255,255,.12);border:none;
+      color:#fff;font-size:1.1rem;width:38px;height:38px;border-radius:50%;cursor:pointer;
+      align-items:center;justify-content:center;z-index:1">
+    <i class="fas fa-chevron-right"></i>
+  </button>
+  <div id="draft-lb-counter"
+    style="position:absolute;bottom:14px;color:rgba(255,255,255,.5);font-size:.85rem;
+      pointer-events:none"></div>
+</div>

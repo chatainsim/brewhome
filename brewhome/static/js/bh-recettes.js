@@ -396,6 +396,48 @@ async function rateRecipe(id, n) {
   } catch(e) { toast(t('rec.err_notation'), 'error'); }
 }
 
+// ── Stock rapide par recette (badge sur la carte) ─────────────────────────────
+let _recStockInvMap = null;
+
+function _buildRecStockInvMap() {
+  if (!S.inventory?.length) { _recStockInvMap = null; return; }
+  _recStockInvMap = {};
+  S.inventory.filter(i => !i.archived).forEach(item => {
+    const key = item.name.trim().toLowerCase();
+    const b   = _toBaseQty(parseFloat(item.quantity) || 0, item.unit);
+    if (!_recStockInvMap[key]) _recStockInvMap[key] = {};
+    _recStockInvMap[key][b.base] = (_recStockInvMap[key][b.base] || 0) + b.val;
+  });
+}
+
+function _recipeStockBadge(r) {
+  if (!_recStockInvMap) return '';
+  const ings = r.ingredients || [];
+  if (!ings.length) return '';
+  // Aggregate needed quantities per ingredient name
+  const needs = new Map();
+  ings.forEach(ing => {
+    const key = (ing.name || '').trim().toLowerCase();
+    if (!key) return;
+    const b = _toBaseQty(parseFloat(ing.quantity) || 0, ing.unit);
+    if (!needs.has(key)) needs.set(key, { val: 0, base: b.base });
+    needs.get(key).val += b.val;
+  });
+  let status = 'ok';
+  for (const [key, { val, base }] of needs) {
+    const inv   = _recStockInvMap[key];
+    if (!inv) { status = 'missing'; break; }
+    const avail = inv[base] || 0;
+    if (avail < val) { status = avail === 0 ? 'missing' : 'low'; if (status === 'missing') break; }
+  }
+  const cfg = {
+    ok:      { color:'var(--success)', bg:'rgba(16,185,129,.12)',  border:'rgba(16,185,129,.3)',  icon:'fa-check',                tip: t('rec.stock_all_ok')  },
+    low:     { color:'var(--amber)',   bg:'rgba(251,191,36,.12)',  border:'rgba(251,191,36,.3)',  icon:'fa-triangle-exclamation', tip: t('rec.stock_low')    },
+    missing: { color:'#f87171',        bg:'rgba(239,68,68,.12)',   border:'rgba(239,68,68,.3)',   icon:'fa-xmark',                tip: t('rec.stock_missing') },
+  }[status];
+  return `<span title="${cfg.tip}" style="display:inline-flex;align-items:center;gap:3px;font-size:.7rem;color:${cfg.color};background:${cfg.bg};border:1px solid ${cfg.border};border-radius:10px;padding:1px 7px;cursor:help"><i class="fas ${cfg.icon}"></i></span>`;
+}
+
 function recipeCost(r) {
   let total = 0, has = false;
   (r.ingredients || []).forEach(ing => {
@@ -479,6 +521,7 @@ function _recipeItemHtml(r) {
   const starsHtml = r.rating
     ? `<span class="stars-sm">${Array.from({length:5},(_,i)=>`<span style="color:${i<r.rating?'var(--amber)':'var(--border)'}">\u2605</span>`).join('')}</span>`
     : '';
+  const stockBadge = _recipeStockBadge(r);
   const activeBrews = S.brews.filter(b => b.recipe_id === r.id && !b.archived && b.status !== 'completed');
   const linkedBeers = S.beers.filter(b => b.recipe_id === r.id && !b.archived);
   const total33  = linkedBeers.reduce((s, b) => s + (b.stock_33cl   || 0), 0);
@@ -521,6 +564,7 @@ function _recipeItemHtml(r) {
           <div class="recipe-item-meta" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <span>${r.batch_no ? '#' + r.batch_no + ' · ' : ''}${r.style ? esc(r.style) + ' · ' : ''}${r.volume}L · ${r.ingredients.length} ing.</span>
             ${starsHtml}
+            ${stockBadge}
             ${costBadge}
           </div>
           <div class="recipe-item-status">${statusHtml}</div>
@@ -536,6 +580,7 @@ let _recListAC = null;
 const renderRecipeListDebounced = debounce(renderRecipeList, 200);
 
 function renderRecipeList() {
+  _buildRecStockInvMap(); // rebuild inventory map for stock badges
   // Sync sort select
   const sortSel = document.getElementById('rec-sort-select');
   if (sortSel) sortSel.value = recSort;
@@ -975,7 +1020,14 @@ function renderIngredientRows() {
       totalLabel = `<span style="font-weight:400;opacity:.7;margin-left:8px">${totalMaltKg >= 1 ? totalMaltKg.toFixed(2)+' kg' : (totalMaltKg*1000).toFixed(0)+' g'}</span>`;
     if (cat === 'houblon') {
       const hopTotalSpan = totalHopG > 0 ? `<span style="font-weight:400;opacity:.7;margin-left:8px">${totalHopG.toFixed(0)} g</span>` : '';
-      totalLabel = hopTotalSpan + `<span id="rec-ibu-badge" style="font-weight:600;margin-left:10px;font-size:.78rem;color:var(--hop)"></span>`;
+      const dryHopG = recIngredients
+        .filter(i => i.category === 'houblon' && i.hop_type === 'dryhop')
+        .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity * 1000 : i.quantity), 0);
+      const vol = parseFloat(document.getElementById('rec-volume')?.value) || 20;
+      const dryHopBadge = dryHopG > 0
+        ? `<span style="font-weight:600;margin-left:10px;font-size:.78rem;color:#818cf8" title="${t('rec.dryhop_rate_tip')}"><i class="fas fa-snowflake" style="font-size:.65rem;margin-right:3px"></i>${(dryHopG / vol).toFixed(1)} g/L</span>`
+        : '';
+      totalLabel = hopTotalSpan + `<span id="rec-ibu-badge" style="font-weight:600;margin-left:10px;font-size:.78rem;color:var(--hop)"></span>` + dryHopBadge;
     }
     html += `<div style="margin-bottom:10px"><div class="section-label" style="color:${catColors[cat]};margin-bottom:6px">${catLabel(cat)}${totalLabel}</div>`;
     ings.forEach((ing, idx) => {
@@ -1046,7 +1098,7 @@ function renderIngredientRows() {
       const maltPct = cat === 'malt' && totalMaltKg > 0 ? (maltKg / totalMaltKg * 100).toFixed(1) : null;
 
       html += `
-        <div class="ing-row" draggable="true" data-ridx="${realIdx}">
+        <div class="ing-row" data-ridx="${realIdx}">
           <div class="ing-drag-handle" onmousedown="_ingDragFromHandle=true" onmouseup="_ingDragFromHandle=false" ontouchstart="_ingDragFromHandle=true"><i class="fas fa-grip-vertical"></i></div>
           <div class="ing-name" style="position:relative">
             <div class="ing-lbl"><i class="fas fa-flask" style="font-size:.6rem"></i> ${t('rec.ing_name')}</div>
@@ -1061,21 +1113,23 @@ function renderIngredientRows() {
             </div>
             <div class="ing-suggest" id="sug-${realIdx}"></div>
           </div>
-          <div class="ing-qty" style="max-width:110px">
-            <div class="ing-lbl"><i class="fas fa-scale-balanced"></i> ${t('rec.ing_qty')}</div>
-            <input type="number" placeholder="0" step="${ing.unit==='g'?0.01:ing.unit==='sachet'?0.5:0.1}" min="0" value="${ing.quantity||''}"
-              onchange="recIngredients[${realIdx}].quantity=parseFloat(this.value)||0;renderIngredientRows();recCalc()"
-              style="font-size:.875rem">
+          <div class="ing-fields">
+            <div class="ing-qty">
+              <div class="ing-lbl"><i class="fas fa-scale-balanced"></i> ${t('rec.ing_qty')}</div>
+              <input type="number" placeholder="0" step="${ing.unit==='g'?0.01:ing.unit==='sachet'?0.5:0.1}" min="0" value="${ing.quantity||''}"
+                onchange="recIngredients[${realIdx}].quantity=parseFloat(this.value)||0;renderIngredientRows();recCalc()"
+                style="font-size:.875rem">
+            </div>
+            <div class="ing-unit">
+              <div class="ing-lbl"><i class="fas fa-ruler"></i> ${t('rec.ing_unit')}</div>
+              <select onchange="recIngredients[${realIdx}].unit=this.value;renderIngredientRows();recCalc()" style="font-size:.8rem">
+                ${['kg','g','L','mL','sachet','pièce'].map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
+              </select>
+            </div>
+            ${maltPct !== null ? `<div class="malt-pct">${maltPct}%</div>` : ''}
+            ${extraFields}
+            ${(() => { const c = ingCost(ing); return c !== null ? `<div style="flex-shrink:0;text-align:center"><div class="ing-lbl"><i class="fas fa-euro-sign"></i> ${t('rec.ing_cost')}</div><div style="font-size:.85rem;color:var(--success);font-weight:600">≈ ${c.toFixed(2)} €</div></div>` : ''; })()}
           </div>
-          <div class="ing-unit" style="max-width:90px">
-            <div class="ing-lbl"><i class="fas fa-ruler"></i> ${t('rec.ing_unit')}</div>
-            <select onchange="recIngredients[${realIdx}].unit=this.value;renderIngredientRows();recCalc()" style="font-size:.8rem">
-              ${['kg','g','L','mL','sachet','pièce'].map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
-            </select>
-          </div>
-          ${maltPct !== null ? `<div class="malt-pct">${maltPct}%</div>` : ''}
-          ${extraFields}
-          ${(() => { const c = ingCost(ing); return c !== null ? `<div style="flex-shrink:0;text-align:center"><div class="ing-lbl"><i class="fas fa-euro-sign"></i> ${t('rec.ing_cost')}</div><div style="font-size:.85rem;color:var(--success);font-weight:600">≈ ${c.toFixed(2)} €</div></div>` : ''; })()}
           <button class="btn btn-icon btn-danger btn-sm ing-remove" onclick="removeIng(${realIdx})"><i class="fas fa-times"></i></button>
         </div>`;
     });
@@ -1307,7 +1361,27 @@ async function saveRecipe(silent = false) {
         brewhouse_efficiency:'rec.efficiency', ferm_temp:'rec.ferm_temp',
         ferm_time:'rec.ferm_time_label', mash_ratio:'rec.mash_ratio',
         evap_rate:'rec.evap', grain_absorption:'rec.absorption', volume:'rec.volume',
+        name:'rec.field_name',
       };
+      const _fieldIds = {
+        volume:'rec-volume', mash_temp:'rec-mash-temp', mash_time:'rec-mash-time',
+        boil_time:'rec-boil-time', brewhouse_efficiency:'rec-efficiency',
+        ferm_temp:'rec-ferm-temp', ferm_time:'rec-ferm-time',
+        mash_ratio:'rec-mash-ratio', evap_rate:'rec-evap', grain_absorption:'rec-absorption',
+        name:'rec-name',
+      };
+      // Clear previous highlights
+      document.querySelectorAll('.rec-field-error').forEach(el => el.classList.remove('rec-field-error'));
+      // Highlight each offending field
+      let firstEl = null;
+      Object.keys(e.fields).forEach(f => {
+        const el = _fieldIds[f] ? document.getElementById(_fieldIds[f]) : null;
+        if (!el) return;
+        el.classList.add('rec-field-error');
+        el.addEventListener('input', () => el.classList.remove('rec-field-error'), { once: true });
+        if (!firstEl) firstEl = el;
+      });
+      if (firstEl) firstEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const msgs = Object.entries(e.fields)
         .map(([f, msg]) => `${t(_labels[f] || f)} : ${msg}`)
         .join(' — ');
@@ -1499,55 +1573,66 @@ async function checkRecipeStock() {
     </div>`;
   }
 
+  // ── Agréger les quantités par ingrédient (même nom = même lot en stock) ──────
+  const ingAgg = new Map(); // nameKey → { name, category, alpha, neededVal, base, count }
+  ings.forEach(ing => {
+    const needed  = toBase(parseFloat(ing.quantity) || 0, ing.unit);
+    const nameKey = (ing.name || '').trim().toLowerCase();
+    if (!ingAgg.has(nameKey)) {
+      ingAgg.set(nameKey, { name: ing.name, category: ing.category, alpha: ing.alpha, neededVal: 0, base: needed.base, count: 0 });
+    }
+    const entry = ingAgg.get(nameKey);
+    entry.neededVal += needed.val;
+    entry.count++;
+  });
+
   const shoppingItems = [];
   let allOk = true;
   let rows = '';
-  ings.forEach(ing => {
-    const needed     = toBase(parseFloat(ing.quantity) || 0, ing.unit);
-    const nameKey    = (ing.name || '').trim().toLowerCase();
+  ingAgg.forEach(({ name, category, alpha, neededVal, base, count }) => {
+    const nameKey    = name.trim().toLowerCase();
     const invQtyMap  = invMap[nameKey] || {};
-    const available  = invQtyMap[needed.base] || 0;
+    const available  = invQtyMap[base] || 0;
     const inInv      = Object.keys(invQtyMap).length > 0;
-    // Item is in inventory but stored in a different unit family (e.g. recipe in ml, inventory in g)
     const unitMismatch = inInv && available === 0;
-    const color      = CAT_COLOR[ing.category] || 'var(--text)';
-    const icon       = CAT_ICON[ing.category]  || 'box';
+    const color      = CAT_COLOR[category] || 'var(--text)';
+    const icon       = CAT_ICON[category]  || 'box';
+    const countLabel = count > 1 ? ` <span style="font-size:.72rem;color:var(--muted);font-weight:400">(${count}×)</span>` : '';
 
     let status, statusColor, detail;
     if (!inInv) {
       status      = `<span style="background:rgba(239,68,68,.12);color:#f87171;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_missing')}</span>`;
       statusColor = '#f87171';
-      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong></span>`;
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${formatBase(neededVal, base)}</strong></span>`;
       allOk = false;
-      shoppingItems.push({ name: ing.name, cat: ing.category, qty: ing.quantity, unit: ing.unit });
+      shoppingItems.push({ name, cat: category, qty: formatBase(neededVal, base), unit: '' });
     } else if (unitMismatch) {
-      // Can't compare — units are in different families (mass vs volume)
       const altBase = Object.keys(invQtyMap)[0];
       const altQty  = invQtyMap[altBase];
       status      = `<span style="background:rgba(139,92,246,.12);color:#a78bfa;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">≈ unités diff.</span>`;
       statusColor = '#a78bfa';
-      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:#a78bfa">${formatBase(altQty, altBase)}</strong></span>`;
-    } else if (available >= needed.val) {
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${formatBase(neededVal, base)}</strong> · ${t('rec.stock_available')}: <strong style="color:#a78bfa">${formatBase(altQty, altBase)}</strong></span>`;
+    } else if (available >= neededVal) {
       status      = `<span style="background:rgba(16,185,129,.12);color:var(--success);padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_ok')}</span>`;
       statusColor = 'var(--success)';
-      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--success)">${formatBase(available, needed.base)}</strong></span>`;
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${formatBase(neededVal, base)}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--success)">${formatBase(available, base)}</strong></span>`;
     } else {
-      const shortVal = needed.val - available;
+      const shortVal = neededVal - available;
       status      = `<span style="background:rgba(251,191,36,.12);color:var(--amber);padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">${t('rec.stock_low')}</span>`;
       statusColor = 'var(--amber)';
-      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${ing.quantity} ${ing.unit}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--amber)">${formatBase(available, needed.base)}</strong> · <span style="color:#f87171">${t('rec.stock_short_by')} ${formatBase(shortVal, needed.base)}</span></span>`;
+      detail      = `<span style="font-size:.8rem;color:var(--muted)">${t('rec.stock_needed')}: <strong>${formatBase(neededVal, base)}</strong> · ${t('rec.stock_available')}: <strong style="color:var(--amber)">${formatBase(available, base)}</strong> · <span style="color:#f87171">${t('rec.stock_short_by')} ${formatBase(shortVal, base)}</span></span>`;
       allOk = false;
-      shoppingItems.push({ name: ing.name, cat: ing.category, qty: formatBase(shortVal, needed.base), unit: '' });
+      shoppingItems.push({ name, cat: category, qty: formatBase(shortVal, base), unit: '' });
     }
 
-    const needsSub = ing.category === 'houblon' && (!inInv || available < needed.val);
-    const subPanel = needsSub ? renderSubstitutePanel(ing.name, ing.alpha) : '';
+    const needsSub = category === 'houblon' && (!inInv || available < neededVal);
+    const subPanel = needsSub ? renderSubstitutePanel(name, alpha) : '';
 
     rows += `<div style="border-bottom:1px solid var(--border);padding:9px 0">
       <div style="display:flex;align-items:center;gap:10px">
         <i class="fas fa-${icon}" style="color:${color};width:14px;text-align:center;flex-shrink:0"></i>
         <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:.88rem">${esc(ing.name)}</div>
+          <div style="font-weight:600;font-size:.88rem">${esc(name)}${countLabel}</div>
           ${detail}
         </div>
         ${status}
@@ -1682,6 +1767,18 @@ function renderRecipeView() {
       </tr>`;
     });
     hopHtml += '</tbody></table>';
+    // Badge dry hop g/L
+    const dryHops = hops.filter(h => (h.hop_type || 'ebullition') === 'dryhop');
+    if (dryHops.length) {
+      const dryHopG = dryHops.reduce((s, h) => s + (h.unit === 'kg' ? h.quantity * 1000 : h.quantity), 0);
+      const vol = parseFloat(document.getElementById('rec-volume')?.value) || r.volume || 20;
+      hopHtml += `<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:.82rem">
+        <i class="fas fa-snowflake" style="color:#818cf8;font-size:.75rem"></i>
+        <span style="color:var(--muted)">${t('rec.dryhop_rate_lbl')}</span>
+        <strong style="color:#818cf8">${(dryHopG / vol).toFixed(1)} g/L</strong>
+        <span style="color:var(--muted);font-size:.75rem">(${dryHopG.toFixed(0)} g / ${vol} L)</span>
+      </div>`;
+    }
   }
 
   // Levures + Autres
@@ -1775,7 +1872,7 @@ function renderRecipeView() {
     ${malts.length ? `<div class="rec-view-section" style="color:var(--malt)"><i class="fas fa-wheat-awn"></i> ${t('rec.malts_full')}</div><div style="margin-bottom:12px">${maltHtml}</div>` : ''}
     ${hops.length  ? `<div class="rec-view-section" style="color:var(--hop)"><i class="fas fa-seedling"></i> ${t('cat.houblons')}</div><div style="margin-bottom:12px">${hopHtml}</div>` : ''}
     ${otherHtml}
-    ${r.notes ? `<div class="rec-view-section"><i class="fas fa-note-sticky"></i> Notes</div><div class="view-notes">${esc(r.notes)}</div>` : ''}
+    ${r.notes ? `<div class="rec-view-section"><i class="fas fa-note-sticky"></i> Notes</div><div class="view-notes">${renderMd(r.notes)}</div>` : ''}
 
     ${(() => {
       const linked = S.beers.filter(b => b.recipe_id === r.id && !b.archived && b.photo);
@@ -1983,14 +2080,21 @@ let _ingDragSrc = null;
 
 function _initIngDrag(container) {
   container.querySelectorAll('.ing-row').forEach(row => {
+    // Draggable activé uniquement depuis le handle → la sélection de texte reste possible partout ailleurs
+    const handle = row.querySelector('.ing-drag-handle');
+    if (handle) {
+      handle.addEventListener('pointerdown', () => { row.draggable = true; });
+      handle.addEventListener('pointerup',   () => { row.draggable = false; });
+    }
     row.addEventListener('dragstart', e => {
-      if (!_ingDragFromHandle) { e.preventDefault(); return; }
+      if (!_ingDragFromHandle) { e.preventDefault(); row.draggable = false; return; }
       _ingDragFromHandle = false;
       _ingDragSrc = parseInt(row.dataset.ridx);
       row.classList.add('ing-dragging');
       e.dataTransfer.effectAllowed = 'move';
     });
     row.addEventListener('dragend', () => {
+      row.draggable = false;
       _ingDragSrc = null;
       container.querySelectorAll('.ing-row').forEach(r => {
         r.classList.remove('ing-dragging', 'ing-drop-target');
@@ -2370,7 +2474,7 @@ function printRecipe() {
   });
 
   const notesHtml = r.notes
-    ? `<div class="notes"><strong>${t('common.notes')} :</strong><br>${esc(r.notes).replace(/\n/g,'<br>')}</div>` : '';
+    ? `<div class="notes"><strong>${t('common.notes')} :</strong><br>${renderMd(r.notes)}</div>` : '';
 
   const win = window.open('', '_blank', 'width=840,height=700');
   win.document.write(`<!DOCTYPE html><html lang="fr"><head>
@@ -2405,6 +2509,7 @@ function printRecipe() {
     .ebc-dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:middle;border:1px solid rgba(0,0,0,.15)}
     @media print{body{padding:16px}}
     @page{margin:12mm}
+    ${_MD_PRINT_CSS}
   </style></head><body>
   <div class="header">
     <h1>${esc(r.name)}</h1>
@@ -2518,6 +2623,7 @@ function printBrewingSheet() {
     .notes-area{border:1px solid #ccc;border-radius:6px;padding:10px;min-height:60px;margin-bottom:8px;font-size:11px;color:#888}
     .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     @media print{body{padding:12px}@page{size:A4 portrait;margin:10mm}}
+    ${_MD_PRINT_CSS}
   </style></head><body>
   <h1>${esc(r.name)}</h1>
   <div class="meta">
@@ -2575,7 +2681,7 @@ function printBrewingSheet() {
     <tr><td>ABV calculé</td><td style="border-bottom:1px solid #aaa">&nbsp;</td><td style="border-bottom:1px solid #aaa">&nbsp;</td></tr>
   </table>
 
-  ${r.notes ? `<h2>Notes</h2><div style="font-size:11px;line-height:1.6;padding:8px 10px;background:#f8f8f8;border-radius:6px">${esc(r.notes).replace(/\n/g,'<br>')}</div>` : ''}
+  ${r.notes ? `<h2>Notes</h2><div class="notes">${renderMd(r.notes)}</div>` : ''}
 
   <script>window.onload=function(){window.print()}<\/script>
 </body></html>`);
@@ -2698,7 +2804,7 @@ function printCombinedSheet() {
   if(!boilHops.length) schedHtml+=`<tr><td colspan="4" style="color:#aaa;text-align:center">–</td></tr>`;
   schedHtml+='</tbody></table>';
 
-  const notesHtml=r.notes?`<h3>${t('common.notes')}</h3><div class="notes">${esc(r.notes).replace(/\n/g,'<br>')}</div>`:'';
+  const notesHtml=r.notes?`<h3>${t('common.notes')}</h3><div class="notes">${renderMd(r.notes)}</div>`:'';
 
   const win=window.open('','_blank','width=1100,height=800');
   win.document.write(`<!DOCTYPE html><html lang="fr"><head>
@@ -2747,6 +2853,7 @@ function printCombinedSheet() {
       .col{overflow:hidden}
       @page{size:A4 landscape;margin:8mm}
     }
+    ${_MD_PRINT_CSS}
   </style></head><body>
   <div class="page">
     <div class="page-header">

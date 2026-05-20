@@ -3,9 +3,10 @@ import os
 import secrets
 import urllib.request
 import urllib.error
+import uuid
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, Response, jsonify, request, current_app
+from flask import Blueprint, Response, jsonify, request, current_app, send_from_directory
 
 from db import get_db, get_readings_db, PHOTOS_DIR
 
@@ -17,8 +18,92 @@ def _safe_int(val):
         return int(val)
     except (ValueError, TypeError):
         return None
-from helpers import _image_too_large, _shrink_image_b64, api_error
+from helpers import _image_too_large, _shrink_image_b64, api_error, _b64_to_jpeg_file
 from constants import BrewStatus
+
+
+_DRAFT_IMG_PREFIX = '/api/draft-images/'
+
+
+def _draft_image_url(filename):
+    return f'{_DRAFT_IMG_PREFIX}{filename}'
+
+
+def _save_b64_to_draft_file(raw):
+    """Decode a base64 image string and save it to PHOTOS_DIR. Returns the filename."""
+    os.makedirs(PHOTOS_DIR, exist_ok=True)
+    fname = f'draft_{uuid.uuid4().hex}.jpg'
+    _b64_to_jpeg_file(raw, os.path.join(PHOTOS_DIR, fname))
+    return fname
+
+
+def _delete_draft_image_file(filename):
+    """Delete a single draft image file from disk, ignoring missing files."""
+    if not filename:
+        return
+    try:
+        os.remove(os.path.join(PHOTOS_DIR, filename))
+    except OSError:
+        pass
+
+
+def _process_draft_images(images_raw, old_files_json='[]'):
+    """Convert a JSON array of base64/URLs to disk files.
+
+    - base64 strings  → saved to disk as JPEG, filename added to result
+    - /api/draft-images/<fname> URLs → filename kept as-is (already on disk)
+    - Files present in old_files_json but absent from the new list are deleted.
+
+    Returns JSON string of filename list.
+    """
+    try:
+        imgs = json.loads(images_raw) if isinstance(images_raw, str) else (images_raw or [])
+    except (ValueError, TypeError):
+        imgs = []
+    try:
+        old_files = set(json.loads(old_files_json) if isinstance(old_files_json, str) else (old_files_json or []))
+    except (ValueError, TypeError):
+        old_files = set()
+
+    new_files = []
+    for img in imgs:
+        if not isinstance(img, str) or not img:
+            continue
+        if img.startswith('data:'):
+            try:
+                if _image_too_large(img):
+                    img = _shrink_image_b64(img)
+                fname = _save_b64_to_draft_file(img)
+                new_files.append(fname)
+            except Exception as e:
+                current_app.logger.warning('draft_images: failed to save image: %s', e)
+        elif img.startswith(_DRAFT_IMG_PREFIX):
+            fname = os.path.basename(img)
+            new_files.append(fname)
+
+    # Delete orphaned files (were on disk, no longer referenced)
+    for orphan in old_files - set(new_files):
+        _delete_draft_image_file(orphan)
+
+    return json.dumps(new_files)
+
+
+def _draft_row_to_dict(row):
+    """Convert a draft_recipes row to a dict, replacing images_files with URL array."""
+    d = dict(row)
+    images_files_raw = d.get('images_files')
+    if images_files_raw is not None:
+        # images_files was explicitly set (even as empty '[]') → authoritative, no base64 fallback
+        try:
+            files = json.loads(images_files_raw) if images_files_raw else []
+        except (ValueError, TypeError):
+            files = []
+        d['images'] = json.dumps([_draft_image_url(f) for f in files])
+        d['image']  = _draft_image_url(files[0]) if files else None
+    # else: images_files IS NULL → legacy draft never migrated, keep base64 as fallback
+    d.pop('images_files', None)
+    return d
+
 
 bp = Blueprint('calendar', __name__)
 
@@ -115,6 +200,207 @@ def delete_custom_event(event_id):
 
 
 # ---------------------------------------------------------------------------
+# Draft images (serve files from disk)
+# ---------------------------------------------------------------------------
+
+@bp.route('/api/draft-images/<path:filename>')
+def serve_draft_image(filename):
+    safe = os.path.basename(filename)
+    return send_from_directory(PHOTOS_DIR, safe)
+
+
+@bp.route('/api/admin/draft-images-status', methods=['GET'])
+def draft_images_status():
+    """Diagnostic: returns the image state of every draft and orphaned disk files."""
+    with get_db() as conn:
+        rows = conn.execute(
+            '''SELECT id, title, images_files,
+                      CASE WHEN image  IS NOT NULL AND length(image)  > 0 THEN 1 ELSE 0 END AS has_b64_single,
+                      CASE WHEN images IS NOT NULL AND length(images) > 10 THEN 1 ELSE 0 END AS has_b64_array
+               FROM draft_recipes ORDER BY id'''
+        ).fetchall()
+    try:
+        disk_files = {f for f in os.listdir(PHOTOS_DIR) if f.startswith('draft_')}
+    except OSError:
+        disk_files = set()
+    referenced = set()
+    drafts_info = []
+    for r in rows:
+        try:
+            files = json.loads(r['images_files'] or '[]') if r['images_files'] is not None else None
+        except (ValueError, TypeError):
+            files = []
+        if files:
+            referenced.update(files)
+        drafts_info.append({
+            'id':             r['id'],
+            'title':          r['title'],
+            'images_files':   files,
+            'has_b64_single': bool(r['has_b64_single']),
+            'has_b64_array':  bool(r['has_b64_array']),
+            'files_on_disk':  [f for f in (files or []) if f in disk_files],
+            'files_missing':  [f for f in (files or []) if f not in disk_files],
+        })
+    orphans = sorted(disk_files - referenced)
+    return jsonify({'drafts': drafts_info, 'orphaned_files': orphans, 'total_disk_files': len(disk_files)})
+
+
+@bp.route('/api/admin/migrate-draft-images', methods=['POST'])
+def migrate_draft_images():
+    """Migrate legacy base64 images in DB to filesystem files, and purge orphaned base64.
+
+    Two cases handled in one pass:
+    - Draft has no filesystem files yet + has base64  → save files, clear base64
+    - Draft already has filesystem files + still has base64  → just clear base64
+    Atomic per draft for the first case. Safe to call multiple times.
+    """
+    migrated = 0
+    purged   = 0
+    skipped  = 0
+    errors   = 0
+    with get_db() as conn:
+        rows = conn.execute(
+            'SELECT id, image, images, images_files FROM draft_recipes ORDER BY id'
+        ).fetchall()
+        for row in rows:
+            try:
+                existing_files = json.loads(row['images_files'] or '[]')
+            except (ValueError, TypeError):
+                existing_files = []
+
+            # Detect actual base64 content in either column
+            b64_single = row['image'] and str(row['image']).startswith('data:')
+            try:
+                b64_array = [i for i in json.loads(row['images'] or '[]')
+                             if isinstance(i, str) and i.startswith('data:')]
+            except (ValueError, TypeError):
+                b64_array = []
+            has_b64 = bool(b64_single or b64_array)
+
+            if existing_files:
+                # Already migrated — only clear leftover base64 if present
+                if has_b64:
+                    conn.execute(
+                        "UPDATE draft_recipes SET image=NULL, images='[]' WHERE id=?",
+                        (row['id'],)
+                    )
+                    purged += 1
+                else:
+                    skipped += 1
+                continue
+
+            # No filesystem files yet
+            if not has_b64:
+                skipped += 1
+                continue
+
+            imgs_raw = b64_array if b64_array else [row['image']]
+            new_files = []
+            save_failed = False
+            for img in imgs_raw:
+                try:
+                    if _image_too_large(img):
+                        img = _shrink_image_b64(img)
+                    new_files.append(_save_b64_to_draft_file(img))
+                except Exception as e:
+                    current_app.logger.warning('migrate_draft_images: draft %s: %s', row['id'], e)
+                    save_failed = True
+                    break
+
+            if save_failed:
+                for fname in new_files:
+                    _delete_draft_image_file(fname)
+                errors += 1
+                continue
+
+            conn.execute(
+                "UPDATE draft_recipes SET images_files=?, image=NULL, images='[]' WHERE id=?",
+                (json.dumps(new_files), row['id'])
+            )
+            migrated += 1
+    return jsonify({'migrated': migrated, 'purged': purged, 'skipped': skipped, 'errors': errors})
+
+
+@bp.route('/api/admin/restore-draft-images', methods=['POST'])
+def restore_draft_images():
+    """Restore draft images from a brouillons.json GitHub backup.
+
+    Expects JSON body: {"drafts": [...]} — the content of the brouillons.json
+    backup file.  For each draft in the payload that has base64 data in `image`
+    or `images` and whose DB row currently has no images, saves the images to
+    disk and updates images_files.
+    """
+    payload = request.json or {}
+    backup_drafts = payload.get('drafts') or (payload if isinstance(payload, list) else [])
+    if not backup_drafts:
+        return api_error('validation', 400, detail='Expected {"drafts": [...]} or a JSON array')
+
+    restored = 0
+    skipped  = 0
+    errors   = 0
+
+    with get_db() as conn:
+        for bd in backup_drafts:
+            draft_id = bd.get('id')
+            if not draft_id:
+                continue
+            db_row = conn.execute(
+                'SELECT images_files, length(image) as il, length(images) as isl FROM draft_recipes WHERE id=?',
+                (draft_id,)
+            ).fetchone()
+            if not db_row:
+                skipped += 1
+                continue
+            # Skip if already has linked files
+            try:
+                existing_files = json.loads(db_row['images_files'] or '[]') if db_row['images_files'] is not None else None
+            except (ValueError, TypeError):
+                existing_files = []
+            if existing_files:
+                skipped += 1
+                continue
+
+            imgs_raw = []
+            try:
+                parsed = json.loads(bd.get('images') or '[]')
+                if isinstance(parsed, list):
+                    imgs_raw = [i for i in parsed if isinstance(i, str) and i.startswith('data:')]
+            except (ValueError, TypeError):
+                pass
+            if not imgs_raw and bd.get('image', '').startswith('data:'):
+                imgs_raw = [bd['image']]
+            if not imgs_raw:
+                skipped += 1
+                continue
+
+            new_files = []
+            save_failed = False
+            for img in imgs_raw:
+                try:
+                    if _image_too_large(img):
+                        img = _shrink_image_b64(img)
+                    new_files.append(_save_b64_to_draft_file(img))
+                except Exception as e:
+                    current_app.logger.warning('restore_draft_images: draft %s: %s', draft_id, e)
+                    save_failed = True
+                    break
+
+            if save_failed:
+                for fname in new_files:
+                    _delete_draft_image_file(fname)
+                errors += 1
+                continue
+
+            conn.execute(
+                "UPDATE draft_recipes SET images_files=?, image=NULL, images='[]' WHERE id=?",
+                (json.dumps(new_files), draft_id)
+            )
+            restored += 1
+
+    return jsonify({'restored': restored, 'skipped': skipped, 'errors': errors})
+
+
+# ---------------------------------------------------------------------------
 # Drafts
 # ---------------------------------------------------------------------------
 
@@ -123,10 +409,11 @@ def get_drafts():
     with get_db() as conn:
         rows = conn.execute(
             '''SELECT id, title, style, volume, ingredients, notes, color,
-                      target_date, event_label, sort_order, created_at, updated_at
+                      target_date, event_label, sort_order, status, created_at, updated_at,
+                      images_files
                FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC'''
         ).fetchall()
-    return jsonify([dict(r) for r in rows])
+    return jsonify([_draft_row_to_dict(r) for r in rows])
 
 
 @bp.route('/api/drafts/<int:draft_id>', methods=['GET'])
@@ -135,7 +422,7 @@ def get_draft(draft_id):
         row = conn.execute('SELECT * FROM draft_recipes WHERE id=?', (draft_id,)).fetchone()
         if not row:
             return api_error('not_found', 404)
-        return jsonify(dict(row))
+        return jsonify(_draft_row_to_dict(row))
 
 
 @bp.route('/api/drafts/reorder', methods=['PUT'])
@@ -154,13 +441,12 @@ def reorder_drafts():
 @bp.route('/api/drafts', methods=['POST'])
 def create_draft():
     data = request.json or {}
-    if _image_too_large(data.get('image')):
-        shrunk = _shrink_image_b64(data['image'])
-        data['image'] = shrunk if not _image_too_large(shrunk) else None
+    images_files_json = _process_draft_images(data.get('images', '[]'))
     with get_db() as conn:
         cur = conn.execute(
-            '''INSERT INTO draft_recipes (title, style, volume, ingredients, notes, color, target_date, event_label, image)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            '''INSERT INTO draft_recipes
+               (title, style, volume, ingredients, notes, color, target_date, event_label, status, images_files)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (
                 data.get('title', 'Nouveau brouillon'),
                 data.get('style'),
@@ -170,24 +456,30 @@ def create_draft():
                 data.get('color'),
                 data.get('target_date'),
                 data.get('event_label'),
-                data.get('image'),
+                data.get('status', 'idea'),
+                images_files_json,
             )
         )
         row = conn.execute('SELECT * FROM draft_recipes WHERE id=?', (cur.lastrowid,)).fetchone()
-    return jsonify(dict(row)), 201
+    return jsonify(_draft_row_to_dict(row)), 201
 
 
 @bp.route('/api/drafts/<int:draft_id>', methods=['PUT'])
 def update_draft(draft_id):
     data = request.json or {}
-    if _image_too_large(data.get('image')):
-        shrunk = _shrink_image_b64(data['image'])
-        data['image'] = shrunk if not _image_too_large(shrunk) else None
     with get_db() as conn:
+        existing = conn.execute(
+            'SELECT images_files FROM draft_recipes WHERE id=?', (draft_id,)
+        ).fetchone()
+        if not existing:
+            return api_error('not_found', 404)
+        old_files_json = existing['images_files'] or '[]'
+        images_files_json = _process_draft_images(data.get('images', '[]'), old_files_json)
         cur = conn.execute(
             '''UPDATE draft_recipes
                SET title=?, style=?, volume=?, ingredients=?, notes=?, color=?,
-                   target_date=?, event_label=?, image=?, updated_at=CURRENT_TIMESTAMP
+                   target_date=?, event_label=?, status=?, images_files=?,
+                   updated_at=CURRENT_TIMESTAMP
                WHERE id=?''',
             (
                 data.get('title', 'Nouveau brouillon'),
@@ -198,22 +490,33 @@ def update_draft(draft_id):
                 data.get('color'),
                 data.get('target_date'),
                 data.get('event_label'),
-                data.get('image'),
+                data.get('status', 'idea'),
+                images_files_json,
                 draft_id,
             )
         )
         if cur.rowcount == 0:
             return api_error('not_found', 404)
         row = conn.execute('SELECT * FROM draft_recipes WHERE id=?', (draft_id,)).fetchone()
-    return jsonify(dict(row))
+    return jsonify(_draft_row_to_dict(row))
 
 
 @bp.route('/api/drafts/<int:draft_id>', methods=['DELETE'])
 def delete_draft(draft_id):
     with get_db() as conn:
-        cur = conn.execute('DELETE FROM draft_recipes WHERE id=?', (draft_id,))
-        if cur.rowcount == 0:
+        row = conn.execute(
+            'SELECT images_files FROM draft_recipes WHERE id=?', (draft_id,)
+        ).fetchone()
+        if not row:
             return api_error('not_found', 404)
+        # Delete image files from disk before removing the DB row
+        try:
+            files = json.loads(row['images_files'] or '[]')
+        except (ValueError, TypeError):
+            files = []
+        for fname in files:
+            _delete_draft_image_file(fname)
+        conn.execute('DELETE FROM draft_recipes WHERE id=?', (draft_id,))
     return jsonify({'success': True})
 
 
@@ -310,11 +613,34 @@ Règles :
 # Drafts export / import
 # ---------------------------------------------------------------------------
 
+def _draft_row_to_export_dict(row):
+    """Convert a draft row to export dict, reading image files back to base64."""
+    import base64
+    d = dict(row)
+    try:
+        files = json.loads(d.get('images_files') or '[]')
+    except (ValueError, TypeError):
+        files = []
+    b64_images = []
+    for fname in files:
+        try:
+            fpath = os.path.join(PHOTOS_DIR, fname)
+            with open(fpath, 'rb') as fh:
+                b64_images.append('data:image/jpeg;base64,' + base64.b64encode(fh.read()).decode())
+        except OSError:
+            pass
+    if b64_images:
+        d['images'] = json.dumps(b64_images)
+        d['image']  = b64_images[0]
+    d.pop('images_files', None)
+    return d
+
+
 @bp.route('/api/export/drafts')
 def export_drafts():
     with get_db() as conn:
         rows = conn.execute('SELECT * FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC').fetchall()
-    return jsonify([dict(r) for r in rows])
+    return jsonify([_draft_row_to_export_dict(r) for r in rows])
 
 
 @bp.route('/api/import/drafts', methods=['POST'])
@@ -329,31 +655,40 @@ def import_drafts():
     imported = 0
     with get_db() as conn:
         if mode == 'replace':
+            # Delete image files for all drafts being replaced
+            existing_rows = conn.execute('SELECT images_files FROM draft_recipes').fetchall()
+            for er in existing_rows:
+                try:
+                    for fname in json.loads(er['images_files'] or '[]'):
+                        _delete_draft_image_file(fname)
+                except (ValueError, TypeError):
+                    pass
             conn.execute('DELETE FROM draft_recipes')
         for d in data:
             if not d.get('title'):
                 continue
             try:
-                existing = conn.execute('SELECT id FROM draft_recipes WHERE title=?', (d['title'],)).fetchone()
-                img = _shrink_image_b64(d['image']) if _image_too_large(d.get('image')) else d.get('image')
+                existing = conn.execute('SELECT id, images_files FROM draft_recipes WHERE title=?', (d['title'],)).fetchone()
+                old_files = existing['images_files'] if existing else '[]'
+                imgs_files_json = _process_draft_images(d.get('images', '[]'), old_files)
                 if existing:
                     conn.execute(
                         '''UPDATE draft_recipes SET style=?,volume=?,ingredients=?,notes=?,color=?,
-                           target_date=?,event_label=?,image=? WHERE id=?''',
+                           target_date=?,event_label=?,status=?,images_files=? WHERE id=?''',
                         (d.get('style'), d.get('volume'), d.get('ingredients'), d.get('notes'),
                          d.get('color', '#ff9500'), d.get('target_date'), d.get('event_label'),
-                         img, existing['id'])
+                         d.get('status', 'idea'), imgs_files_json, existing['id'])
                     )
                 else:
                     conn.execute(
                         '''INSERT INTO draft_recipes
                            (title, style, volume, ingredients, notes, color,
-                            target_date, event_label, sort_order, image)
-                           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                            target_date, event_label, sort_order, status, images_files)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
                         (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
                          d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
                          d.get('target_date'), d.get('event_label'),
-                         d.get('sort_order', 0), img)
+                         d.get('sort_order', 0), d.get('status', 'idea'), imgs_files_json)
                     )
                 imported += 1
             except Exception as e:
@@ -932,30 +1267,39 @@ def _import_section_direct(section, items, mode='merge'):
         imported = 0
         with get_db() as conn:
             if mode == 'replace':
+                existing_rows = conn.execute('SELECT images_files FROM draft_recipes').fetchall()
+                for er in existing_rows:
+                    try:
+                        for fname in json.loads(er['images_files'] or '[]'):
+                            _delete_draft_image_file(fname)
+                    except (ValueError, TypeError):
+                        pass
                 conn.execute('DELETE FROM draft_recipes')
             for d in items:
                 if not d.get('title'):
                     continue
                 try:
-                    img = _shrink_image_b64(d['image']) if _image_too_large(d.get('image')) else d.get('image')
-                    existing = conn.execute('SELECT id FROM draft_recipes WHERE title=?', (d['title'],)).fetchone()
+                    existing = conn.execute('SELECT id, images_files FROM draft_recipes WHERE title=?', (d['title'],)).fetchone()
+                    old_files = existing['images_files'] if existing else '[]'
+                    imgs_files_json = _process_draft_images(d.get('images', '[]'), old_files)
                     if existing:
                         conn.execute(
                             '''UPDATE draft_recipes SET style=?,volume=?,ingredients=?,notes=?,color=?,
-                               target_date=?,event_label=?,image=? WHERE id=?''',
+                               target_date=?,event_label=?,status=?,images_files=? WHERE id=?''',
                             (d.get('style'), d.get('volume'), d.get('ingredients'), d.get('notes'),
                              d.get('color', '#ff9500'), d.get('target_date'), d.get('event_label'),
-                             img, existing['id'])
+                             d.get('status', 'idea'), imgs_files_json, existing['id'])
                         )
                     else:
                         conn.execute(
                             '''INSERT INTO draft_recipes
                                (title, style, volume, ingredients, notes, color,
-                                target_date, event_label, sort_order, image)
-                               VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                                target_date, event_label, sort_order, status, images_files)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
                             (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
                              d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
-                             d.get('target_date'), d.get('event_label'), d.get('sort_order', 0), img)
+                             d.get('target_date'), d.get('event_label'), d.get('sort_order', 0),
+                             d.get('status', 'idea'), imgs_files_json)
                         )
                     imported += 1
                 except Exception as e:

@@ -754,52 +754,52 @@ async function pushVitrine(force = false, silent = false) {
   const btnForce = document.getElementById(force ? 'btn-push-vitrine' : 'btn-push-vitrine-force');
   if (btnForce) btnForce.disabled = true;
 
-  // S'assurer que les bières sont chargées
-  if (!S.beers.length) {
-    try { S.beers = await api('GET', '/api/beers'); } catch(e) { console.warn('[BrewHome] beers load failed during push:', e); }
-  }
-  const beers   = S.beers.filter(b => !b.archived);
-  const dateStr = new Date().toISOString().slice(0, 10);
-
-  // Construire la map des photos (id → {ext, b64})
-  const photoMap = {};
-  beers.forEach(b => {
-    const p = _parsePhotoDataUrl(b.photo);
-    if (p) photoMap[b.id] = p;
-  });
-
-  // Logo de l'application
-  const appIconParsed = _parsePhotoDataUrl(appSettings.appIcon || null);
-  const iconPath = appIconParsed ? `images/app-icon.${appIconParsed.ext}` : null;
-
-  // Charger les recettes liées aux bières
-  const recipeIds = [...new Set(beers.filter(b => b.recipe_id).map(b => b.recipe_id))];
-  if (recipeIds.length) {
-    try { await ensureRecipesLoaded(); } catch(e) { console.warn('[BrewHome] recipes load failed during push:', e); }
-  }
-  const recipeMap = {};
-  S.recipes.forEach(r => { if (recipeIds.includes(r.id)) recipeMap[r.id] = r; });
-
-  const html = generateVitrineHtml(beers, photoMap, iconPath);
-  const json = JSON.stringify(beers, null, 2);
-
-  // Pages de recettes
-  const recipeFiles = Object.values(recipeMap).map(rec => {
-    const beer = beers.find(b => b.recipe_id === rec.id);
-    const theo = typeof _recTheoretical === 'function' ? _recTheoretical(rec) : null;
-    return { path: `recipes/${rec.id}.html`, b64: btoa(unescape(encodeURIComponent(generateRecipeHtml(rec, beer, theo)))) };
-  });
-
-  // Liste des fichiers : { path, b64 }
-  const files = [
-    { path: 'index.html', b64: btoa(unescape(encodeURIComponent(html))) },
-    { path: 'beers.json', b64: btoa(unescape(encodeURIComponent(json))) },
-    ...recipeFiles,
-    ...Object.entries(photoMap).map(([id, { ext, b64 }]) => ({ path: `images/beer-${id}.${ext}`, b64 })),
-    ...(appIconParsed ? [{ path: iconPath, b64: appIconParsed.b64 }] : []),
-  ];
-
   try {
+    // S'assurer que les bières sont chargées
+    if (!S.beers.length) {
+      try { S.beers = await api('GET', '/api/beers'); } catch(e) { console.warn('[BrewHome] beers load failed during push:', e); }
+    }
+    const beers   = S.beers.filter(b => !b.archived);
+    const dateStr = new Date().toISOString().slice(0, 10);
+
+    // Construire la map des photos (id → {ext, b64})
+    const photoMap = {};
+    beers.forEach(b => {
+      const p = _parsePhotoDataUrl(b.photo);
+      if (p) photoMap[b.id] = p;
+    });
+
+    // Logo de l'application
+    const appIconParsed = _parsePhotoDataUrl(appSettings.appIcon || null);
+    const iconPath = appIconParsed ? `images/app-icon.${appIconParsed.ext}` : null;
+
+    // Charger les recettes liées aux bières
+    const recipeIds = [...new Set(beers.filter(b => b.recipe_id).map(b => b.recipe_id))];
+    if (recipeIds.length) {
+      try { await ensureRecipesLoaded(); } catch(e) { console.warn('[BrewHome] recipes load failed during push:', e); }
+    }
+    const recipeMap = {};
+    S.recipes.forEach(r => { if (recipeIds.includes(r.id)) recipeMap[r.id] = r; });
+
+    const html = generateVitrineHtml(beers, photoMap, iconPath);
+    const json = JSON.stringify(beers, null, 2);
+
+    // Pages de recettes
+    const recipeFiles = Object.values(recipeMap).map(rec => {
+      const beer = beers.find(b => b.recipe_id === rec.id);
+      const theo = typeof _recTheoretical === 'function' ? _recTheoretical(rec) : null;
+      return { path: `recipes/${rec.id}.html`, b64: btoa(unescape(encodeURIComponent(generateRecipeHtml(rec, beer, theo)))) };
+    });
+
+    // Liste des fichiers : { path, b64 }
+    const files = [
+      { path: 'index.html', b64: btoa(unescape(encodeURIComponent(html))) },
+      { path: 'beers.json', b64: btoa(unescape(encodeURIComponent(json))) },
+      ...recipeFiles,
+      ...Object.entries(photoMap).map(([id, { ext, b64 }]) => ({ path: `images/beer-${id}.${ext}`, b64 })),
+      ...(appIconParsed ? [{ path: iconPath, b64: appIconParsed.b64 }] : []),
+    ];
+
     let totalPushed = 0, totalSkipped = 0;
     for (const cfg of targets) {
       const isCustom = cfg.provider === 'custom';

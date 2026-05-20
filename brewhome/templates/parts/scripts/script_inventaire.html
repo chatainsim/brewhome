@@ -325,6 +325,57 @@ function calcStrikeWater() {
   }
 }
 
+// ── Calculateur de bouteilles ─────────────────────────────────────────────────
+
+function calcBottles(changed) {
+  const volEl = document.getElementById('ot-bottles-vol');
+  const n33El = document.getElementById('ot-bottles-n33');
+  const n75El = document.getElementById('ot-bottles-n75');
+  const sumEl = document.getElementById('ot-bottles-summary');
+  if (!volEl || !n33El || !n75El) return;
+
+  const vol = parseFloat(volEl.value);
+  if (isNaN(vol) || vol <= 0) {
+    n33El.value = ''; n75El.value = '';
+    if (sumEl) sumEl.textContent = '';
+    return;
+  }
+
+  const ml = Math.round(vol * 1000);
+
+  if (changed === '33') {
+    const n33 = Math.max(0, parseInt(n33El.value) || 0);
+    const rem = ml - n33 * 330;
+    n75El.value = rem >= 750 ? Math.floor(rem / 750) : 0;
+  } else if (changed === '75') {
+    const n75 = Math.max(0, parseInt(n75El.value) || 0);
+    const rem = ml - n75 * 750;
+    n33El.value = rem >= 330 ? Math.floor(rem / 330) : 0;
+  } else {
+    // volume changé : tout en 33cl par défaut
+    n33El.value = Math.floor(ml / 330);
+    n75El.value = 0;
+  }
+
+  const n33 = parseInt(n33El.value) || 0;
+  const n75 = parseInt(n75El.value) || 0;
+  const used = n33 * 330 + n75 * 750;
+  const diff = ml - used;
+
+  if (sumEl) {
+    if (diff === 0) {
+      sumEl.style.color = 'var(--success)';
+      sumEl.textContent = t('ot.bottles_exact');
+    } else if (diff > 0) {
+      sumEl.style.color = 'var(--muted)';
+      sumEl.textContent = t('ot.bottles_rem').replace('${n}', diff);
+    } else {
+      sumEl.style.color = 'var(--danger)';
+      sumEl.textContent = t('ot.bottles_over').replace('${n}', Math.abs(diff));
+    }
+  }
+}
+
 // ── Dilution RO / eau distillée ───────────────────────────────────────────────
 
 const _RO_PRESET_NAMES = {
@@ -886,11 +937,12 @@ function renderDashboard() {
   }
 
   // ── Colonne gauche : Top recettes + Top bières + Stats styles ─────────────
+  const recByIdDash = new Map(S.recipes.map(r => [r.id, r]));
   const rated = [...recipes].filter(r => r.rating).sort((a,b) => b.rating-a.rating).slice(0,5);
   const ratedBeers = [...beers].filter(b => b.taste_rating).sort((a,b) => b.taste_rating - a.taste_rating).slice(0,5);
   const styleCounts = {};
   brews.forEach(b => {
-    const r = S.recipes.find(x => x.id === b.recipe_id);
+    const r = recByIdDash.get(b.recipe_id);
     if (r?.style) styleCounts[r.style] = (styleCounts[r.style]||0) + 1;
   });
   const topStyles = Object.entries(styleCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -996,27 +1048,41 @@ function renderDashboard() {
   }
 
   // Alertes inventaire — même logique que la page Stats
+  const CAT_ICON = {malt:'fa-wheat-awn',houblon:'fa-seedling',levure:'fa-flask',autre:'fa-box'};
+  const depletedStock = inv.filter(i => i.quantity != null && i.quantity <= 0);
   const lowStock = inv.filter(i => {
-    if (!i.quantity || i.quantity <= 0) return false;
+    if (i.quantity == null || i.quantity <= 0) return false;
     if (i.min_stock != null) return i.quantity < i.min_stock;
     const th = getThresh(i.category);
     if (i.category === 'autre')  return false;
     if (i.category === 'levure') return i.quantity < th;
     return (i.unit === 'kg' ? i.quantity * 1000 : i.unit === 'L' ? i.quantity * 1000 : i.quantity) < th;
   });
+  if (depletedStock.length) {
+    rightHtml += `<div class="card" style="margin-bottom:12px">
+      <div class="section-label" style="margin-bottom:12px;color:var(--muted)">${t('dash.depleted').replace('${n}', depletedStock.length)}</div>
+      ${depletedStock.slice(0,8).map((i,idx) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;${idx<Math.min(depletedStock.length,8)-1?'border-bottom:1px solid var(--border)':''}">
+          <i class="fas ${CAT_ICON[i.category]||'fa-box'}" style="color:var(--muted);width:14px"></i>
+          <span style="flex:1;font-size:.83rem">${esc(i.name)}</span>
+          <span style="font-size:.75rem;color:var(--muted);font-weight:600">${t('dash.depleted_label')}</span>
+        </div>`).join('')}
+      ${depletedStock.length>8?`<div style="font-size:.75rem;color:var(--muted);margin-top:8px;text-align:center">${t('dash.depleted_more').replace('${n}', depletedStock.length-8)}</div>`:''}
+    </div>`;
+  }
   if (lowStock.length) {
-    const CAT_ICON = {malt:'fa-wheat-awn',houblon:'fa-seedling',levure:'fa-flask',autre:'fa-box'};
     rightHtml += `<div class="card">
       <div class="section-label" style="margin-bottom:12px;color:var(--danger)">${t('dash.low_stock').replace('${n}', lowStock.length)}</div>
-      ${lowStock.slice(0,8).map(i => `
-        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;${lowStock.indexOf(i)<lowStock.length-1?'border-bottom:1px solid var(--border)':''}">
+      ${lowStock.slice(0,8).map((i,idx) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;${idx<Math.min(lowStock.length,8)-1?'border-bottom:1px solid var(--border)':''}">
           <i class="fas ${CAT_ICON[i.category]||'fa-box'}" style="color:var(--muted);width:14px"></i>
           <span style="flex:1;font-size:.83rem">${esc(i.name)}</span>
           <span style="font-size:.78rem;color:var(--danger);font-weight:600">${i.quantity||0} ${i.unit}</span>
         </div>`).join('')}
       ${lowStock.length>8?`<div style="font-size:.75rem;color:var(--muted);margin-top:8px;text-align:center">${t('dash.low_stock_more').replace('${n}', lowStock.length-8)}</div>`:''}
     </div>`;
-  } else {
+  }
+  if (!depletedStock.length && !lowStock.length) {
     rightHtml += `<div class="card" style="color:var(--success);font-size:.85rem;padding:16px;text-align:center"><i class="fas fa-check-circle"></i> ${t('dash.inv_ok')}</div>`;
   }
 
@@ -1053,6 +1119,7 @@ function _destroyStatsCharts() {
 function renderStatsPage() {
   _destroyStatsCharts();
   const allCompleted = S.brews.filter(b => !b.archived && b.status === 'completed' && b.brew_date);
+  const recById = new Map(S.recipes.map(r => [r.id, r]));
 
   // Build year list
   const years = [...new Set(allCompleted.map(b => b.brew_date.slice(0,4)))].sort().reverse();
@@ -1128,7 +1195,7 @@ function renderStatsPage() {
   // ── Styles chart ──
   const styleCounts = {};
   filtered.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     const style = rec?.style || (b.recipe_style) || null;
     if (style) styleCounts[style] = (styleCounts[style]||0) + 1;
   });
@@ -1346,7 +1413,7 @@ function renderStatsPage() {
   // ── Fermentation moyenne par année ─────────────────────────────────────────
   const fermByYear = {};
   allCompleted.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     if (rec?.ferm_time) {
       const y = b.brew_date.slice(0,4);
       if (!fermByYear[y]) fermByYear[y] = [];
@@ -1370,8 +1437,8 @@ function renderStatsPage() {
   const fgBrews  = filtered.filter(b => b.fg);
   const avgOg    = ogBrews.length  ? ogBrews.reduce((s,b)  => s + b.og, 0)  / ogBrews.length  : null;
   const avgFg    = fgBrews.length  ? fgBrews.reduce((s,b)  => s + b.fg, 0)  / fgBrews.length  : null;
-  const effBrews = filtered.filter(b => { const r = S.recipes.find(r => r.id === b.recipe_id); return r?.brewhouse_efficiency; });
-  const avgEff   = effBrews.length ? effBrews.reduce((s,b) => { const r = S.recipes.find(r => r.id === b.recipe_id); return s + r.brewhouse_efficiency; }, 0) / effBrews.length : null;
+  const effBrews = filtered.filter(b => recById.get(b.recipe_id)?.brewhouse_efficiency);
+  const avgEff   = effBrews.length ? effBrews.reduce((s,b) => s + recById.get(b.recipe_id).brewhouse_efficiency, 0) / effBrews.length : null;
   const cplBrews = filtered.filter(b => { const c = brewCost(b); return c?.total > 0 && b.volume_brewed > 0; });
   const avgCpl   = cplBrews.length ? cplBrews.reduce((s,b) => { const c = brewCost(b); return s + c.total / b.volume_brewed; }, 0) / cplBrews.length : null;
 
@@ -1387,7 +1454,7 @@ function renderStatsPage() {
   // ── Top malts ─────────────────────────────────────────────────────────────
   const maltUsage = {}, hopUsage = {};
   filtered.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     if (!rec?.ingredients) return;
     rec.ingredients.forEach(ing => {
       const qg = ing.unit === 'kg' ? ing.quantity * 1000 : (ing.quantity || 0);
@@ -1426,7 +1493,7 @@ function renderStatsPage() {
   // ── Efficacité par année ──────────────────────────────────────────────────
   const effByYear = {};
   filtered.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     if (rec?.brewhouse_efficiency) {
       const y = b.brew_date.slice(0,4);
       if (!effByYear[y]) effByYear[y] = [];
@@ -1473,7 +1540,7 @@ function renderStatsPage() {
   // ── Top levures ───────────────────────────────────────────────────────────
   const yeastUsage = {};
   filtered.forEach(b => {
-    const rec = S.recipes.find(r => r.id === b.recipe_id);
+    const rec = recById.get(b.recipe_id);
     if (!rec?.ingredients) return;
     rec.ingredients.filter(i => i.category === 'levure').forEach(i => {
       yeastUsage[i.name] = (yeastUsage[i.name] || 0) + 1;
@@ -1525,7 +1592,7 @@ function renderStatsPage() {
     // IBU + EBC moyens
     let ibuSum = 0, ibuCount = 0, ebcSum = 0, ebcCount = 0;
     filtered.forEach(b => {
-      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      const rec = recById.get(b.recipe_id);
       if (!rec) return;
       const { ibu, ebc } = _labelIbuEbc(rec);
       if (ibu != null) { ibuSum += ibu; ibuCount++; }
@@ -1534,7 +1601,7 @@ function renderStatsPage() {
     const avgIbu = ibuCount ? Math.round(ibuSum / ibuCount) : null;
     const avgEbc = ebcCount ? Math.round(ebcSum / ebcCount) : null;
     // Styles distincts
-    const stylesSet = new Set(filtered.map(b => { const r = S.recipes.find(r => r.id === b.recipe_id); return r?.style||null; }).filter(Boolean));
+    const stylesSet = new Set(filtered.map(b => recById.get(b.recipe_id)?.style || null).filter(Boolean));
 
     brewKpisEl.innerHTML =
       `<div class="stat"><div class="stat-val" style="color:var(--info)">${cadence != null ? cadence+'j' : '—'}</div>` +
@@ -1659,7 +1726,7 @@ function renderStatsPage() {
           '<th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">' + t('stat.tbl_rating') + '</th>' +
         '</tr></thead><tbody>' +
         tableRows.map((b, i) => {
-          const rec = S.recipes.find(r => r.id === b.recipe_id);
+          const rec = recById.get(b.recipe_id);
           return '<tr style="border-bottom:1px solid var(--border);' + (i%2===1?'background:rgba(255,255,255,.02)':'') + '">' +
             '<td style="padding:6px 8px;font-weight:600">' + esc(b.name||'—') + '</td>' +
             '<td style="padding:6px 8px;color:var(--muted);white-space:nowrap">' + (b.brew_date||'—') + '</td>' +
@@ -1681,7 +1748,7 @@ function renderStatsPage() {
       .filter(b => b.brew_date)
       .sort((a, b) => a.brew_date.localeCompare(b.brew_date))
       .map(b => {
-        const rec = S.recipes.find(r => r.id === b.recipe_id);
+        const rec = recById.get(b.recipe_id);
         const { ibu } = _labelIbuEbc(rec);
         const label = b.name.length > 18 ? b.name.slice(0, 16) + '…' : b.name;
         return { label, abv: b.abv || null, ibu: ibu ?? null };
@@ -1729,7 +1796,7 @@ function renderStatsPage() {
     const UTIL_COLORS = { malt: 'var(--malt)', houblon: 'var(--hop)', levure: 'var(--yeast)', autre: 'var(--other)' };
     const usedNames = { malt: new Set(), houblon: new Set(), levure: new Set(), autre: new Set() };
     allCompleted.forEach(b => {
-      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      const rec = recById.get(b.recipe_id);
       if (!rec?.ingredients) return;
       rec.ingredients.forEach(ing => {
         if (usedNames[ing.category] != null) usedNames[ing.category].add(ing.name.toLowerCase());
@@ -1772,6 +1839,7 @@ function renderStatsPage() {
     const todayD = new Date(); todayD.setHours(0,0,0,0);
     const soonD  = new Date(todayD); soonD.setDate(soonD.getDate() + 30);
     const invActive = (S.inventory||[]).filter(i => !i.archived);
+    const zeroItems = invActive.filter(i => i.quantity <= 0);
     const lowItems  = invActive.filter(i => {
       if (i.quantity <= 0) return false;
       if (i.min_stock != null) return i.quantity < i.min_stock;
@@ -1792,6 +1860,11 @@ function renderStatsPage() {
     const catsPresent = catOrder.filter(c => catCounts[c]);
 
     const alertsHtml = [
+      ...zeroItems.map(i =>
+        '<div style="font-size:.78rem;margin-bottom:4px;display:flex;align-items:center;gap:6px">' +
+        '<i class="fas fa-box-open" style="color:var(--danger);font-size:.65rem;flex-shrink:0"></i>' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(i.name) + '</span>' +
+        '<span style="color:var(--danger);flex-shrink:0">0 ' + i.unit + '</span></div>'),
       ...lowItems.map(i =>
         '<div style="font-size:.78rem;margin-bottom:4px;display:flex;align-items:center;gap:6px">' +
         '<i class="fas fa-triangle-exclamation" style="color:#f59e0b;font-size:.65rem;flex-shrink:0"></i>' +
@@ -1806,14 +1879,15 @@ function renderStatsPage() {
           '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(i.name) + '</span>' +
           '<span style="color:var(--danger);flex-shrink:0">' + lbl + '</span></div>';
       }),
-    ].slice(0, 8);
+    ].slice(0, 12);
 
     invHealthEl.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">' +
         '<div class="section-label">' + t('stat.inv_health_title') + '</div>' +
       '</div>' +
-      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">' +
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">' +
         '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800">' + invActive.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_items') + '</div></div>' +
+        '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800;color:' + (zeroItems.length?'var(--danger)':'var(--text)') + '">' + zeroItems.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_zero') + '</div></div>' +
         '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800;color:' + (lowItems.length?'#f59e0b':'var(--text)') + '">' + lowItems.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_low') + '</div></div>' +
         '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800;color:' + (expiringItems.length?'var(--danger)':'var(--text)') + '">' + expiringItems.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_expiring') + '</div></div>' +
       '</div>' +
@@ -1870,14 +1944,14 @@ function renderStatsPage() {
 
     // ── Efficacité réelle vs prévue ──────────────────────────────────────────
     const effActual  = advBrews.map(b => {
-      const rec    = S.recipes.find(r => r.id === b.recipe_id);
+      const rec    = recById.get(b.recipe_id);
       if (!rec || !b.og || !(b.volume_brewed > 0)) return null;
       const maxPts = typeof _recMaxExtract === 'function' ? _recMaxExtract(rec) : 0;
       if (!maxPts) return null;
       return +((b.og - 1) * 1000 * b.volume_brewed / maxPts * 100).toFixed(1);
     });
     const effPlanned = advBrews.map(b => {
-      const rec = S.recipes.find(r => r.id === b.recipe_id);
+      const rec = recById.get(b.recipe_id);
       return rec?.brewhouse_efficiency ?? null;
     });
     const brewEffCanvas = document.getElementById('stats-brew-eff-chart');
@@ -1961,7 +2035,7 @@ function renderStatsPage() {
     const advTableEl = document.getElementById('stats-adv-table');
     if (advTableEl) {
       const rows = advBrews.slice().reverse().map(b => {
-        const rec    = S.recipes.find(r => r.id === b.recipe_id);
+        const rec    = recById.get(b.recipe_id);
         const maxPts = (rec && typeof _recMaxExtract === 'function') ? _recMaxExtract(rec) : 0;
         const theo   = (rec && typeof _recTheoretical === 'function') ? _recTheoretical(rec) : null;
         const actEff = maxPts && b.og && b.volume_brewed
@@ -2196,10 +2270,11 @@ function _invRowHtml(item) {
     const gen = r.gen > 1 ? ` · G${r.gen}` : '';
     return `<div style="margin-top:3px"><span style="font-size:.7rem;padding:1px 6px;border-radius:8px;background:${c}18;color:${c};border:1px solid ${c}44;font-weight:600"><i class="fas fa-flask" style="font-size:.6rem;margin-right:2px"></i>${r.pct}%${gen}</span></div>`;
   })();
-  return `<tr class="inv-row ${item.archived ? 'archived-item' : ''}" draggable="true" data-id="${item.id}">
+  const emptyBadge = isEmpty ? `<div style="margin-top:2px"><span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:rgba(239,68,68,.15);color:var(--danger);font-weight:600"><i class="fas fa-box-open" style="font-size:.6rem;margin-right:2px"></i>${t('inv.empty_badge')}</span></div>` : '';
+  return `<tr class="inv-row ${item.archived ? 'archived-item' : ''}${isEmpty ? ' inv-row-empty' : ''}" draggable="true" data-id="${item.id}">
         <td style="padding:2px 4px;width:18px"><span class="inv-drag-handle" onmousedown="_invDragFromHandle=true" onmouseup="_invDragFromHandle=false"><i class="fas fa-grip-vertical"></i></span></td>
         <td style="padding:0;width:44px"><label class="inv-cb-label" onclick="event.stopPropagation()"><input type="checkbox" class="inv-cb" data-id="${item.id}" onchange="_invSelToggle(${item.id},this.checked)"></label></td>
-        <td><strong>${esc(item.name)}</strong>${aromaHtml}${item.notes ? `<div style="font-size:.78rem;color:var(--muted)">${esc(item.notes)}</div>` : ''}${expiryBadge}${viabHtml}</td>
+        <td><strong>${esc(item.name)}</strong>${aromaHtml}${item.notes ? `<div style="font-size:.78rem;color:var(--muted)">${esc(item.notes)}</div>` : ''}${emptyBadge}${expiryBadge}${viabHtml}</td>
         <td><span class="badge badge-${item.category}">${catLabel(item.category)}</span></td>
         <td class="col-hide-sm" style="color:var(--muted);font-size:.85rem">${esc(item.origin||'')}</td>
         <td class="col-hide-sm">${specs.join(' ')}</td>
@@ -2548,8 +2623,7 @@ async function saveInventoryItem() {
     }
     closeModal('inv-modal');
     renderInventaire();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(id ? t('inv.updated') : t('inv.added'), 'success');
   } catch(e) { toast(t('inv.err_save'), 'error'); }
 }
@@ -2560,8 +2634,7 @@ async function deleteInventoryItem(id) {
     await api('DELETE', `/api/inventory/${id}`);
     S.inventory = S.inventory.filter(i => i.id !== id);
     renderInventaire();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('inv.deleted'), 'success');
   } catch(e) { toast(t('common.delete') + ' — ' + t('common.error'), 'error'); }
 }
@@ -2673,8 +2746,7 @@ async function deleteInvSelection() {
   S.inventory = await api('GET', '/api/inventory');
   _invSel.clear();
   renderInventaire();
-  const stats = await api('GET', '/api/stats');
-  updateNavBadges(stats);
+  syncNavBadges();
   toast(t('inv.bulk_deleted').replace('${n}', ids.length), 'success');
 }
 

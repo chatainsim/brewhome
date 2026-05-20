@@ -260,6 +260,27 @@ def patch_spindle(spindle_id):
     d = request.json or {}
     updates = {col: d[col] for col in _SPINDLE_PATCH_FIELDS if col in d}
     with get_db() as conn:
+        if 'brew_id' in updates:
+            current = conn.execute('SELECT brew_id FROM spindles WHERE id=?', (spindle_id,)).fetchone()
+            old_brew_id = current['brew_id'] if current else None
+            new_brew_id = updates['brew_id']
+            # Migrate live readings to the old brew before changing association
+            if old_brew_id and old_brew_id != new_brew_id:
+                sr = conn.execute(
+                    '''SELECT recorded_at, gravity, temperature, battery, angle
+                       FROM rdb.spindle_readings WHERE spindle_id=? ORDER BY recorded_at''',
+                    (spindle_id,)
+                ).fetchall()
+                if sr:
+                    conn.executemany(
+                        '''INSERT INTO brew_fermentation_readings
+                           (brew_id, recorded_at, gravity, temperature, battery, angle)
+                           VALUES (?,?,?,?,?,?)''',
+                        [(old_brew_id, r['recorded_at'], r['gravity'], r['temperature'],
+                          r['battery'], r['angle']) for r in sr]
+                    )
+                conn.execute('DELETE FROM rdb.spindle_readings WHERE spindle_id=?', (spindle_id,))
+
         # When (re-)assigning a brew, backfill spindle_readings from brew_fermentation_readings
         # so the spindle chart shows the full history even after a COMPLETED migration.
         if 'brew_id' in updates and updates['brew_id']:
@@ -271,8 +292,8 @@ def patch_spindle(spindle_id):
                    ORDER BY recorded_at''',
                 (new_brew_id,)
             ).fetchall()
-            conn.execute('DELETE FROM rdb.spindle_readings WHERE spindle_id=?', (spindle_id,))
             if ferm_rows:
+                conn.execute('DELETE FROM rdb.spindle_readings WHERE spindle_id=?', (spindle_id,))
                 conn.executemany(
                     'INSERT INTO rdb.spindle_readings (spindle_id, recorded_at, gravity, temperature, battery, angle) VALUES (?,?,?,?,?,?)',
                     [(spindle_id, r['recorded_at'], r['gravity'], r['temperature'],
@@ -313,40 +334,44 @@ def reorder_spindles():
 
 _READINGS_MAX_LIMIT = 10_000
 
+
+def _readings_where(spindle_id, hours, from_ts, to_ts):
+    conds  = ['spindle_id = ?']
+    params = [spindle_id]
+    if hours:
+        conds.append("recorded_at >= datetime('now', ?)")
+        params.append(f'-{hours} hours')
+    elif from_ts and to_ts:
+        conds.append('recorded_at >= ? AND recorded_at <= ?')
+        params.extend([from_ts, to_ts])
+    elif from_ts:
+        conds.append('recorded_at >= ?')
+        params.append(from_ts)
+    return ' AND '.join(conds), params
+
+
 @bp.route('/api/spindles/<int:spindle_id>/readings', methods=['GET'])
 def get_spindle_readings(spindle_id):
     limit   = max(1, min(request.args.get('limit', 2000, type=int) or 2000, _READINGS_MAX_LIMIT))
     hours   = request.args.get('hours',  type=int)
     from_ts = request.args.get('from')
     to_ts   = request.args.get('to')
-    # Hard cap on rows fetched from DB to avoid loading millions of rows into memory
-    db_limit = _READINGS_MAX_LIMIT
+    where, params = _readings_where(spindle_id, hours, from_ts, to_ts)
+    # Decimation entirely in SQL: ROW_NUMBER lets SQLite skip rows before Python sees them
+    sql = f'''
+        SELECT * FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (ORDER BY recorded_at ASC) AS _rn,
+                   COUNT(*)     OVER ()                         AS _total
+            FROM spindle_readings
+            WHERE {where}
+        )
+        WHERE (_rn - 1) % CASE WHEN _total <= ? THEN 1 ELSE _total / ? END = 0
+        LIMIT ?
+    '''
     with get_readings_db() as conn:
-        if hours:
-            rows = conn.execute(
-                "SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= datetime('now',?) ORDER BY recorded_at ASC LIMIT ?",
-                (spindle_id, f'-{hours} hours', db_limit)
-            ).fetchall()
-        elif from_ts and to_ts:
-            rows = conn.execute(
-                'SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at ASC LIMIT ?',
-                (spindle_id, from_ts, to_ts, db_limit)
-            ).fetchall()
-        elif from_ts:
-            rows = conn.execute(
-                'SELECT * FROM spindle_readings WHERE spindle_id=? AND recorded_at >= ? ORDER BY recorded_at ASC LIMIT ?',
-                (spindle_id, from_ts, db_limit)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                'SELECT * FROM spindle_readings WHERE spindle_id=? ORDER BY recorded_at ASC LIMIT ?',
-                (spindle_id, db_limit)
-            ).fetchall()
-        # Decimate uniformly if too many points — preserves curve shape across full range
-        if len(rows) > limit:
-            step = max(1, len(rows) // limit)
-            rows = rows[::step]
-        return jsonify([dict(r) for r in rows])
+        rows = conn.execute(sql, params + [limit, limit, limit]).fetchall()
+    return jsonify([{k: v for k, v in dict(r).items() if k not in ('_rn', '_total')} for r in rows])
 
 
 @bp.route('/api/spindle/data', methods=['POST', 'GET'])
@@ -384,7 +409,7 @@ def receive_spindle_data():
     gravity = _frange(
         d.get('gravity') or d.get('Gravity') or d.get('SG') or
         d.get('specific_gravity') or d.get('og'),
-        0.900, 1.200,
+        0.900, 1.300,
     )
 
     if device_type == 'tilt':
@@ -417,7 +442,10 @@ def receive_spindle_data():
     now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     with get_readings_db() as rconn:
         if not brew_id:
-            rconn.execute('DELETE FROM spindle_readings WHERE spindle_id=?', (sid,))
+            rconn.execute(
+                "DELETE FROM spindle_readings WHERE spindle_id=? AND recorded_at < datetime('now', '-1 hours')",
+                (sid,)
+            )
         rconn.execute(
             'INSERT INTO spindle_readings (spindle_id,gravity,temperature,battery,angle,rssi,recorded_at) VALUES (?,?,?,?,?,?,?)',
             (sid, gravity, temp_c, battery, angle, rssi, now)
