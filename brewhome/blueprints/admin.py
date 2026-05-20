@@ -14,7 +14,7 @@ from helpers import api_error
 
 bp = Blueprint('admin', __name__)
 
-APP_VERSION = "0.0.8"
+APP_VERSION = "0.1.0"
 
 # Token généré à chaque démarrage du serveur — requis pour télécharger l'export SQL.
 # Injecté dans le HTML de la page principale (variable JS _BH_EXPORT_TOKEN).
@@ -135,7 +135,7 @@ def get_stats():
 # Version check
 # ---------------------------------------------------------------------------
 
-_version_cache = {'result': None, 'ts': 0}
+_version_cache = {'github': None, 'ts': 0}
 
 
 def _parse_semver(v):
@@ -149,27 +149,35 @@ def _parse_semver(v):
 @bp.route('/api/version/check')
 def check_app_version():
     now = time.time()
-    if _version_cache['result'] and now - _version_cache['ts'] < 6 * 3600:
-        return jsonify(_version_cache['result'])
-    try:
-        req = urllib.request.Request(
-            'https://api.github.com/repos/chatainsim/brewhome/releases/latest',
-            headers={'User-Agent': f'BrewHome/{APP_VERSION}', 'Accept': 'application/vnd.github+json'}
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
-        latest = data.get('tag_name', '').lstrip('v')
-        result = {
-            'current': APP_VERSION,
-            'latest': latest,
-            'update_available': _parse_semver(latest) > _parse_semver(APP_VERSION),
-            'release_url': data.get('html_url', 'https://github.com/chatainsim/brewhome/releases'),
-        }
-    except Exception as e:
-        current_app.logger.debug(f"check_app_version: {e}")
-        result = {'current': APP_VERSION, 'latest': None, 'update_available': False, 'error': str(e)}
-    _version_cache['result'] = result
-    _version_cache['ts'] = now
+    # Rafraîchir le cache GitHub seulement si expiré (6 h)
+    if not _version_cache['github'] or now - _version_cache['ts'] >= 6 * 3600:
+        try:
+            req = urllib.request.Request(
+                'https://api.github.com/repos/chatainsim/brewhome/releases/latest',
+                headers={'User-Agent': f'BrewHome/{APP_VERSION}', 'Accept': 'application/vnd.github+json'}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+            _version_cache['github'] = {
+                'latest': data.get('tag_name', '').lstrip('v'),
+                'release_url': data.get('html_url', 'https://github.com/chatainsim/brewhome/releases'),
+            }
+        except Exception as e:
+            current_app.logger.debug(f"check_app_version: {e}")
+            _version_cache['github'] = {'latest': None, 'error': str(e)}
+        _version_cache['ts'] = now
+
+    # current et update_available calculés en direct depuis APP_VERSION (jamais mis en cache)
+    gh = _version_cache['github']
+    latest = gh.get('latest')
+    result = {
+        'current': APP_VERSION,
+        'latest': latest,
+        'update_available': bool(latest and _parse_semver(latest) > _parse_semver(APP_VERSION)),
+        'release_url': gh.get('release_url', 'https://github.com/chatainsim/brewhome/releases'),
+    }
+    if 'error' in gh:
+        result['error'] = gh['error']
     return jsonify(result)
 
 
