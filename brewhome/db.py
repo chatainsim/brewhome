@@ -692,6 +692,9 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_bstep_brew ON brew_steps(brew_id, scheduled_date)",
     # 137 — stockage photo cave (beers) sur filesystem
     "ALTER TABLE beers ADD COLUMN photo_file TEXT",
+    # 138 — volumes d'eau en empâtage/rinçage saisissables manuellement
+    "ALTER TABLE recipes ADD COLUMN water_mash_override REAL",
+    "ALTER TABLE recipes ADD COLUMN water_sparge_override REAL",
     # ── Ajouter les nouvelles migrations ci-dessous ───────────────────────────
 ]
 
