@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+
+# Environnements virtuels
+venv/
+env/
+.venv/
+.env
+
+# Base de données
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# Système
+.DS_Store
+Thumbs.db
+nul
+
+# Claude Code (local)
+.claude/
+
+# Logs
+*.log

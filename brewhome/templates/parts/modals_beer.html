@@ -1,0 +1,350 @@
+<!-- Lightbox image bière -->
+<div id="beer-lightbox" onclick="closeBeerLightbox()" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.93);cursor:zoom-out;align-items:center;justify-content:center;flex-direction:column;gap:12px">
+  <button onclick="event.stopPropagation();closeBeerLightbox()" style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.12);border:none;color:#fff;font-size:1.4rem;width:40px;height:40px;border-radius:50%;cursor:pointer;line-height:1">✕</button>
+  <img id="beer-lightbox-img" src="" alt="" onclick="event.stopPropagation();closeBeerLightbox()" style="max-width:95vw;max-height:88vh;object-fit:contain;border-radius:6px;box-shadow:0 8px 48px rgba(0,0,0,.7);cursor:zoom-out">
+  <div id="beer-lightbox-name" style="color:rgba(255,255,255,.7);font-size:.95rem;letter-spacing:.03em"></div>
+</div>
+
+<!-- Modal Bière (cave) -->
+<div class="modal-overlay" id="beer-modal" onclick="if(event.target===this)closeModal('beer-modal')">
+  <div class="modal">
+    <div class="modal-head"><h3 id="beer-modal-title">Ajouter une bière</h3><button class="modal-close" onclick="closeModal('beer-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row cols-2">
+        <div class="field"><label><span data-i18n="common.name">Nom</span> <span class="req">*</span></label><input type="text" id="beer-f-name" placeholder="Ex : IPA Tropicale"></div>
+        <div class="field" style="position:relative"><label data-i18n="cave.field_type">Type</label>
+          <input type="text" id="beer-f-type" placeholder="Rechercher un type de bière…" autocomplete="off"
+            oninput="beerTypeSearch(this)" onfocus="beerTypeSearch(this)" onblur="setTimeout(closeBeerTypeSuggest,200)">
+          <div id="beer-type-sug" class="ing-suggest" style="max-height:280px"></div>
+        </div>
+      </div>
+      <div class="form-row cols-3">
+        <div class="field"><label data-i18n="brew.abv_label">ABV (%)</label><input type="number" id="beer-f-abv" step="0.1" placeholder="Ex : 6.5"></div>
+        <div class="field"><label data-i18n="cave.stock_33">Stock actuel 33cl</label><input type="number" id="beer-f-33" value="0" min="0"></div>
+        <div class="field"><label data-i18n="cave.stock_75">Stock actuel 75cl</label><input type="number" id="beer-f-75" value="0" min="0"></div>
+      </div>
+      <div class="form-row cols-2" id="beer-f-init-wrap" style="display:none">
+        <div class="field"><label><span data-i18n="cave.init_33">Remplissage initial 33cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-33-init" value="0" min="0"></div>
+        <div class="field"><label><span data-i18n="cave.init_75">Remplissage initial 75cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-75-init" value="0" min="0"></div>
+      </div>
+      <div class="field" style="margin-bottom:14px"><label data-i18n="cave.field_origin">Origine / Brasserie</label><input type="text" id="beer-f-origin" placeholder="Ex : Maison, Belgique..."></div>
+      <div class="field" style="margin-bottom:14px"><label data-i18n="common.description">Description</label><textarea id="beer-f-desc" placeholder="Notes de dégustation, arômes..."></textarea></div>
+      <div class="form-row cols-2" style="margin-bottom:14px" id="beer-f-dates-wrap">
+        <div class="field"><label data-i18n="brew.field_date">Date du brassin</label><input type="date" id="beer-f-brew-date"></div>
+        <div class="field"><label data-i18n="brew.field_bottling">Date d'embouteillage</label><input type="date" id="beer-f-bottling-date"></div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 12px;background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.2);border-radius:9px">
+          <input type="checkbox" id="beer-f-refermentation" style="width:auto;accent-color:var(--info)" onchange="toggleRefermDays()">
+          <span><i class="fas fa-rotate" style="color:var(--info)"></i> <span data-i18n="cave.refermentation">Refermentation en cours</span></span>
+        </label>
+        <div id="beer-f-referm-days-wrap" style="display:none;margin-top:8px">
+          <div class="field" style="margin:0">
+            <label data-i18n="cave.refermentation_days">Durée de refermentation (jours)</label>
+            <input type="number" id="beer-f-refermentation-days" min="1" max="365" placeholder="Ex : 21">
+          </div>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:14px">
+        <label><i class="fas fa-wine-barrel" style="color:var(--amber)"></i> <span data-i18n="cave.field_keg">Volume en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.keg_hint">— laisser vide si uniquement en bouteilles</span></label>
+        <input type="number" id="beer-f-keg" step="0.1" min="0" placeholder="Ex : 19" oninput="updateKegInitWrap()">
+      </div>
+      <div class="form-row cols-2" id="beer-f-keg-init-wrap" style="display:none;margin-bottom:14px">
+        <div class="field"><label><span data-i18n="cave.keg_init">Volume initial en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-keg-init" step="0.1" min="0" value="0"></div>
+      </div>
+      <div class="field"><label data-i18n="cave.field_photo">Photo</label>
+        <input type="file" id="beer-f-photo" accept="image/*" onchange="previewBeerPhoto(event)" style="display:none">
+        <div style="display:flex;gap:8px;align-items:stretch">
+          <label for="beer-f-photo" style="flex:1;display:block;padding:10px;border:2px dashed var(--border);border-radius:9px;cursor:pointer;text-align:center;color:var(--muted)">
+            <i class="fas fa-camera" style="font-size:1.5rem;display:block;margin-bottom:4px"></i> <span data-i18n="cave.photo_click">Cliquer pour ajouter une photo</span>
+          </label>
+          <button type="button" id="beer-gen-ai-btn" class="btn btn-ghost btn-sm" onclick="withBtn(this, generateBeerImage)" style="display:none;white-space:nowrap;align-self:center" title="Générer une image avec l'IA configurée">
+            <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="draft.img_generate">Générer avec IA</span>
+          </button>
+        </div>
+        <div id="beer-ai-extra-wrap" style="display:none;margin-top:8px">
+          <textarea id="beer-ai-extra" placeholder="Instructions supplémentaires pour l'IA : couleurs, style graphique, ambiance, ingrédients à illustrer…" style="width:100%;height:60px;font-size:.82rem;resize:vertical"></textarea>
+        </div>
+        <div style="position:relative;display:inline-block;width:100%">
+          <img id="beer-f-photo-preview" style="display:none;width:100%;max-height:180px;object-fit:contain;margin-top:8px;border-radius:9px">
+          <button type="button" id="beer-f-photo-remove" onclick="removeBeerPhoto()" style="display:none;position:absolute;top:12px;right:4px;background:rgba(0,0,0,.55);border:none;color:#fff;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:.85rem;line-height:1" title="Supprimer la photo"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+      <input type="hidden" id="beer-f-id">
+      <input type="hidden" id="beer-f-photo-b64">
+    </div>
+    <div id="beer-modal-alert" class="alert"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('beer-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveBeer)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Détail Bière (cave) -->
+<div class="modal-overlay" id="beer-detail-modal" onclick="if(event.target===this)closeModal('beer-detail-modal')">
+  <div class="modal modal-lg" style="max-width:640px">
+    <div class="modal-head">
+      <h3 id="bd-title" style="font-size:1.25rem"></h3>
+      <button class="modal-close" onclick="closeModal('beer-detail-modal')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div id="bd-photo-wrap" style="display:none;max-height:320px;overflow:hidden;border-radius:0;cursor:zoom-in" onclick="_bdPhotoClick()">
+        <img id="bd-photo" src="" alt="" style="width:100%;max-height:320px;object-fit:cover;display:block;transition:transform .3s">
+      </div>
+      <div style="padding:20px 24px">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px" id="bd-badges"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px" id="bd-stocks"></div>
+        <div id="bd-depletion" style="margin-bottom:10px"></div>
+        <div id="bd-desc" style="font-size:.9rem;line-height:1.6;color:var(--text);margin-bottom:12px;white-space:pre-wrap"></div>
+        <div id="bd-meta" style="font-size:.82rem;color:var(--muted)"></div>
+        <div id="bd-tasting" style="display:none;margin-top:16px;border-top:1px solid var(--border);padding-top:14px"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('beer-detail-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-ghost" id="bd-tasting-btn"><i class="fas fa-wine-glass"></i> <span data-i18n="tasting.btn">Dégustation</span></button>
+      <button class="btn btn-ghost" id="bd-print-btn"><i class="fas fa-tag"></i> <span data-i18n="cave.label">Étiquette</span></button>
+      <button class="btn btn-ghost" id="bd-edit-btn" onclick=""><i class="fas fa-pen"></i> <span data-i18n="common.edit">Modifier</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Fiche de dégustation -->
+<div class="modal-overlay" id="tasting-modal" onclick="if(event.target===this)closeModal('tasting-modal')">
+  <div class="modal" style="max-width:620px">
+    <div class="modal-head">
+      <h3><i class="fas fa-wine-glass" style="color:var(--amber)"></i> <span id="tasting-modal-title"></span></h3>
+      <button class="modal-close" onclick="closeModal('tasting-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Date + Note -->
+      <div style="display:flex;align-items:flex-end;gap:20px;margin-bottom:16px;flex-wrap:wrap">
+        <div class="field" style="margin-bottom:0">
+          <label data-i18n="tasting.date">Date de dégustation</label>
+          <input type="date" id="tasting-f-date" style="max-width:200px">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label data-i18n="tasting.rating">Note globale</label>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="star-input" id="tasting-star-input">
+              <span class="star" onclick="setTastingRating(1)">★</span>
+              <span class="star" onclick="setTastingRating(2)">★</span>
+              <span class="star" onclick="setTastingRating(3)">★</span>
+              <span class="star" onclick="setTastingRating(4)">★</span>
+              <span class="star" onclick="setTastingRating(5)">★</span>
+            </div>
+            <span id="tasting-rating-label" style="font-size:.82rem;color:var(--muted)"></span>
+          </div>
+        </div>
+      </div>
+      <!-- Scores radar (1-10) -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:8px" data-i18n="tasting.scores_title">Scores (1–10)</div>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--info);font-weight:600;white-space:nowrap"><i class="fas fa-eye"></i></label>
+            <input type="number" id="tasting-s-appearance" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.appearance">Apparence</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--hop);font-weight:600;white-space:nowrap"><i class="fas fa-wind"></i></label>
+            <input type="number" id="tasting-s-aroma" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.aroma">Arôme</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--malt);font-weight:600;white-space:nowrap"><i class="fas fa-droplet"></i></label>
+            <input type="number" id="tasting-s-flavor" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.flavor">Goût</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--amber);font-weight:600;white-space:nowrap"><i class="fas fa-fire"></i></label>
+            <input type="number" id="tasting-s-bitterness" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.bitterness">Amertume</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--info);font-weight:600;white-space:nowrap"><i class="fas fa-circle-half-stroke"></i></label>
+            <input type="number" id="tasting-s-mouthfeel" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.mouthfeel">Bouche</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+            <label style="font-size:.7rem;color:var(--amber);font-weight:600;white-space:nowrap"><i class="fas fa-hourglass-end"></i></label>
+            <input type="number" id="tasting-s-finish" min="1" max="10" step="1" style="width:100%;text-align:center;padding:4px 2px">
+            <span style="font-size:.65rem;color:var(--muted)" data-i18n="tasting.finish">Finale</span>
+          </div>
+        </div>
+      </div>
+      <!-- Nez / Bouche / Finale — 3 colonnes principales -->
+      <div class="form-row" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:0">
+        <div class="field">
+          <label><i class="fas fa-wind" style="color:var(--hop)"></i> <span data-i18n="tasting.aroma">Nez / Arôme</span></label>
+          <textarea id="tasting-f-aroma" style="height:90px;resize:vertical" data-i18n-placeholder="tasting.ph_aroma"></textarea>
+        </div>
+        <div class="field">
+          <label><i class="fas fa-circle-half-stroke" style="color:var(--info)"></i> <span data-i18n="tasting.mouthfeel">Bouche</span></label>
+          <textarea id="tasting-f-mouthfeel" style="height:90px;resize:vertical" data-i18n-placeholder="tasting.ph_mouthfeel"></textarea>
+        </div>
+        <div class="field">
+          <label><i class="fas fa-hourglass-end" style="color:var(--amber)"></i> <span data-i18n="tasting.finish">Finale</span></label>
+          <textarea id="tasting-f-finish" style="height:90px;resize:vertical" data-i18n-placeholder="tasting.ph_finish"></textarea>
+        </div>
+      </div>
+      <!-- Secondaires : Goût / Amertume / Apparence -->
+      <div class="form-row" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:0">
+        <div class="field">
+          <label><i class="fas fa-droplet" style="color:var(--malt)"></i> <span data-i18n="tasting.flavor">Goût</span></label>
+          <textarea id="tasting-f-flavor" style="height:72px;resize:vertical" data-i18n-placeholder="tasting.ph_flavor"></textarea>
+        </div>
+        <div class="field">
+          <label><i class="fas fa-fire" style="color:var(--amber)"></i> <span data-i18n="tasting.bitterness">Amertume</span></label>
+          <textarea id="tasting-f-bitterness" style="height:72px;resize:vertical" data-i18n-placeholder="tasting.ph_bitterness"></textarea>
+        </div>
+        <div class="field">
+          <label><i class="fas fa-eye" style="color:var(--info)"></i> <span data-i18n="tasting.appearance">Apparence</span></label>
+          <textarea id="tasting-f-appearance" style="height:72px;resize:vertical" data-i18n-placeholder="tasting.ph_appearance"></textarea>
+        </div>
+      </div>
+      <!-- Commentaire libre -->
+      <div class="field" style="margin-bottom:0">
+        <label><i class="fas fa-comment" style="color:var(--muted)"></i> <span data-i18n="tasting.overall_notes">Commentaire libre</span></label>
+        <textarea id="tasting-f-overall" style="height:60px;resize:vertical" data-i18n-placeholder="tasting.ph_overall"></textarea>
+      </div>
+      <input type="hidden" id="tasting-f-rating">
+      <input type="hidden" id="tasting-f-beer-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('tasting-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveTasting)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Étiquette bière -->
+<div class="modal-overlay" id="label-modal" onclick="if(event.target===this)closeModal('label-modal')">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-head">
+      <h3><i class="fas fa-tag" style="color:var(--amber)"></i> <span data-i18n="cave.print_label">Imprimer une étiquette</span></h3>
+      <button class="modal-close" onclick="closeModal('label-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+        <label style="font-size:.88rem;color:var(--muted);white-space:nowrap" data-i18n="cave.label_copies">Exemplaires :</label>
+        <input type="number" id="label-copies" value="1" min="1" max="200" style="width:68px" oninput="renderLabelPreview()">
+        <label style="font-size:.88rem;color:var(--muted);white-space:nowrap;margin-left:8px" data-i18n="cave.label_fmt">Format :</label>
+        <select id="label-format" style="width:auto;min-width:130px">
+          <option value="A4 landscape" data-i18n="cave.label_fmt_a4l">A4 Paysage</option>
+          <option value="A4 portrait" data-i18n="cave.label_fmt_a4p">A4 Portrait</option>
+          <option value="A5 landscape" data-i18n="cave.label_fmt_a5l">A5 Paysage</option>
+          <option value="A5 portrait" data-i18n="cave.label_fmt_a5p">A5 Portrait</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.88rem;color:var(--muted);cursor:pointer;margin-left:8px">
+          <input type="checkbox" id="label-qr" onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_qr">Inclure un QR code</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.88rem;color:var(--muted);cursor:pointer;margin-left:8px">
+          <input type="checkbox" id="label-crop-marks" onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_crop_marks">Marques de découpe</span>
+        </label>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <span style="font-size:.85rem;color:var(--muted)" data-i18n="cave.label_show">Afficher :</span>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-style" checked onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_show_style">Style</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-abv" checked onchange="renderLabelPreview()" style="width:auto">
+          <span>ABV</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-ibu" checked onchange="renderLabelPreview()" style="width:auto">
+          <span>IBU</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-ebc" checked onchange="renderLabelPreview()" style="width:auto">
+          <span>EBC</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-photo" checked onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.field_photo">Photo</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-ing" checked onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_show_ing">Ingrédients</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:.85rem;cursor:pointer">
+          <input type="checkbox" id="label-show-dates" checked onchange="renderLabelPreview()" style="width:auto">
+          <span data-i18n="cave.label_show_dates">Dates</span>
+        </label>
+      </div>
+      <div class="label-preview-wrap" id="label-preview-wrap"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('label-modal')" data-i18n="common.close">Fermer</button>
+      <button class="btn btn-primary" onclick="doPrintLabel()"><i class="fas fa-print"></i> <span data-i18n="cave.print">Imprimer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Zone d'impression (injectée au moment de window.print()) -->
+<div id="label-print-area" style="display:none"></div>
+
+<!-- Modal Association Bière cave ↔ Keg -->
+<div class="modal-overlay" id="cave-keg-modal" onclick="if(event.target===this)closeModal('cave-keg-modal')">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <h3><i class="fas fa-jar" style="color:var(--amber)"></i> <span data-i18n="cave.keg_assign">Associer à un keg</span></h3>
+      <button class="modal-close" onclick="closeModal('cave-keg-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field" style="margin-bottom:14px">
+        <label data-i18n="cave.keg_assign">Keg</label>
+        <select id="ck-keg-id">
+          <option value="" data-i18n="cave.keg_select">Choisir un keg…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label data-i18n="cave.keg_volume">Volume mis en keg (L)</label>
+        <input type="number" id="ck-volume" step="0.1" min="0" placeholder="Ex : 19">
+      </div>
+      <input type="hidden" id="ck-beer-id">
+      <input type="hidden" id="ck-prev-keg-id">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="ck-unlink-btn" onclick="withBtn(this, unlinkCaveKeg)" style="margin-right:auto;display:none"><i class="fas fa-link-slash"></i> <span data-i18n="cave.keg_unlink">Dissocier</span></button>
+      <button class="btn btn-ghost" onclick="closeModal('cave-keg-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" onclick="withBtn(this, saveCaveKegAssoc)"><i class="fas fa-floppy-disk"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Transfert fût → bouteilles -->
+<div class="modal-overlay" id="keg-transfer-modal" onclick="if(event.target===this)closeModal('keg-transfer-modal')">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">
+      <h3><i class="fas fa-wine-barrel" style="color:var(--amber)"></i> <span data-i18n="cave.keg_transfer">Transvaser du fût</span></h3>
+      <button class="modal-close" onclick="closeModal('keg-transfer-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:16px;padding:12px;background:var(--card2);border-radius:9px">
+        <div id="keg-tr-name" style="font-weight:700;margin-bottom:4px"></div>
+        <div id="keg-tr-current" style="font-size:.85rem;color:var(--muted)"></div>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label data-i18n="cave.keg_consumed">Bière consommée directement du fût (L)</label>
+        <input type="number" id="keg-tr-consumed" step="0.1" min="0" value="0" placeholder="0" oninput="updateKegCalc()">
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:14px">
+        <div class="field" style="flex:1"><label data-i18n="cave.bottles_33">Bouteilles 33cl</label><input type="number" id="keg-tr-33" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
+        <div class="field" style="flex:1"><label data-i18n="cave.bottles_75">Bouteilles 75cl</label><input type="number" id="keg-tr-75" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
+      </div>
+      <div id="keg-tr-calc" style="padding:12px;border-radius:9px;background:var(--card2);font-size:.88rem;line-height:2"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('keg-transfer-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" id="keg-tr-save-btn" onclick="withBtn(this, saveKegTransfer)"><i class="fas fa-check"></i> <span data-i18n="cave.validate">Valider</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL PARAMÈTRES AVANCÉS ══════════════════════════════════════════ -->
