@@ -1580,7 +1580,7 @@ function _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, al
           <span style="flex:1;font-size:.83rem">${WC_MINERAL_LABEL[mineral] || mineral}</span>
           <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${grams.toFixed(2)} g</span>
           <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
-            onclick="wcAddToRecipe('${mineral} (${suffix})',${grams.toFixed(2)},'g','${otherType}')">
+            onclick="wcAddToRecipe('${mineral}',${grams.toFixed(2)},'g','${otherType}')">
             <i class="fas fa-plus"></i> ${t('rec.wc_add_recipe')}
           </button>
         </div>`;
@@ -1602,7 +1602,7 @@ function _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, al
           <span style="flex:1;font-size:.83rem">${WC_MINERAL_LABEL['Chlorure de calcium']}</span>
           <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${altCaCl2g.toFixed(2)} g</span>
           <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
-            onclick="wcAddToRecipe('Chlorure de calcium (${suffix})',${altCaCl2g.toFixed(2)},'g','${otherType}')">
+            onclick="wcAddToRecipe('Chlorure de calcium',${altCaCl2g.toFixed(2)},'g','${otherType}')">
             <i class="fas fa-plus"></i> ${t('rec.wc_add_recipe')}
           </button>
         </div>
@@ -1623,7 +1623,7 @@ function _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, al
           <span style="flex:1;font-size:.83rem">${WC_MINERAL_LABEL['Carbonate de calcium']}</span>
           <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${altCaCO3g.toFixed(2)} g</span>
           <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
-            onclick="wcAddToRecipe('Carbonate de calcium (${suffix})',${altCaCO3g.toFixed(2)},'g','${otherType}')">
+            onclick="wcAddToRecipe('Carbonate de calcium',${altCaCO3g.toFixed(2)},'g','${otherType}')">
             <i class="fas fa-plus"></i> ${t('rec.wc_add_recipe')}
           </button>
         </div>
@@ -1644,7 +1644,7 @@ function _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, al
           <span style="flex:1;font-size:.83rem">${WC_MINERAL_LABEL['Bicarbonate de sodium']}</span>
           <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${altNaHCO3g.toFixed(2)} g</span>
           <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
-            onclick="wcAddToRecipe('Bicarbonate de sodium (${suffix})',${altNaHCO3g.toFixed(2)},'g','${otherType}')">
+            onclick="wcAddToRecipe('Bicarbonate de sodium',${altNaHCO3g.toFixed(2)},'g','${otherType}')">
             <i class="fas fa-plus"></i> ${t('rec.wc_add_recipe')}
           </button>
         </div>
@@ -1662,7 +1662,7 @@ function _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, al
           <span style="flex:1;font-size:.83rem">${acid}</span>
           <span style="font-weight:700;color:var(--amber);min-width:58px;text-align:right">${mL.toFixed(1)} mL</span>
           <button class="btn btn-sm btn-ghost" style="padding:2px 8px;white-space:nowrap"
-            onclick="wcAddToRecipe('${acid} (${suffix})',${mL.toFixed(1)},'mL','${otherType}')">
+            onclick="wcAddToRecipe('${acid}',${mL.toFixed(1)},'mL','${otherType}')">
             <i class="fas fa-plus"></i> ${t('rec.wc_add_recipe')}
           </button>
         </div>`;
@@ -1677,7 +1677,7 @@ function _renderWCResults(s, tgt, delta, doses, acidDoses, result, altCaCl2g, al
 
 function wcAddToRecipe(name, qty, unit, otherType = 'empatage') {
   // Update if already present, otherwise add new row
-  const existing = recIngredients.find(i => i.name === name && i.category === 'autre');
+  const existing = recIngredients.find(i => i.name === name && i.category === 'autre' && i.other_type === otherType);
   if (existing) {
     existing.quantity   = qty;
     existing.unit       = unit;

@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-05-21] — 3
+
+### Corrigé
+- **Recettes — correction d'eau : noms d'ingrédients** : les minéraux et acides ajoutés via le panneau de correction d'eau s'appelaient "Acide lactique 80% (empatage)" au lieu de "Acide lactique 80%", ce qui empêchait la déduction automatique du stock lors du passage en brassin. Le suffixe (empatage) / (sparge) est retiré du nom ; le moment d'ajout est conservé dans le champ `other_type`.
+
+---
+
 ## [2026-05-21] — 2
 
 ### Ajouté
