@@ -20,3 +20,90 @@ Toutes les modifications notables de ce projet sont documentées ici.
 - **Recettes — mode visualisation** : les valeurs de saisie manuelle des volumes d'eau ne s'affichaient pas en mode visualisation d'une recette (JS compilé obsolète)
 
 ---
+
+## [Pré-historique] — avant le 2026-05-21
+
+> Historique reconstitué depuis le code source. Pas de dates précises disponibles.
+
+### Fonctionnalités existantes au premier commit
+
+**Inventaire**
+- Gestion des stocks de malts, houblons, levures et autres ingrédients
+- Alertes de stock faible avec seuils configurables par catégorie et unité
+- Prix à l'unité pour le calcul de coût des recettes
+- Réorganisation par glisser-déposer, archivage
+- Déduction automatique du stock lors de la validation d'un brassin
+
+**Recettes**
+- Créateur complet : volume, efficacité, températures/durées d'empâtage et d'ébullition
+- Calculs automatiques : OG estimée, IBU (Tinseth), EBC, coût matières
+- IBU en temps réel dans l'en-tête de la section houblons
+- Volumes d'eau automatiques (ratio, absorption, évaporation) avec saisie manuelle
+- Comparaison styles BJCP (OG, FG, ABV, IBU, EBC min/max)
+- Autocomplétion depuis le catalogue d'ingrédients
+- Gestion houblons : type, temps d'addition, dry hop
+- Ingrédients "autres" avec 8 moments d'ajout possibles
+- Paramètre de fermentation (température, durée)
+- Note sur 5 étoiles, vue lecture / édition
+- Cloner à X litres (mise à l'échelle automatique)
+- Miniature brouillon d'origine, étiquettes cave associées
+- Impression (A4/A5, portrait/paysage)
+- Import BeerXML avec détection des ingrédients manquants
+
+**Brassins**
+- Sessions de brassage liées à une recette
+- Lancement depuis une recette avec coût estimé en temps réel
+- Saisie OG, FG, ABV calculé ; suivi état (en cours / terminé)
+- Association densimètre connecté (graphique densité + température)
+- Association sonde de température Home Assistant
+- Association soda keg, badge en temps réel
+- Passage en cave (stock bouteilles 33/75 cl + volume fût)
+
+**Cave à bières**
+- Stock bouteilles (33 cl / 75 cl) et fûts (volume)
+- Barre de progression colorée, modal transfert fût → bouteilles
+- Association soda keg
+- Photo (import fichier ou génération IA)
+- Impression d'étiquettes (51 mm, 5 par ligne, A4/A5)
+
+**Soda Kegs**
+- Types pré-configurés Corny Keg 19 L et 6 L, type libre
+- Suivi statut : Vide / En fermentation / En service / Nettoyage
+- Suivi des révisions avec alerte si dépassée ou imminente
+- Fiche détail, débit rapide, association bidirectionnelle avec brassins et cave
+
+**Cahier de brouillons**
+- Formulaire structuré : titre, style BJCP, volume, ingrédients, notes
+- Couleur personnalisable, image (import ou génération IA)
+- Vue lecture / édition, auto-save (1 s après la dernière frappe)
+- Association à un événement calendrier avec compte à rebours
+- Conversion brouillon → recette complète
+- Suggestion de recette par IA
+
+**Calendrier**
+- Vue mensuelle : brassins, fermentations, embouteillages automatiques
+- Événements brassicoles mondiaux générés automatiquement (IPA Day, Oktoberfest…)
+- Événements personnalisés avec récurrence (ponctuel, annuel, Nième jour)
+- Association événement ↔ style BJCP / recette / brouillon
+- Rappel de brassage configurable par événement
+- Notifications Telegram (rappel + jour J)
+
+**Densimètres connectés**
+- Endpoint universel `POST /api/spindle/data` : iSpindel, Tilt, GravityMon, générique
+- Tableau de bord par appareil, graphique de fermentation, association brassin
+
+**Sondes de température (Home Assistant)**
+- Types `sensor` (température + humidité) et `climate` (thermostat)
+- Association brassin, alertes seuils min/max, graphique historique
+- Génération YAML prête à copier pour `configuration.yaml` et `automations.yaml`
+
+**Paramètres avancés**
+- Catalogue d'ingrédients (malts, houblons, levures, autres) — enrichissable
+- Seuils de stock par catégorie et unité
+- Eau & Énergie : prix, profil minéral, récupération automatique via HubEau
+- Import / Export JSON par module (tokens exclus de l'export)
+- Langue : Français / English (interface entièrement traduite)
+- Apparence : thème clair/sombre, nom et logo personnalisables, couleur d'accent
+- Mises à jour : vérification version GitHub, mise à jour Chart.js / Font Awesome / Google Fonts
+
+---
