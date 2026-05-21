@@ -203,9 +203,32 @@ def update_beer(beer_id):
         return jsonify(_beer_row_to_dict(row))
 
 
+_TASTING_SCHEMA = {
+    'taste_appearance':        {'type': str,          'max_len': 2000},
+    'taste_aroma':             {'type': str,          'max_len': 2000},
+    'taste_flavor':            {'type': str,          'max_len': 2000},
+    'taste_bitterness':        {'type': str,          'max_len': 2000},
+    'taste_mouthfeel':         {'type': str,          'max_len': 2000},
+    'taste_overall':           {'type': str,          'max_len': 2000},
+    'taste_finish':            {'type': str,          'max_len': 2000},
+    'taste_date':              {'type': str,          'max_len': 20},
+    'taste_rating':            {'type': (int, float), 'min_val': 1, 'max_val': 5},
+    'taste_score_appearance':  {'type': (int, float), 'min_val': 1, 'max_val': 10},
+    'taste_score_aroma':       {'type': (int, float), 'min_val': 1, 'max_val': 10},
+    'taste_score_flavor':      {'type': (int, float), 'min_val': 1, 'max_val': 10},
+    'taste_score_bitterness':  {'type': (int, float), 'min_val': 1, 'max_val': 10},
+    'taste_score_mouthfeel':   {'type': (int, float), 'min_val': 1, 'max_val': 10},
+    'taste_score_finish':      {'type': (int, float), 'min_val': 1, 'max_val': 10},
+}
+
+
 @bp.route('/api/beers/<int:beer_id>/tasting', methods=['PUT'])
 def update_beer_tasting(beer_id):
-    d = request.json
+    d = request.json or {}
+    partial = {k: v for k, v in d.items() if k in _TASTING_SCHEMA and v is not None}
+    errors = validate(partial, _TASTING_SCHEMA)
+    if errors:
+        return api_error('validation', 400, fields=errors)
     with get_db() as conn:
         cur = conn.execute(
             '''UPDATE beers SET

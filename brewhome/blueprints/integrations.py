@@ -53,7 +53,7 @@ def _tg_get_settings():
     return s.get('telegram_token'), s.get('telegram_chat_id'), notifs, s.get('telegram_tz', 'UTC')
 
 
-def _tg_send(token, chat_id, text, _retries=1, _backoff=5):
+def _tg_send(token, chat_id, text, _retries=2, _backoff=5):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     data = urllib.parse.urlencode({
         'chat_id': chat_id,
@@ -63,7 +63,15 @@ def _tg_send(token, chat_id, text, _retries=1, _backoff=5):
     last_exc = None
     for attempt in range(1 + _retries):
         if attempt:
-            time.sleep(_backoff)
+            # Backoff exponentiel : 5s, 10s, 20s…
+            # Sur HTTP 429, respecte le Retry-After renvoyé par Telegram si disponible
+            wait = _backoff * (2 ** (attempt - 1))
+            if isinstance(last_exc, urllib.error.HTTPError) and last_exc.code == 429:
+                try:
+                    wait = max(wait, int(last_exc.headers.get('Retry-After', wait)))
+                except (ValueError, AttributeError):
+                    pass
+            time.sleep(wait)
         try:
             req = urllib.request.Request(url, data=data, method='POST')
             with urllib.request.urlopen(req, timeout=10) as r:

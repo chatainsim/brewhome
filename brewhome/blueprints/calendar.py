@@ -544,10 +544,10 @@ def ai_draft_suggest():
     model = (s.get('ai_model') or '').strip() or 'gemini-2.0-flash'
 
     context_parts = []
-    if style:       context_parts.append(f"Style BJCP : {style}")
-    if event_label: context_parts.append(f"Objectif de brassage : {event_label}")
-    if event_desc:  context_parts.append(f"Description de l'événement : {event_desc}")
-    if notes:       context_parts.append(f"Notes du brasseur : {notes}")
+    if style:       context_parts.append(f"Style BJCP : <style>{style}</style>")
+    if event_label: context_parts.append(f"Objectif de brassage : <objectif>{event_label}</objectif>")
+    if event_desc:  context_parts.append(f"Description de l'événement : <description>{event_desc}</description>")
+    if notes:       context_parts.append(f"Notes du brasseur : <notes>{notes}</notes>")
     context_str = '\n'.join(context_parts) if context_parts else "Bière de dégustation générique"
 
     prompt = f"""Tu es un expert en brassage amateur (homebrewing). Génère une recette de bière pour un brassin de {volume} litres.
@@ -724,32 +724,63 @@ def _ics_fold(line):
     return ('\r\n ').join(parts) + '\r\n'
 
 
+_ICAL_DOW = {0: 'SU', 1: 'MO', 2: 'TU', 3: 'WE', 4: 'TH', 5: 'FR', 6: 'SA'}
+
+
+def _vevent(uid, dtstart, dtend, summary, now_utc, description=None, rrule=None, alarm_days=None):
+    ev = [
+        'BEGIN:VEVENT',
+        f'UID:{uid}',
+        f'DTSTAMP:{now_utc}',
+        f'DTSTART;VALUE=DATE:{dtstart}',
+        f'DTEND;VALUE=DATE:{dtend}',
+        f'SUMMARY:{_ics_escape(summary)}',
+    ]
+    if description:
+        ev.append(f'DESCRIPTION:{_ics_escape(description)}')
+    if rrule:
+        ev.append(f'RRULE:{rrule}')
+    if alarm_days:
+        ev += [
+            'BEGIN:VALARM',
+            'ACTION:DISPLAY',
+            f'DESCRIPTION:{_ics_escape(summary)}',
+            f'TRIGGER:-P{alarm_days}D',
+            'END:VALARM',
+        ]
+    ev.append('END:VEVENT')
+    return ev
+
+
+def _rrule_from_rec(rec_str, event_date):
+    if not rec_str:
+        return None
+    try:
+        r = json.loads(rec_str) if isinstance(rec_str, str) else rec_str
+        t = r.get('type', '')
+        if t == 'yearly':
+            return 'FREQ=YEARLY'
+        if t == 'yearly_nth_dow':
+            dow = _ICAL_DOW.get(r.get('dow', 1), 'MO')
+            nth = r.get('nth', 1)
+            month = int(event_date[5:7])
+            return f'FREQ=YEARLY;BYMONTH={month};BYDAY={nth}{dow}'
+        if t == 'monthly':
+            return 'FREQ=MONTHLY'
+        if t == 'monthly_nth_dow':
+            dow = _ICAL_DOW.get(r.get('dow', 1), 'MO')
+            nth = r.get('nth', 1)
+            return f'FREQ=MONTHLY;BYDAY={nth}{dow}'
+        if t == 'weekly':
+            interval = int(r.get('interval') or 1)
+            return f'FREQ=WEEKLY;INTERVAL={interval}' if interval > 1 else 'FREQ=WEEKLY'
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        pass
+    return None
+
+
 def _make_ical():
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%dT%H%M%SZ')
-
-    def _vevent(uid, dtstart, dtend, summary, description=None, rrule=None, alarm_days=None):
-        ev = [
-            'BEGIN:VEVENT',
-            f'UID:{uid}',
-            f'DTSTAMP:{now_utc}',
-            f'DTSTART;VALUE=DATE:{dtstart}',
-            f'DTEND;VALUE=DATE:{dtend}',
-            f'SUMMARY:{_ics_escape(summary)}',
-        ]
-        if description:
-            ev.append(f'DESCRIPTION:{_ics_escape(description)}')
-        if rrule:
-            ev.append(f'RRULE:{rrule}')
-        if alarm_days:
-            ev += [
-                'BEGIN:VALARM',
-                'ACTION:DISPLAY',
-                f'DESCRIPTION:{_ics_escape(summary)}',
-                f'TRIGGER:-P{alarm_days}D',
-                'END:VALARM',
-            ]
-        ev.append('END:VEVENT')
-        return ev
 
     lines = [
         'BEGIN:VCALENDAR',
@@ -760,34 +791,6 @@ def _make_ical():
         'X-WR-CALNAME:BrewHome',
         'X-WR-CALDESC:Calendrier de brassage BrewHome',
     ]
-
-    _ical_dow = {0: 'SU', 1: 'MO', 2: 'TU', 3: 'WE', 4: 'TH', 5: 'FR', 6: 'SA'}
-
-    def _rrule_from_rec(rec_str, event_date):
-        if not rec_str:
-            return None
-        try:
-            r = json.loads(rec_str) if isinstance(rec_str, str) else rec_str
-            t = r.get('type', '')
-            if t == 'yearly':
-                return 'FREQ=YEARLY'
-            if t == 'yearly_nth_dow':
-                dow = _ical_dow.get(r.get('dow', 1), 'MO')
-                nth = r.get('nth', 1)
-                month = int(event_date[5:7])
-                return f'FREQ=YEARLY;BYMONTH={month};BYDAY={nth}{dow}'
-            if t == 'monthly':
-                return 'FREQ=MONTHLY'
-            if t == 'monthly_nth_dow':
-                dow = _ical_dow.get(r.get('dow', 1), 'MO')
-                nth = r.get('nth', 1)
-                return f'FREQ=MONTHLY;BYDAY={nth}{dow}'
-            if t == 'weekly':
-                interval = int(r.get('interval') or 1)
-                return f'FREQ=WEEKLY;INTERVAL={interval}' if interval > 1 else 'FREQ=WEEKLY'
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            pass
-        return None
 
     with get_db() as conn:
         remind_row = conn.execute(
@@ -812,7 +815,7 @@ def _make_ical():
                         alarm_days = default_remind
                 lines.extend(_vevent(
                     uid=f'brewhome-event-{ev["id"]}@brewhome',
-                    dtstart=dtstart, dtend=dtend, summary=title,
+                    dtstart=dtstart, dtend=dtend, summary=title, now_utc=now_utc,
                     description=ev.get('notes'), rrule=rrule, alarm_days=alarm_days,
                 ))
             except Exception:
@@ -841,7 +844,7 @@ def _make_ical():
                     parts.append(brew['notes'])
                 lines.extend(_vevent(
                     uid=f'brewhome-brew-{brew["id"]}@brewhome',
-                    dtstart=dtstart, dtend=dtend,
+                    dtstart=dtstart, dtend=dtend, now_utc=now_utc,
                     summary=f'\U0001f37a {brew["name"]}',
                     description='\n'.join(parts) if parts else None,
                 ))
@@ -853,6 +856,7 @@ def _make_ical():
                         dtstart=end_dt.strftime('%Y%m%d'),
                         dtend=(end_dt + timedelta(days=1)).strftime('%Y%m%d'),
                         summary=f'\U0001f37e Mise en bouteille \u2014 {brew["name"]}',
+                        now_utc=now_utc,
                     ))
             except Exception:
                 continue

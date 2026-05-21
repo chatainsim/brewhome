@@ -630,21 +630,14 @@ def _photo_url(filename):
     return f'/api/brew-photos/{filename}'
 
 
-def _row_to_list_dict(row):
-    """Retourne un dict pour la liste (sans la photo plein format)."""
+def _row_to_dict(row, full=False):
+    """Retourne un dict de ligne brew_photos; full=True inclut la photo plein format."""
     d = dict(row)
     d['thumb'] = _photo_url(d['thumb_file']) if d.get('thumb_file') else d.get('thumb')
-    d.pop('photo', None)
-    d.pop('photo_file', None)
-    d.pop('thumb_file', None)
-    return d
-
-
-def _row_to_full_dict(row):
-    """Retourne un dict avec la photo plein format."""
-    d = dict(row)
-    d['photo'] = _photo_url(d['photo_file']) if d.get('photo_file') else d.get('photo')
-    d['thumb'] = _photo_url(d['thumb_file']) if d.get('thumb_file') else d.get('thumb')
+    if full:
+        d['photo'] = _photo_url(d['photo_file']) if d.get('photo_file') else d.get('photo')
+    else:
+        d.pop('photo', None)
     d.pop('photo_file', None)
     d.pop('thumb_file', None)
     return d
@@ -704,13 +697,13 @@ def brew_photos(brew_id):
             row = conn.execute(
                 'SELECT * FROM brew_photos WHERE id=?', (cur.lastrowid,)
             ).fetchone()
-        return jsonify(_row_to_list_dict(row)), 201
+        return jsonify(_row_to_dict(row)), 201
     with get_db() as conn:
         rows = conn.execute(
             'SELECT * FROM brew_photos WHERE brew_id=? ORDER BY created_at',
             (brew_id,)
         ).fetchall()
-    return jsonify([_row_to_list_dict(r) for r in rows])
+    return jsonify([_row_to_dict(r) for r in rows])
 
 
 @bp.route('/api/brews/<int:brew_id>/photos/<int:photo_id>', methods=['GET', 'DELETE', 'PATCH'])
@@ -734,9 +727,9 @@ def brew_photo_item(brew_id, photo_id):
             row = conn.execute('SELECT * FROM brew_photos WHERE id=? AND brew_id=?', (photo_id, brew_id)).fetchone()
         if not row:
             return api_error('not_found', 404)
-        return jsonify(_row_to_full_dict(row))
+        return jsonify(_row_to_dict(row, full=True))
     with get_db() as conn:
         row = conn.execute('SELECT * FROM brew_photos WHERE id=? AND brew_id=?', (photo_id, brew_id)).fetchone()
     if not row:
         return api_error('not_found', 404)
-    return jsonify(_row_to_full_dict(row))
+    return jsonify(_row_to_dict(row, full=True))

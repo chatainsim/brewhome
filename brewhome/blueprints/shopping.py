@@ -1,38 +1,26 @@
+import logging
 from flask import Blueprint, jsonify, request
 from db import get_db, _log_inv
-from helpers import api_error, validate, VALID_UNITS
+from helpers import api_error, validate, VALID_UNITS, _to_base, _from_base
+
+_log = logging.getLogger(__name__)
 
 bp = Blueprint('shopping', __name__)
 
 _VALID_CATS = frozenset({'malt', 'houblon', 'levure', 'autre'})
 
-
-# ── Conversion d'unités ───────────────────────────────────────────────────────
-def _to_base(qty, unit):
-    """Convertit une quantité vers l'unité de base (g ou mL).
-    Retourne (valeur_base, dimension) où dimension ∈ {'weight','volume','count'}."""
-    if unit == 'kg':           return qty * 1000, 'weight'
-    if unit == 'g':            return qty,         'weight'
-    if unit == 'L':            return qty * 1000,  'volume'
-    if unit in ('mL', 'ml'):   return qty,          'volume'
-    return qty, 'count'                             # sachet, pièce, unité…
-
-def _from_base(base_val, unit):
-    """Reconvertit depuis la valeur de base vers l'unité cible."""
-    if unit == 'kg':           return base_val / 1000
-    if unit == 'g':            return base_val
-    if unit == 'L':            return base_val / 1000
-    if unit in ('mL', 'ml'):   return base_val
-    return base_val
+_UNIT_DIM = {
+    'kg': 'weight', 'g': 'weight',
+    'L': 'volume', 'mL': 'volume', 'ml': 'volume',
+}
 
 def _add_qty(inv_qty, inv_unit, add_qty, add_unit):
     """Additionne deux quantités en convertissant les unités si nécessaire.
     Retourne la nouvelle quantité exprimée dans inv_unit."""
-    inv_base, inv_dim = _to_base(inv_qty, inv_unit)
-    add_base, add_dim = _to_base(add_qty, add_unit)
-    if inv_dim == add_dim:
-        return _from_base(inv_base + add_base, inv_unit)
+    if _UNIT_DIM.get(inv_unit) == _UNIT_DIM.get(add_unit) and inv_unit in _UNIT_DIM:
+        return _from_base(_to_base(inv_qty, inv_unit) + _to_base(add_qty, add_unit), inv_unit)
     # Dimensions incompatibles (ex. g + sachet) → addition brute sans conversion
+    _log.warning('_add_qty: incompatible units %s + %s, falling back to raw sum', inv_unit, add_unit)
     return inv_qty + add_qty
 
 _SHOPPING_SCHEMA = {

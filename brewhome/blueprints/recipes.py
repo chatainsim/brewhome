@@ -21,6 +21,8 @@ _RECIPE_SCHEMA = {
     'ferm_temp':            {'type': (int, float), 'min_val': 0,    'max_val': 50},
     'ferm_time':            {'type': (int, float), 'min_val': 0,    'max_val': 730},
     'rating':               {'type': int,          'min_val': 1,    'max_val': 5},
+    'water_mash_override':  {'type': (int, float), 'min_val': 0,    'max_val': 1000},
+    'water_sparge_override':{'type': (int, float), 'min_val': 0,    'max_val': 1000},
 }
 
 
@@ -52,7 +54,8 @@ def _apply_recipe_data(conn, recipe_id, d):
     conn.execute(
         '''UPDATE recipes SET batch_no=?,name=?,style=?,volume=?,brew_date=?,bottling_date=?,
            mash_temp=?,mash_time=?,boil_time=?,mash_ratio=?,evap_rate=?,grain_absorption=?,
-           brewhouse_efficiency=?,ferm_temp=?,ferm_time=?,ferm_profile=?,notes=?,rating=?,draft_id=?
+           brewhouse_efficiency=?,ferm_temp=?,ferm_time=?,ferm_profile=?,notes=?,rating=?,draft_id=?,
+           water_mash_override=?,water_sparge_override=?
            WHERE id=?''',
         (d.get('batch_no'), d.get('name'), d.get('style'), d.get('volume', 20),
          d.get('brew_date'), d.get('bottling_date'), d.get('mash_temp', 66),
@@ -60,7 +63,8 @@ def _apply_recipe_data(conn, recipe_id, d):
          d.get('evap_rate', 3.0), d.get('grain_absorption', 0.8),
          d.get('brewhouse_efficiency', 72),
          d.get('ferm_temp', 20), d.get('ferm_time', 14), d.get('ferm_profile'),
-         d.get('notes'), d.get('rating'), d.get('draft_id'), recipe_id)
+         d.get('notes'), d.get('rating'), d.get('draft_id'),
+         d.get('water_mash_override'), d.get('water_sparge_override'), recipe_id)
     )
     conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id=?', (recipe_id,))
     for ing in d.get('ingredients', []):
@@ -171,15 +175,17 @@ def create_recipe():
             '''INSERT INTO recipes
                (batch_no,name,style,volume,brew_date,bottling_date,mash_temp,mash_time,
                 boil_time,mash_ratio,evap_rate,grain_absorption,brewhouse_efficiency,
-                ferm_temp,ferm_time,notes,rating,draft_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                ferm_temp,ferm_time,ferm_profile,notes,rating,draft_id,
+                water_mash_override,water_sparge_override)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (d.get('batch_no'), d.get('name'), d.get('style'), d.get('volume', 20),
              d.get('brew_date'), d.get('bottling_date'), d.get('mash_temp', 66),
              d.get('mash_time', 60), d.get('boil_time', 60), d.get('mash_ratio', 3.0),
              d.get('evap_rate', 3.0), d.get('grain_absorption', 0.8),
              d.get('brewhouse_efficiency', 72),
-             d.get('ferm_temp', 20), d.get('ferm_time', 14), d.get('notes'),
-             d.get('rating'), d.get('draft_id'))
+             d.get('ferm_temp', 20), d.get('ferm_time', 14), d.get('ferm_profile'),
+             d.get('notes'), d.get('rating'), d.get('draft_id'),
+             d.get('water_mash_override'), d.get('water_sparge_override'))
         )
         recipe_id = cur.lastrowid
         for ing in d.get('ingredients', []):
@@ -314,15 +320,17 @@ def fork_recipe(recipe_id):
             '''INSERT INTO recipes
                (batch_no,name,style,volume,brew_date,bottling_date,mash_temp,mash_time,
                 boil_time,mash_ratio,evap_rate,grain_absorption,brewhouse_efficiency,
-                ferm_temp,ferm_time,notes,rating,
+                ferm_temp,ferm_time,ferm_profile,notes,rating,
+                water_mash_override,water_sparge_override,
                 parent_recipe_id,version_number,version_notes)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (src['batch_no'], new_name, src['style'], src['volume'],
              src['brew_date'], src['bottling_date'],
              src['mash_temp'], src['mash_time'], src['boil_time'],
              src['mash_ratio'], src['evap_rate'], src['grain_absorption'],
              src['brewhouse_efficiency'], src['ferm_temp'], src['ferm_time'],
-             src['notes'], src['rating'],
+             src['ferm_profile'], src['notes'], src['rating'],
+             src['water_mash_override'], src['water_sparge_override'],
              parent_id, next_ver, version_notes)
         )
         new_id = cur.lastrowid
@@ -331,18 +339,18 @@ def fork_recipe(recipe_id):
             'SELECT * FROM recipe_ingredients WHERE recipe_id=? ORDER BY category, id',
             (recipe_id,)
         ).fetchall()
-        for ing in ings:
-            conn.execute(
-                '''INSERT INTO recipe_ingredients
-                   (recipe_id,inventory_item_id,name,category,quantity,unit,
-                    hop_time,hop_type,hop_days,other_type,other_time,ebc,alpha,notes)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (new_id, ing['inventory_item_id'], ing['name'], ing['category'],
-                 ing['quantity'], ing['unit'], ing['hop_time'],
-                 ing['hop_type'], ing['hop_days'],
-                 ing['other_type'], ing['other_time'],
-                 ing['ebc'], ing['alpha'], ing['notes'])
-            )
+        conn.executemany(
+            '''INSERT INTO recipe_ingredients
+               (recipe_id,inventory_item_id,name,category,quantity,unit,
+                hop_time,hop_type,hop_days,other_type,other_time,ebc,alpha,notes)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            [(new_id, ing['inventory_item_id'], ing['name'], ing['category'],
+              ing['quantity'], ing['unit'], ing['hop_time'],
+              ing['hop_type'], ing['hop_days'],
+              ing['other_type'], ing['other_time'],
+              ing['ebc'], ing['alpha'], ing['notes'])
+             for ing in ings]
+        )
 
         result = _recipe_with_ingredients(conn, new_id)
         _log('recipe', 'forked', json.dumps({'_i18n': 'act.recipe_forked', 'name': new_name,
