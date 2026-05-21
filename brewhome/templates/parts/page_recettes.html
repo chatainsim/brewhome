@@ -109,11 +109,39 @@
       </div>
 
       <!-- Volumes calculés -->
-      <div class="grid-4" style="margin-bottom:16px" id="rec-water-cards">
+      <div class="grid-4" style="margin-bottom:8px" id="rec-water-cards">
         <div class="stat"><div class="stat-val" id="rw-mash">–</div><div class="stat-lbl" data-i18n="rec.water_mash">Eau empâtage (L)</div></div>
         <div class="stat"><div class="stat-val" id="rw-sparge">–</div><div class="stat-lbl" data-i18n="rec.water_sparge">Eau rinçage (L)</div></div>
         <div class="stat"><div class="stat-val" id="rw-preboil">–</div><div class="stat-lbl" data-i18n="rec.water_preboil">Pré-ébullition (L)</div></div>
         <div class="stat"><div class="stat-val" id="rw-total">–</div><div class="stat-lbl" data-i18n="rec.water_total">Eau totale (L)</div></div>
+      </div>
+
+      <!-- Override eau manuel -->
+      <div id="rw-override-trigger" style="margin-bottom:8px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleWaterOverrideRow(true)" style="font-size:.75rem;padding:3px 8px;color:var(--muted)">
+          <i class="fas fa-pen" style="font-size:.68rem"></i> <span data-i18n="rec.water_override_btn">Saisir manuellement</span>
+        </button>
+      </div>
+      <div id="rw-override-row" style="display:none;margin-bottom:10px;padding:8px 12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;font-size:.82rem">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span style="color:var(--amber);font-size:.75rem;font-weight:600;white-space:nowrap"><i class="fas fa-pen"></i> <span data-i18n="rec.water_override_label">Volumes manuels</span></span>
+          <label style="display:flex;align-items:center;gap:5px;color:var(--muted);white-space:nowrap">
+            <span data-i18n="rec.water_mash_abbr">Emp.</span>
+            <input type="number" id="rw-mash-override" step="0.1" min="0" max="1000"
+                   placeholder="auto" style="width:70px" oninput="recCalc()">
+            <span>L</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;color:var(--muted);white-space:nowrap">
+            <span data-i18n="rec.rinse_label">Rinçage</span>
+            <input type="number" id="rw-sparge-override" step="0.1" min="0" max="1000"
+                   placeholder="auto" style="width:70px" oninput="recCalc()">
+            <span>L</span>
+          </label>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="toggleWaterOverrideRow(false)" style="font-size:.75rem;padding:3px 8px;margin-left:auto">
+            <i class="fas fa-xmark"></i> <span data-i18n="rec.water_override_reset">Auto</span>
+          </button>
+        </div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:5px" data-i18n="rec.water_override_hint">Laisser vide = calculé automatiquement</div>
       </div>
 
       <div id="rw-vessel-warnings" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px"></div>
@@ -382,15 +410,15 @@
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
         <div class="field">
           <label data-i18n="rec.priming_vol">Volume (L)</label>
-          <input type="number" id="priming-vol" value="20" min="1" max="200" step="0.5" oninput="calcPriming()">
+          <input type="number" id="priming-vol" value="20" min="1" max="200" step="0.5" oninput="calcPrimingDebounced()">
         </div>
         <div class="field">
           <label data-i18n="rec.priming_temp">Temp. (°C)</label>
-          <input type="number" id="priming-temp" value="20" min="0" max="35" step="0.5" oninput="calcPriming()">
+          <input type="number" id="priming-temp" value="20" min="0" max="35" step="0.5" oninput="calcPrimingDebounced()">
         </div>
         <div class="field">
           <label data-i18n="rec.priming_target">CO₂ cible</label>
-          <input type="number" id="priming-co2" value="2.5" min="0.5" max="5.0" step="0.1" oninput="calcPriming()">
+          <input type="number" id="priming-co2" value="2.5" min="0.5" max="5.0" step="0.1" oninput="calcPrimingDebounced()">
         </div>
       </div>
 

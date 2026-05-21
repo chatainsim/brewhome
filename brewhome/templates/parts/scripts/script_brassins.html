@@ -96,6 +96,7 @@ function openBrewingGuide() {
 let _scaleGuideActive = false;
 let _scaleGuidePollInterval = null;
 let _scaleGuideStep = 0;
+let _scaleGuidePollErrors = 0;
 
 function _sgUpdateUi(active, statusText) {
   const col   = active ? 'var(--hop)'              : '#f0883e';
@@ -121,6 +122,7 @@ function _sgUpdateUi(active, statusText) {
 
 function _scaleGuidePollFn() {
   fetch('/api/scale-guide').then(r => r.json()).then(data => {
+    _scaleGuidePollErrors = 0;
     if (!_scaleGuideActive) return;
     if (!data.active) {
       // Terminé par l'appareil — cocher tous les malts restants
@@ -151,7 +153,18 @@ function _scaleGuidePollFn() {
       .replace('${step}', () => String(data.step || 1))
       .replace('${total}',() => String(data.total || 1));
     _sgUpdateUi(true, sg);
-  }).catch(() => {});
+  }).catch(() => {
+    _scaleGuidePollErrors++;
+    if (_scaleGuidePollErrors >= 3) {
+      _scaleGuideActive = false;
+      clearInterval(_scaleGuidePollInterval);
+      _scaleGuidePollInterval = null;
+      _scaleGuideStep = 0;
+      _scaleGuidePollErrors = 0;
+      _sgUpdateUi(false, '');
+      toast(t('rec.scale_guide_err_poll'), 'error');
+    }
+  });
 }
 
 async function _bgToggleScaleGuide() {
@@ -159,6 +172,7 @@ async function _bgToggleScaleGuide() {
     clearInterval(_scaleGuidePollInterval);
     _scaleGuidePollInterval = null;
     _scaleGuideStep = 0;
+    _scaleGuidePollErrors = 0;
     await fetch('/api/scale-guide/stop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
     _scaleGuideActive = false;
     _sgUpdateUi(false, '');
@@ -486,6 +500,21 @@ function _bgHtmlPitch() {
 
 // ── Render orchestration ──────────────────────────────────────────────────────
 let _bgFs = false;
+let _bgFsEls = null;
+
+function _bgFsCacheEls() {
+  _bgFsEls = {
+    timer:     document.getElementById('bfs-timer'),
+    prog:      document.getElementById('bfs-prog'),
+    timerBtns: document.getElementById('bfs-timer-btns'),
+    pTimer:    document.getElementById('bfs-p-timer'),
+    pProg:     document.getElementById('bfs-p-prog'),
+    pBtn:      document.getElementById('bfs-p-btn'),
+    hops:      _bgState
+      ? _bgState.boilHops.map((_, idx) => document.getElementById(`bfs-hop-${idx}`))
+      : [],
+  };
+}
 
 function _bgRenderAll() {
   if (_bgFs) { _bgFsRenderAll(); return; }
@@ -569,6 +598,7 @@ function _bgFsOpen() {
 
 function _bgFsClose() {
   _bgFs = false;
+  _bgFsEls = null;
   document.getElementById('brew-fs').style.display = 'none';
   const mg = document.getElementById('modal-brew-guide');
   mg.style.opacity = ''; mg.style.pointerEvents = '';
@@ -883,6 +913,7 @@ function _bgFsRenderAll() {
   if (portrait) {
     center.innerHTML = _bgFsPortraitHtml();
     document.getElementById('bfs-footer').innerHTML = _bgFsPortraitFooter(s);
+    _bgFsCacheEls();
     return;
   }
 
@@ -899,6 +930,7 @@ function _bgFsRenderAll() {
     ? _bfsBtn(`${t('common.next')} <i class="fas fa-arrow-right"></i>`, `_bgGoStep(${s.step+1})`, 'primary')
     : _bfsBtn(`<i class="fas fa-check"></i> ${t('rec.guide_done')}`, '_bgFsClose()', 'success');
   document.getElementById('bfs-footer').innerHTML = foot;
+  _bgFsCacheEls();
 }
 
 function _bgFsRenderTimer() {
@@ -910,9 +942,9 @@ function _bgFsRenderTimer() {
 
   if (_bgIsMobilePortrait()) {
     // Portrait mode: update portrait-specific elements
-    const tp = document.getElementById('bfs-p-timer');
-    const pp = document.getElementById('bfs-p-prog');
-    const bp = document.getElementById('bfs-p-btn');
+    const tp = _bgFsEls?.pTimer;
+    const pp = _bgFsEls?.pProg;
+    const bp = _bgFsEls?.pBtn;
     if (tp) { tp.textContent = _bgFmt(rem); tp.style.color = done ? 'var(--success)' : color; }
     if (pp) pp.style.width = pct.toFixed(2) + '%';
     if (bp) {
@@ -922,15 +954,16 @@ function _bgFsRenderTimer() {
       bp.innerHTML = playPause + _bfsBtn(`<i class="fas fa-rotate-left"></i>`, '_bgResetTimer()');
     }
     if (s.step === 3) {
+      // outerHTML replacement invalidates any cached ref — getElementById is correct here
       const wrap = document.getElementById('bfs-p-nexthop-wrap');
       if (wrap) wrap.outerHTML = _bgFsPortraitNextHopHtml();
     }
     return;
   }
 
-  const te = document.getElementById('bfs-timer');
-  const pe = document.getElementById('bfs-prog');
-  const be = document.getElementById('bfs-timer-btns');
+  const te = _bgFsEls?.timer;
+  const pe = _bgFsEls?.prog;
+  const be = _bgFsEls?.timerBtns;
   if (te) { te.textContent = _bgFmt(rem); te.style.color = done ? 'var(--success)' : color; }
   if (pe) pe.style.width = pct.toFixed(2) + '%';
   if (be) {
@@ -944,7 +977,7 @@ function _bgFsRenderTimer() {
   if (s.step === 3) {
     const em = s.timerSec / 60;
     s.boilHops.forEach((hop, idx) => {
-      const el = document.getElementById(`bfs-hop-${idx}`);
+      const el = _bgFsEls?.hops[idx];
       if (!el) return;
       const ht    = hop.hop_type || 'ebullition';
       const addAt = ['whirlpool','flameout'].includes(ht) ? s.boilTime : s.boilTime - (hop.hop_time ?? s.boilTime);

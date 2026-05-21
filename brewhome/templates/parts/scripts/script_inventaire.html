@@ -2304,7 +2304,7 @@ let _invSel = new Set();
 let _invDragFromHandle = false;
 let _invAC = null;
 
-function renderInventaire() {
+function renderInventaire(searchOnly = false) {
   const q = (document.getElementById('inv-search')?.value || '').toLowerCase().trim();
   const catFiltered = S.inventory.filter(i => invFilter === 'all' || i.category === invFilter);
   const catActive = catFiltered.filter(i => !i.archived);
@@ -2367,30 +2367,32 @@ function renderInventaire() {
     }, { signal: invSig });
   });
 
-  // Stats (active only)
-  const activeAll = S.inventory.filter(i => !i.archived);
-  const counts = { malt:0, houblon:0, levure:0, autre:0 };
-  activeAll.forEach(i => counts[i.category] = (counts[i.category]||0)+1);
+  if (!searchOnly) {
+    // Stats (active only) \u2014 invariant to search query, skip on keystrokes
+    const activeAll = S.inventory.filter(i => !i.archived);
+    const counts = { malt:0, houblon:0, levure:0, autre:0 };
+    activeAll.forEach(i => counts[i.category] = (counts[i.category]||0)+1);
 
-  const maltKgTotal = activeAll.filter(i => i.category === 'malt')
-    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.unit === 'g' ? i.quantity / 1000 : 0), 0);
-  const hopGTotal = activeAll.filter(i => i.category === 'houblon')
-    .reduce((s, i) => s + (i.unit === 'g' ? i.quantity : i.unit === 'kg' ? i.quantity * 1000 : 0), 0);
-  const maltQtyLabel = maltKgTotal > 0 ? (maltKgTotal >= 1 ? maltKgTotal.toFixed(2) + ' kg' : (maltKgTotal * 1000).toFixed(0) + ' g') : '';
-  const hopQtyLabel  = hopGTotal  > 0 ? (hopGTotal >= 1000 ? (hopGTotal / 1000).toFixed(2) + ' kg' : hopGTotal.toFixed(0) + ' g') : '';
+    const maltKgTotal = activeAll.filter(i => i.category === 'malt')
+      .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.unit === 'g' ? i.quantity / 1000 : 0), 0);
+    const hopGTotal = activeAll.filter(i => i.category === 'houblon')
+      .reduce((s, i) => s + (i.unit === 'g' ? i.quantity : i.unit === 'kg' ? i.quantity * 1000 : 0), 0);
+    const maltQtyLabel = maltKgTotal > 0 ? (maltKgTotal >= 1 ? maltKgTotal.toFixed(2) + ' kg' : (maltKgTotal * 1000).toFixed(0) + ' g') : '';
+    const hopQtyLabel  = hopGTotal  > 0 ? (hopGTotal >= 1000 ? (hopGTotal / 1000).toFixed(2) + ' kg' : hopGTotal.toFixed(0) + ' g') : '';
 
-  document.getElementById('inv-stats').innerHTML = `
-    <div class="stat"><div class="stat-val" style="color:var(--text)">${activeAll.length}</div><div class="stat-lbl">${t('inv.total_articles')}</div></div>
-    <div class="stat"><div class="stat-val" style="color:var(--malt)">${counts.malt}</div><div class="stat-lbl">${t('cat.malts')}</div>${maltQtyLabel ? `<div style="font-size:.78rem;color:var(--malt);opacity:.75;margin-top:3px">${maltQtyLabel}</div>` : ''}</div>
-    <div class="stat"><div class="stat-val" style="color:var(--hop)">${counts.houblon}</div><div class="stat-lbl">${t('cat.houblons')}</div>${hopQtyLabel ? `<div style="font-size:.78rem;color:var(--hop);opacity:.75;margin-top:3px">${hopQtyLabel}</div>` : ''}</div>
-    <div class="stat"><div class="stat-val" style="color:var(--yeast)">${counts.levure}</div><div class="stat-lbl">${t('cat.levures')}</div></div>
-    <div class="stat"><div class="stat-val" style="color:var(--other)">${counts.autre}</div><div class="stat-lbl">${t('cat.autres')}</div></div>`;
+    document.getElementById('inv-stats').innerHTML = `
+      <div class="stat"><div class="stat-val" style="color:var(--text)">${activeAll.length}</div><div class="stat-lbl">${t('inv.total_articles')}</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--malt)">${counts.malt}</div><div class="stat-lbl">${t('cat.malts')}</div>${maltQtyLabel ? `<div style="font-size:.78rem;color:var(--malt);opacity:.75;margin-top:3px">${maltQtyLabel}</div>` : ''}</div>
+      <div class="stat"><div class="stat-val" style="color:var(--hop)">${counts.houblon}</div><div class="stat-lbl">${t('cat.houblons')}</div>${hopQtyLabel ? `<div style="font-size:.78rem;color:var(--hop);opacity:.75;margin-top:3px">${hopQtyLabel}</div>` : ''}</div>
+      <div class="stat"><div class="stat-val" style="color:var(--yeast)">${counts.levure}</div><div class="stat-lbl">${t('cat.levures')}</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--other)">${counts.autre}</div><div class="stat-lbl">${t('cat.autres')}</div></div>`;
 
-  // Archive button
-  const archBtn = document.getElementById('inv-arch-btn');
-  if (archBtn) {
-    const archCount = S.inventory.filter(i => i.archived).length;
-    archBtn.textContent = showArchivedInv ? t('inv.show_archives') : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
+    // Archive button
+    const archBtn = document.getElementById('inv-arch-btn');
+    if (archBtn) {
+      const archCount = S.inventory.filter(i => i.archived).length;
+      archBtn.textContent = showArchivedInv ? t('inv.show_archives') : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
+    }
   }
 }
 

@@ -1373,6 +1373,23 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('open');
 }
 
+// Close the topmost open modal on Escape — single global handler, no inline duplication
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  // Fullscreen brew guide (bh-brassins.js lazy-loaded)
+  if (typeof _bgFsClose === 'function' && typeof _bgFs !== 'undefined' && _bgFs) {
+    _bgFsClose(); return;
+  }
+  // Confirm modal (uses display property, not .open class)
+  const confirmOv = document.getElementById('modal-confirm');
+  if (confirmOv?.style.display === 'flex') {
+    document.getElementById('modal-confirm-cancel')?.click(); return;
+  }
+  // Class-based modal-overlays — close the topmost (last in DOM order)
+  const open = Array.from(document.querySelectorAll('.modal-overlay.open'));
+  if (open.length) { closeModal(open[open.length - 1].id); e.preventDefault(); }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // LOAD ALL DATA
 // ══════════════════════════════════════════════════════════════════════════════

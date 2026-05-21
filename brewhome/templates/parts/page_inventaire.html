@@ -26,8 +26,8 @@
       <div style="position:relative;display:flex;align-items:center">
         <i class="fas fa-magnifying-glass" style="position:absolute;left:8px;color:var(--muted);font-size:.78rem;pointer-events:none"></i>
         <input type="search" id="inv-search" data-i18n-placeholder="inv.search_placeholder"
-          autocomplete="off" oninput="renderInventaire()"
-          onkeydown="if(event.key==='Escape'){this.value='';renderInventaire();this.blur();event.stopPropagation()}"
+          autocomplete="off" oninput="renderInventaire(true)"
+          onkeydown="if(event.key==='Escape'){this.value='';renderInventaire(true);this.blur();event.stopPropagation()}"
           style="padding:5px 28px 5px 28px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:.83rem;width:200px;outline:none">
       </div>
       <span id="inv-search-count" style="font-size:.75rem;color:var(--muted);white-space:nowrap"></span>

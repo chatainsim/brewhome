@@ -768,8 +768,22 @@ footer{text-align:center;padding:20px;font-size:.72rem;color:#444;border-top:1px
 </html>`;
 }
 
+function openVitrineTab() {
+  const tgt = ((appSettings.github || {}).vitrine?.targets || []).find(t => t.repo && t.provider !== 'custom');
+  if (!tgt) { toast(t('settings.github.err_missing_vitrine'), 'error'); return; }
+  const [user, repo] = tgt.repo.split('/');
+  const url = repo.toLowerCase() === (user + '.github.io').toLowerCase()
+    ? `https://${user}.github.io/`
+    : `https://${user}.github.io/${repo}/`;
+  window.open(url, '_blank', 'noopener');
+}
+
 async function pushVitrine(force = false, silent = false) {
-  _captureGithubSettings();
+  // Ne capturer les settings que si le formulaire GitHub est effectivement rendu dans le DOM
+  // (cas du modal Paramètres ouvert sur l'onglet github) — appeler depuis la cave sans
+  // l'onglet rendu viderait les targets et supprimerait la configuration.
+  const ghForm = document.getElementById('gh-vit-targets');
+  if (ghForm && ghForm.querySelector('.gh-target')) _captureGithubSettings();
   const targets = ((appSettings.github || {}).vitrine?.targets || []).filter(tgt => tgt.repo && tgt.pat);
   if (!targets.length) { toast(t('settings.github.err_missing_vitrine'), 'error'); return; }
 
