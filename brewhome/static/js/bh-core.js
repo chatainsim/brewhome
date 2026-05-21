@@ -56,7 +56,7 @@ function renderMd(raw) {
       chunks.push({ t:'p', lines:ps });
     }
   }
-  return chunks.filter(c=>c.t!=='blank').map(c => {
+  const html = chunks.filter(c=>c.t!=='blank').map(c => {
     if (c.t==='h')  return `<h${c.lvl} class="mdn-h">${il(c.s)}</h${c.lvl}>`;
     if (c.t==='hr') return `<hr class="mdn-hr">`;
     if (c.t==='ul') return `<ul class="mdn-ul">${c.items.map(s=>`<li>${il(s)}</li>`).join('')}</ul>`;
@@ -65,6 +65,19 @@ function renderMd(raw) {
     if (c.t==='p')  return `<p class="mdn-p">${c.lines.map(l=>il(l)).join('<br>')}</p>`;
     return '';
   }).join('');
+  // Sanitize via DOM allowlist — strips any tag not produced by this renderer
+  // and any attribute other than class (defense-in-depth against regex edge cases)
+  const _MD_ALLOWED = new Set(['strong','em','del','code','h1','h2','h3','hr','ul','ol','li','blockquote','p','br']);
+  const _tmp = document.createElement('div');
+  _tmp.innerHTML = html;
+  _tmp.querySelectorAll('*').forEach(el => {
+    if (!_MD_ALLOWED.has(el.tagName.toLowerCase())) {
+      el.replaceWith(document.createTextNode(el.textContent));
+    } else {
+      Array.from(el.attributes).filter(a => a.name !== 'class').forEach(a => el.removeAttribute(a.name));
+    }
+  });
+  return _tmp.innerHTML;
 }
 // CSS markdown pour les fenêtres d'impression (new window)
 const _MD_PRINT_CSS = `.mdn-p{margin:0 0 5px}.mdn-h{font-weight:700;margin:8px 0 3px;font-family:sans-serif}h1.mdn-h{font-size:1.1em}h2.mdn-h{font-size:1em}h3.mdn-h{font-size:.92em}.mdn-ul,.mdn-ol{margin:3px 0;padding-left:18px}.mdn-ul li,.mdn-ol li{margin-bottom:1px}.mdn-bq{margin:4px 0;padding:2px 8px;border-left:3px solid #aaa;font-style:italic;color:#555}.mdn-hr{border:none;border-top:1px solid #ddd;margin:6px 0}code{background:rgba(0,0,0,.07);padding:1px 3px;border-radius:2px;font-family:monospace;font-size:.88em}`;
@@ -80,7 +93,7 @@ async function api(method, path, body) {
     const err = await r.json().catch(() => ({ error: r.statusText }));
     throw err;
   }
-  const data = await r.json();
+  const data = await r.json().catch(() => { throw { error: r.statusText || 'invalid_json' }; });
   if (_bch && method !== 'GET') {
     _bch.postMessage({ type: 'change', entity: _entityForPath(path), ts: Date.now() });
   }
@@ -115,7 +128,7 @@ async function withBtn(btn, fn) {
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════════════════════
-const _navSubParent = { stats: 'dashboard', dbadmin: 'dashboard', brouillons: 'recettes', kegs: 'inventaire' };
+const _navSubParent = { stats: 'dashboard', dbadmin: 'dashboard', brouillons: 'recettes', kegs: 'inventaire', shopping: 'inventaire' };
 
 // ── Lazy script loader ────────────────────────────────────────────────────────
 // Maps a script name to its in-flight/resolved Promise so concurrent
@@ -128,8 +141,9 @@ const _PAGE_LAZY_SCRIPTS = {
   recettes:   ['bh-recettes.js', 'bh-brassins.js'], // openBrewingGuide() lives in bh-brassins
   brassins:   ['bh-brassins.js'],
   cave:       ['bh-cave.js'],
-  spindles:   ['bh-spindles.js', 'bh-settings.js', 'bh-recettes.js'], // ingCost/ebcToColor/brewCost in recettes
-  kegs:       ['bh-spindles.js', 'bh-settings.js', 'bh-recettes.js'],
+  spindles:   ['bh-spindles.js', 'bh-settings.js', 'bh-recettes.js', 'bh-brassins.js'], // ingCost/ebcToColor/brewCost in recettes; renderBrassins for keg/sensor/spindle linking
+  kegs:       ['bh-spindles.js', 'bh-settings.js', 'bh-recettes.js', 'bh-brassins.js'],
+  shopping:   ['bh-shopping.js'],
   calendrier: ['bh-calendrier.js'],
   brouillons: ['bh-brouillons.js', 'bh-recettes.js'], // clearRecipeForm/renderIngredientRows etc. in recettes
   dbadmin:    ['bh-settings.js'],
@@ -157,7 +171,11 @@ function _showSkeleton(id, n, rowClass) {
   el.innerHTML = Array.from({length: n || 5}, () => `<div class="${rowClass || 'skel-row'} skel"></div>`).join('');
 }
 
+const _scrollPos = {};
+
 async function navigate(page) {
+  const curPage = document.querySelector('.page.active')?.id.replace('page-', '');
+  if (curPage) _scrollPos[curPage] = window.scrollY;
   if (typeof _closeAllNavDd === 'function') _closeAllNavDd();
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -168,7 +186,8 @@ async function navigate(page) {
   window.scrollTo(0, 0);
   const lazy = _PAGE_LAZY_SCRIPTS[page];
   if (lazy) await Promise.all(lazy.map(_ensureScript));
-  _refreshPage(page);
+  await _refreshPage(page);
+  if (_scrollPos[page]) window.scrollTo(0, _scrollPos[page]);
 }
 
 async function _refreshPage(page) {
@@ -191,11 +210,12 @@ async function _refreshPage(page) {
       S.recipes = await api('GET', '/api/recipes');
       renderRecipeList();
     } else if (page === 'brassins') {
-      [S.brews, S.spindles, S.tempSensors, S.sodaKegs] = await Promise.all([
+      [S.brews, S.spindles, S.tempSensors, S.sodaKegs, S.brewSteps] = await Promise.all([
         api('GET', '/api/brews'),
         api('GET', '/api/spindles'),
         api('GET', '/api/temperature'),
         api('GET', '/api/soda-kegs'),
+        api('GET', '/api/brew-steps').catch(() => []),
       ]);
       renderBrassins();
     } else if (page === 'cave') {
@@ -214,10 +234,11 @@ async function _refreshPage(page) {
       renderSpindles();
       renderTempSensors();
     } else if (page === 'calendrier') {
-      [S.brews, S.drafts, S.customEvents] = await Promise.all([
+      [S.brews, S.drafts, S.customEvents, S.brewSteps] = await Promise.all([
         api('GET', '/api/brews'),
         api('GET', '/api/drafts'),
         api('GET', '/api/custom_events'),
+        api('GET', '/api/brew-steps').catch(() => []),
       ]);
       renderCalendar();
     } else if (page === 'brouillons') {
@@ -240,6 +261,13 @@ async function _refreshPage(page) {
         S.beers.length ? Promise.resolve(S.beers) : api('GET', '/api/beers'),
       ]);
       renderKegs();
+    } else if (page === 'shopping') {
+      [S.shoppingList, S.inventory, S.recipes] = await Promise.all([
+        api('GET', '/api/shopping-list'),
+        S.inventory.length ? Promise.resolve(S.inventory) : api('GET', '/api/inventory'),
+        S.recipes.length   ? Promise.resolve(S.recipes)   : api('GET', '/api/recipes'),
+      ]);
+      renderShopping();
     } else if (page === 'dbadmin') {
       loadDbStats();
       return; // pas de badge à mettre à jour
@@ -250,9 +278,8 @@ async function _refreshPage(page) {
       initRecipeCompare();
       return;
     }
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
-  } catch(e) { /* refresh silencieux */ }
+    syncNavBadges();
+  } catch(e) { toast(t('common_err.load_page'), 'error'); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -309,10 +336,14 @@ function _btnFlash(btn) {
 // TOAST
 // ══════════════════════════════════════════════════════════════════════════════
 function toast(msg, type = 'info') {
-  if (type === 'success' && _lastSaveBtn) { _btnFlash(_lastSaveBtn); _lastSaveBtn = null; }
+  if (type === 'success' && _lastSaveBtn) {
+    const _flashBtn = _lastSaveBtn; _lastSaveBtn = null;
+    // Defer so withBtn's finally (which restores btn.innerHTML) runs first
+    setTimeout(() => _btnFlash(_flashBtn), 0);
+  }
   const el = document.createElement('div');
   el.className = `toast-item toast-${type}`;
-  const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'circle-xmark' : 'circle-info';
+  const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'circle-xmark' : type === 'warning' ? 'triangle-exclamation' : 'circle-info';
   el.innerHTML = `<i class="fas fa-${icon}"></i><span style="flex:1">${esc(msg)}</span><button class="toast-close" onclick="this.parentElement.remove()" title="${esc(t('common.close'))}">✕</button>`;
   document.getElementById('toast').appendChild(el);
   // Auto-fermeture : 5s pour les erreurs, 3s pour les autres
@@ -359,6 +390,9 @@ function confirmModal(msg, opts = {}) {
 function _patchList(container, items, idFn, htmlFn) {
   const entries  = items.map(item => ({ id: String(idFn(item)), html: htmlFn(item).trim() }));
   const newIdSet = new Set(entries.map(e => e.id));
+
+  // Remove skeleton placeholders left over from initial load
+  container.querySelectorAll(':scope > .skel').forEach(el => el.remove());
 
   // Remove elements no longer in the list
   Array.from(container.querySelectorAll(':scope > [data-id]'))
@@ -541,6 +575,7 @@ function _catalogRowHtml(item, cat) {
         </div>
         ${item.aroma_spec ? `<div style="font-size:.71rem;color:var(--muted);font-style:italic;margin-top:1px;line-height:1.3">${esc(item.aroma_spec)}</div>` : ''}
       </div>
+      <button class="btn btn-icon btn-ghost btn-sm" onclick="showCatalogHistory(${item.id})" title="${t('settings.catalogue.history_btn')}"><i class="fas fa-clock-rotate-left"></i></button>
       <button class="btn btn-icon btn-ghost btn-sm" onclick="editCatalogInline(${item.id})" title="${t('common.edit')}"><i class="fas fa-pen"></i></button>
       <button class="btn btn-icon btn-danger btn-sm" onclick="deleteCatalogItem(${item.id})" title="${t('common.delete')}"><i class="fas fa-trash"></i></button>
     </div>`;
@@ -650,12 +685,67 @@ async function addCatalogItem() {
 }
 
 async function deleteCatalogItem(id) {
+  const item = S.catalog.find(c => c.id === id);
+  const msg  = item ? `${t('common.delete')} « ${item.name} » ?` : t('common.confirm_delete');
+  if (!await confirmModal(msg, { danger: true })) return;
   try {
     await api('DELETE', `/api/catalog/${id}`);
     S.catalog = S.catalog.filter(c => c.id !== id);
     renderSettingsCatalog(settingsCat);
     toast(t('settings.toast.catalog_deleted'), 'success');
   } catch(e) { toast(t('settings.toast.err_delete'), 'error'); }
+}
+
+async function showCatalogHistory(id) {
+  const item = S.catalog.find(c => c.id === id);
+  const itemName = item ? item.name : `#${id}`;
+  const modal = document.getElementById('modal-catalog-history');
+  const titleEl = modal.querySelector('.modal-catalog-history-title');
+  const bodyEl  = modal.querySelector('.modal-catalog-history-body');
+  titleEl.textContent = t('settings.catalogue.history_title').replace('${name}', itemName);
+  bodyEl.innerHTML = '<div class="spinner" style="margin:1.5rem auto"></div>';
+  modal.classList.add('open');
+
+  const _fieldLabel = (f) => {
+    const k = `settings.catalogue.history_field_${f}`;
+    return t(k) !== k ? t(k) : f;
+  };
+  const _fmt = (v) => v == null ? '—' : String(v);
+
+  try {
+    const history = await api('GET', `/api/catalog/${id}/history`);
+    if (!history.length) {
+      bodyEl.innerHTML = `<p style="color:var(--muted);text-align:center;padding:1.5rem 0">${t('settings.catalogue.history_empty')}</p>`;
+      return;
+    }
+    bodyEl.innerHTML = history.map(entry => {
+      const date = new Date(entry.changed_at).toLocaleString();
+      const rows = entry.changes.map(c => `
+        <tr>
+          <td style="padding:3px 8px;font-weight:500">${esc(_fieldLabel(c.field))}</td>
+          <td style="padding:3px 8px;color:var(--muted);text-decoration:line-through">${esc(_fmt(c.old))}</td>
+          <td style="padding:3px 8px;color:var(--accent)">${esc(_fmt(c.new))}</td>
+        </tr>`).join('');
+      return `
+        <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border)">
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:.4rem">
+            <i class="fas fa-clock" style="margin-right:4px"></i>${t('settings.catalogue.history_changed_on')} ${date}
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+            <thead>
+              <tr style="font-size:.72rem;color:var(--muted)">
+                <th style="padding:2px 8px;text-align:left">${t('common.field')}</th>
+                <th style="padding:2px 8px;text-align:left">${t('settings.catalogue.history_old')}</th>
+                <th style="padding:2px 8px;text-align:left">${t('settings.catalogue.history_new')}</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }).join('');
+  } catch(e) {
+    bodyEl.innerHTML = `<p style="color:var(--danger);text-align:center;padding:1rem">${e.message || 'Erreur'}</p>`;
+  }
 }
 
 const AUTRE_UNITS = ['g','kg','mL','L','pièce','sachet'];
@@ -1282,6 +1372,23 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('open');
 }
 
+// Close the topmost open modal on Escape — single global handler, no inline duplication
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  // Fullscreen brew guide (bh-brassins.js lazy-loaded)
+  if (typeof _bgFsClose === 'function' && typeof _bgFs !== 'undefined' && _bgFs) {
+    _bgFsClose(); return;
+  }
+  // Confirm modal (uses display property, not .open class)
+  const confirmOv = document.getElementById('modal-confirm');
+  if (confirmOv?.style.display === 'flex') {
+    document.getElementById('modal-confirm-cancel')?.click(); return;
+  }
+  // Class-based modal-overlays — close the topmost (last in DOM order)
+  const open = Array.from(document.querySelectorAll('.modal-overlay.open'));
+  if (open.length) { closeModal(open[open.length - 1].id); e.preventDefault(); }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // LOAD ALL DATA
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1291,8 +1398,13 @@ async function checkAppVersion() {
   const CACHE_KEY = '_bh_version_check';
   const cached = (() => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch { return null; } })();
   if (cached && Date.now() - cached.ts < 6 * 3600 * 1000) {
-    if (cached.data?.update_available) _showVersionNotif(cached.data);
-    return;
+    // Bust cache if app was updated since the cache was populated
+    if (cached.data?.current && cached.data.current !== _BH_APP_VERSION) {
+      localStorage.removeItem(CACHE_KEY);
+    } else {
+      if (cached.data?.update_available) _showVersionNotif(cached.data);
+      return;
+    }
   }
   try {
     const data = await api('GET', '/api/version/check');
@@ -1339,7 +1451,7 @@ async function loadAll() {
 
   // Toutes les données initiales en une seule vague parallèle
   const [
-    stats, catalog, bjcp, serverAppSettings, customEvents, drafts, spindles, tempSensors,
+    stats, catalog, bjcp, serverAppSettings, customEvents, drafts, brewSteps, spindles, tempSensors,
     recipes, brews, beers, inventory, sodaKegs, depletion,
   ] = await Promise.all([
     api('GET', '/api/stats'),
@@ -1348,6 +1460,7 @@ async function loadAll() {
     api('GET', '/api/app-settings').catch(() => ({})),
     api('GET', '/api/custom_events').catch(() => []),
     api('GET', '/api/drafts').catch(() => []),
+    api('GET', '/api/brew-steps').catch(() => []),
     api('GET', '/api/spindles'),
     api('GET', '/api/temperature'),
     api('GET', '/api/recipes'),
@@ -1366,6 +1479,7 @@ async function loadAll() {
   S.tempSensors  = tempSensors;
   S.customEvents = customEvents;
   S.drafts       = drafts;
+  S.brewSteps    = brewSteps;
   S.recipes      = recipes;
   S.brews        = brews;
   S.beers        = beers;
@@ -1389,8 +1503,24 @@ function updateNavBadges(stats) {
   document.getElementById('nb-cav').textContent = stats.beers_count;
   const nbKegs = document.getElementById('nb-kegs');
   if (nbKegs) nbKegs.textContent = stats.kegs_count || '';
+  const nbShop = document.getElementById('nb-shop');
+  if (nbShop) nbShop.textContent = stats.shopping_count || '';
   updateBrouillonsBadge();
   updateBackupNavBadge();
+}
+
+/** Recompute nav badge counts directly from local S.* state — no API call needed.
+ *  Call after any mutation that updates S.inventory / S.recipes / S.brews /
+ *  S.beers / S.sodaKegs / S.shoppingList. */
+function syncNavBadges() {
+  updateNavBadges({
+    inventory_count: (S.inventory    || []).filter(i => !i.archived).length,
+    recipes_count:   (S.recipes      || []).filter(r => !r.archived).length,
+    brews_count:     (S.brews        || []).filter(b => !b.archived).length,
+    beers_count:     (S.beers        || []).filter(b => !b.archived).length,
+    kegs_count:      (S.sodaKegs     || []).filter(k => !k.archived).length,
+    shopping_count:  (S.shoppingList || []).filter(i => !i.checked).length,
+  });
 }
 function updateBackupNavBadge() {
   const btn = document.getElementById('nav-backup-btn');

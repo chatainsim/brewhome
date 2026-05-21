@@ -207,6 +207,28 @@ function _parsePhotoDataUrl(dataUrl) {
   return { ext, b64: m[2] };
 }
 
+async function _resolvePhoto(photo) {
+  if (!photo) return null;
+  // Already base64 data URL
+  const parsed = _parsePhotoDataUrl(photo);
+  if (parsed) return parsed;
+  // Local Flask URL (/api/beer-photos/...) → fetch binary and convert
+  if (photo.startsWith('/api/beer-photos/') || photo.startsWith('/api/draft-images/')) {
+    try {
+      const resp = await fetch(photo);
+      if (!resp.ok) return null;
+      const ab  = await resp.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(ab)));
+      const ext = photo.endsWith('.png') ? 'png' : 'jpg';
+      return { ext, b64 };
+    } catch(e) {
+      console.warn('[BrewHome] _resolvePhoto fetch failed:', photo, e);
+      return null;
+    }
+  }
+  return null;
+}
+
 // esc() est définie dans bh-core.js — alias pour compatibilité interne
 const _vEsc = esc;
 
@@ -270,7 +292,7 @@ function generateVitrineHtml(beers, photoMap, iconPath) {
     return `
     <div class="card" id="beer-${b.id}">
       ${imgSrc
-        ? `<img class="card-img" src="${imgSrc}" loading="lazy" alt="${_vEsc(b.name)}" onclick="openLb(this,'${_vEsc(b.name)}')">`
+        ? `<img class="card-img" src="${imgSrc}" loading="lazy" alt="${_vEsc(b.name)}" data-name="${_vEsc(b.name)}" onclick="openLb(this,this.dataset.name)">`
         : `<div class="card-img-ph">🍺</div>`}
       <div class="card-body">
         <div class="card-name">${_vEsc(b.name)}</div>
@@ -745,8 +767,22 @@ footer{text-align:center;padding:20px;font-size:.72rem;color:#444;border-top:1px
 </html>`;
 }
 
+function openVitrineTab() {
+  const tgt = ((appSettings.github || {}).vitrine?.targets || []).find(t => t.repo && t.provider !== 'custom');
+  if (!tgt) { toast(t('settings.github.err_missing_vitrine'), 'error'); return; }
+  const [user, repo] = tgt.repo.split('/');
+  const url = repo.toLowerCase() === (user + '.github.io').toLowerCase()
+    ? `https://${user}.github.io/`
+    : `https://${user}.github.io/${repo}/`;
+  window.open(url, '_blank', 'noopener');
+}
+
 async function pushVitrine(force = false, silent = false) {
-  _captureGithubSettings();
+  // Ne capturer les settings que si le formulaire GitHub est effectivement rendu dans le DOM
+  // (cas du modal Paramètres ouvert sur l'onglet github) — appeler depuis la cave sans
+  // l'onglet rendu viderait les targets et supprimerait la configuration.
+  const ghForm = document.getElementById('gh-vit-targets');
+  if (ghForm && ghForm.querySelector('.gh-target')) _captureGithubSettings();
   const targets = ((appSettings.github || {}).vitrine?.targets || []).filter(tgt => tgt.repo && tgt.pat);
   if (!targets.length) { toast(t('settings.github.err_missing_vitrine'), 'error'); return; }
 
@@ -755,19 +791,18 @@ async function pushVitrine(force = false, silent = false) {
   if (btnForce) btnForce.disabled = true;
 
   try {
-    // S'assurer que les bières sont chargées
-    if (!S.beers.length) {
-      try { S.beers = await api('GET', '/api/beers'); } catch(e) { console.warn('[BrewHome] beers load failed during push:', e); }
-    }
+    // Toujours recharger depuis l'API : le cache S.beers peut manquer recipe_name/brew_photos_url
+    // (les PUT /api/beers ne retournent pas les champs JOINés)
+    try { S.beers = await api('GET', '/api/beers'); } catch(e) { console.warn('[BrewHome] beers load failed during push:', e); }
     const beers   = S.beers.filter(b => !b.archived);
     const dateStr = new Date().toISOString().slice(0, 10);
 
-    // Construire la map des photos (id → {ext, b64})
+    // Construire la map des photos (id → {ext, b64}) — supporte base64 et URLs locales Flask
     const photoMap = {};
-    beers.forEach(b => {
-      const p = _parsePhotoDataUrl(b.photo);
+    await Promise.all(beers.map(async b => {
+      const p = await _resolvePhoto(b.photo);
       if (p) photoMap[b.id] = p;
-    });
+    }));
 
     // Logo de l'application
     const appIconParsed = _parsePhotoDataUrl(appSettings.appIcon || null);
@@ -782,7 +817,12 @@ async function pushVitrine(force = false, silent = false) {
     S.recipes.forEach(r => { if (recipeIds.includes(r.id)) recipeMap[r.id] = r; });
 
     const html = generateVitrineHtml(beers, photoMap, iconPath);
-    const json = JSON.stringify(beers, null, 2);
+    // beers.json : remplacer les URLs locales par les chemins relatifs dans le repo vitrine
+    const beersForJson = beers.map(b => {
+      const p = photoMap[b.id];
+      return { ...b, photo: p ? `images/beer-${b.id}.${p.ext}` : null };
+    });
+    const json = JSON.stringify(beersForJson, null, 2);
 
     // Pages de recettes
     const recipeFiles = Object.values(recipeMap).map(rec => {
@@ -1327,14 +1367,46 @@ async function renderSettingsTrash() {
   if (!el) return;
   el.innerHTML = `<div style="color:var(--muted);font-size:.85rem"><i class="fas fa-spinner fa-spin"></i></div>`;
   const data = await api('GET', '/api/trash');
+  const retention = data.retention_days || 90;
+  const now = Date.now();
+
+  function _daysLeft(deleted_at) {
+    if (!deleted_at) return null;
+    const deletedMs = new Date(deleted_at).getTime();
+    if (isNaN(deletedMs)) return null;
+    const expireMs = deletedMs + retention * 86400000;
+    return Math.ceil((expireMs - now) / 86400000);
+  }
+
+  function _purgeBadge(daysLeft) {
+    if (daysLeft === null) return '';
+    if (daysLeft <= 0) {
+      return `<span style="flex-shrink:0;font-size:.7rem;font-weight:700;color:var(--danger);white-space:nowrap">
+        <i class="fas fa-circle-exclamation"></i> ${esc(t('settings.trash.purge_today'))}</span>`;
+    }
+    if (daysLeft <= 3) {
+      return `<span style="flex-shrink:0;font-size:.7rem;font-weight:700;color:var(--danger);white-space:nowrap">
+        <i class="fas fa-circle-exclamation"></i> ${esc(t('settings.trash.purge_in').replace('${n}', daysLeft))}</span>`;
+    }
+    if (daysLeft <= 14) {
+      return `<span style="flex-shrink:0;font-size:.7rem;font-weight:600;color:var(--amber);white-space:nowrap">
+        <i class="fas fa-clock"></i> ${esc(t('settings.trash.purge_in').replace('${n}', daysLeft))}</span>`;
+    }
+    return `<span style="flex-shrink:0;font-size:.7rem;color:var(--muted);white-space:nowrap">
+      ${esc(t('settings.trash.purge_in').replace('${n}', daysLeft))}</span>`;
+  }
+
   const sections = [
-    { key: 'recipes',   label: t('settings.trash.section_recipes'), icon: 'fa-scroll',      table: 'recipes',   sub: r => r.style || '' },
-    { key: 'inventory', label: t('settings.trash.section_inv'),     icon: 'fa-boxes-stacked',table: 'inventory', sub: r => `${r.quantity ?? ''} ${r.unit ?? ''} — ${t('cat.' + r.category)}` },
-    { key: 'brews',     label: t('settings.trash.section_brews'),   icon: 'fa-fire-burner',  table: 'brews',     sub: r => r.brew_date || '' },
-    { key: 'beers',     label: t('settings.trash.section_beers'),   icon: 'fa-wine-bottle',  table: 'beers',     sub: r => r.abv ? `${r.abv}%` : '' },
+    { key: 'recipes',   label: t('settings.trash.section_recipes'), icon: 'fa-scroll',       table: 'recipes',   sub: r => r.style || '' },
+    { key: 'inventory', label: t('settings.trash.section_inv'),     icon: 'fa-boxes-stacked', table: 'inventory', sub: r => `${r.quantity ?? ''} ${r.unit ?? ''} — ${t('cat.' + r.category)}` },
+    { key: 'brews',     label: t('settings.trash.section_brews'),   icon: 'fa-fire-burner',   table: 'brews',     sub: r => r.brew_date || '' },
+    { key: 'beers',     label: t('settings.trash.section_beers'),   icon: 'fa-wine-bottle',   table: 'beers',     sub: r => r.abv ? `${r.abv}%` : '' },
   ];
+
   let html = '';
   let total = 0;
+  let soonCount = 0;
+
   for (const s of sections) {
     const items = data[s.key] || [];
     if (!items.length) continue;
@@ -1345,11 +1417,19 @@ async function renderSettingsTrash() {
       </div>`;
     for (const r of items) {
       const deletedDate = r.deleted_at ? r.deleted_at.slice(0, 10) : '';
-      html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--card2);margin-bottom:6px">
+      const dLeft = _daysLeft(r.deleted_at);
+      if (dLeft !== null && dLeft <= 14) soonCount++;
+      const borderStyle = dLeft !== null && dLeft <= 3
+        ? 'border-left:3px solid var(--danger)'
+        : dLeft !== null && dLeft <= 14
+          ? 'border-left:3px solid var(--amber)'
+          : '';
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--card2);margin-bottom:6px;${borderStyle}">
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.name)}</div>
           <div style="font-size:.76rem;color:var(--muted)">${esc(s.sub(r))}${deletedDate ? ' · ' + t('settings.trash.deleted_on') + ' ' + deletedDate : ''}</div>
         </div>
+        ${_purgeBadge(dLeft)}
         <button class="btn btn-sm btn-ghost" style="flex-shrink:0;color:var(--success)" onclick="trashRestore('${s.table}',${r.id})">
           <i class="fas fa-rotate-left"></i> ${esc(t('settings.trash.restore'))}
         </button>
@@ -1360,9 +1440,17 @@ async function renderSettingsTrash() {
     }
     html += `</div>`;
   }
+
+  const bannerHtml = soonCount > 0
+    ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);color:var(--amber);font-size:.82rem;margin-bottom:16px">
+        <i class="fas fa-triangle-exclamation" style="flex-shrink:0"></i>
+        <span>${esc(t('settings.trash.purge_soon_banner').replace('${n}', soonCount))}</span>
+       </div>`
+    : '';
+
   el.innerHTML = total === 0
     ? `<div style="color:var(--muted);font-size:.85rem;text-align:center;padding:24px 0"><i class="fas fa-trash-can" style="font-size:2rem;display:block;margin-bottom:8px;opacity:.3"></i>${esc(t('settings.trash.empty'))}</div>`
-    : html;
+    : bannerHtml + html;
 }
 
 async function trashRestore(table, id) {

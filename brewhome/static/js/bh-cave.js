@@ -2,6 +2,9 @@
 // ── CAVE ─────────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 
+// openVitrineTab() est défini dans bh-ui.js (chargé immédiatement) pour être disponible
+// dès l'affichage des boutons de la page cave, sans attendre le lazy-load de bh-cave.js.
+
 // Auto-push vitrine après modification de la cave (debounce 5 s, silencieux)
 const _autoPushVitrineDebounced = debounce(function() {
   const targets = ((appSettings.github || {}).vitrine?.targets || []).filter(t => t.repo && t.pat);
@@ -68,14 +71,19 @@ function _deplBadge(beerId) {
 let _caveAC = null;
 const renderCaveDebounced = debounce(renderCave, 200);
 
+let _recByIdCache = null, _recByIdSrc = null;
+let _brwByIdCache = null, _brwByIdSrc = null;
+
 function renderCave() {
   const q = (document.getElementById('cave-search')?.value || '').toLowerCase();
   const active = S.beers.filter(b => !b.archived);
   const arch   = S.beers.filter(b => b.archived);
   const all    = showArchivedCave ? [...active, ...arch] : active;
   const shown  = all.filter(b => !q || b.name.toLowerCase().includes(q) || (b.type||'').toLowerCase().includes(q));
-  const recById = new Map(S.recipes.map(r => [r.id, r]));
-  const brwById = new Map(S.brews.map(b => [b.id, b]));
+  if (_recByIdSrc !== S.recipes) { _recByIdCache = new Map(S.recipes.map(r => [r.id, r])); _recByIdSrc = S.recipes; }
+  if (_brwByIdSrc !== S.brews)   { _brwByIdCache = new Map(S.brews.map(b => [b.id, b]));   _brwByIdSrc = S.brews; }
+  const recById = _recByIdCache;
+  const brwById = _brwByIdCache;
 
   // Stats on active beers only
   const total33 = active.reduce((s,b) => s + (b.stock_33cl||0), 0);
@@ -135,7 +143,7 @@ function renderCave() {
   const beerCardHtml = b => {
     const linkedKeg = S.sodaKegs.find(k => k.beer_id === b.id);
     const photoHtml = b.photo
-      ? `<div class="beer-photo" style="cursor:zoom-in" onclick="openBeerLightbox(${b.id})"><img src="${b.photo}" alt="${esc(b.name)}"></div>`
+      ? `<div class="beer-photo" style="cursor:zoom-in" onclick="openBeerLightbox(${b.id})"><img src="${esc(b.photo)}" alt="${esc(b.name)}"></div>`
       : `<div class="beer-photo" style="display:flex;align-items:center;justify-content:center;background:var(--card2);color:var(--border);font-size:3rem;cursor:pointer" onclick="openBeerDetail(${b.id})">🍺</div>`;
 
     // ── Calcul du prix par bouteille ──────────────────────────────────────────
@@ -485,7 +493,10 @@ function openBeerDetail(id) {
     const fmtDate = d => d ? d.split('-').reverse().join('/') : null;
     if (b.brew_date)        metaParts.push(`<i class="fas fa-fire-flame-curved"></i> Brassé le ${fmtDate(b.brew_date)}`);
     if (b.bottling_date)    metaParts.push(`<i class="fas fa-wine-bottle"></i> Embouteillé le ${fmtDate(b.bottling_date)}`);
-    if (b.brew_photos_url)  metaParts.push(`<a href="${esc(b.brew_photos_url)}" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:none"><i class="fas fa-images"></i> ${t('brew.photos_url_open')}</a>`);
+    if (b.brew_photos_url) {
+      const _safeUrl = /^https?:\/\//i.test(b.brew_photos_url) ? esc(b.brew_photos_url) : null;
+      if (_safeUrl) metaParts.push(`<a href="${_safeUrl}" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:none"><i class="fas fa-images"></i> ${t('brew.photos_url_open')}</a>`);
+    }
     const metaEl = get('bd-meta');
     if (metaEl) metaEl.innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
 
@@ -814,13 +825,15 @@ function _buildOneLabelHtml(b, recipe, opts = {}) {
   const fmtDate = d => d ? d.split('-').reverse().join('/') : null;
   const fmtQty = i => esc(i.name) + (i.hop_type === 'dryhop' ? ' <span style="color:#888;font-style:italic">(DH)</span>' : '');
 
+  // Ingrédients groupés (Autres : seulement sucre, miel, lactose)
+  const AUTRES_LABEL = ['sucre', 'miel', 'lactose', 'épice', 'epice', 'cannelle', 'coriandre', 'gingembre', 'vanille', 'cardamome', 'poivre', 'cumin', 'anis', 'muscade', 'piment', 'zeste'];
   let ingHtml = '';
   if (showIngredients) {
     if (recipe && recipe.ingredients && recipe.ingredients.length) {
       const groups = [
         { cat: 'malt',    label: t('cat.malts'),    filter: null },
         { cat: 'houblon', label: t('cat.houblons'), filter: null },
-        { cat: 'autre',   label: t('cat.autres'),   filter: null },
+        { cat: 'autre',   label: t('cat.autres'),   filter: i => AUTRES_LABEL.some(k => i.name.toLowerCase().includes(k)) },
       ];
       groups.forEach(({ cat, label, filter }) => {
         let items = recipe.ingredients.filter(i => i.category === cat);
@@ -847,7 +860,7 @@ function _buildOneLabelHtml(b, recipe, opts = {}) {
   const subtitle  = showStyle ? beerStyle : '';
   const photoSection = showPhoto
     ? (b.photo
-        ? `<img class="beer-label-photo" src="${b.photo}" alt="${esc(b.name)}">`
+        ? `<img class="beer-label-photo" src="${esc(b.photo)}" alt="${esc(b.name)}">`
         : `<div class="beer-label-nophoto">🍺</div>`)
     : '';
 
@@ -857,8 +870,8 @@ function _buildOneLabelHtml(b, recipe, opts = {}) {
   const ebcBar = `<div style="height:2.5mm;background:${ebcBarColor}"></div>`;
 
   const footLeft = showDates ? [
-    b.brew_date     ? `🍺\u202f${fmtDate(b.brew_date)}`     : null,
-    b.bottling_date ? `🍾\u202f${fmtDate(b.bottling_date)}` : null,
+    b.brew_date     ? `🍺\u202f${esc(fmtDate(b.brew_date))}`     : null,
+    b.bottling_date ? `🍾\u202f${esc(fmtDate(b.bottling_date))}` : null,
   ].filter(Boolean).join(' · ') : '';
 
   // QR code: encode key beer info
@@ -879,7 +892,7 @@ function _buildOneLabelHtml(b, recipe, opts = {}) {
   const statsItems = [
     showIbu && ibu != null ? `IBU\u202f${ibu}` : null,
     showEbc && ebc != null ? `EBC\u202f${ebc}` : null,
-    showAbv && b.abv       ? `${b.abv}%\u202fABV` : null,
+    showAbv && b.abv       ? `${esc(String(b.abv))}%\u202fABV` : null,
   ].filter(Boolean);
   const statsText = statsItems.join(' · ');
   const footerRight = qrHtml
@@ -888,7 +901,7 @@ function _buildOneLabelHtml(b, recipe, opts = {}) {
   const labelHtml = `<div class="beer-label">
       <div class="beer-label-header" style="background:${accentColor};color:${headerTextColor}">
         <div class="beer-label-title">${esc(b.name)}</div>
-        ${subtitle ? `<div class="beer-label-sub">${subtitle}</div>` : ''}
+        ${subtitle ? `<div class="beer-label-sub">${esc(subtitle)}</div>` : ''}
       </div>
       ${ebcBar}
       ${photoSection}
@@ -940,7 +953,7 @@ function doPrintLabel() {
   // Inject dynamic @page rule so the selected format is applied
   let styleTag = document.getElementById('_label-page-style');
   if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = '_label-page-style'; document.head.appendChild(styleTag); }
-  styleTag.textContent = `@page{size:${pageSize};margin:10mm}`;
+  styleTag.textContent = `@page{size:${pageSize};margin:${opts.showCropMarks ? '0' : '10mm'}}`;
   if (area) {
     area.innerHTML = html;
     area.style.display = 'flex';
@@ -1082,8 +1095,7 @@ async function saveBeer() {
     }
     closeModal('beer-modal');
     renderCave();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(id ? t('cave.beer_updated') : t('cave.beer_added'), 'success');
     _autoPushVitrineDebounced();
   } catch(e) { toast(t('cave.err_save'), 'error'); }
@@ -1125,8 +1137,7 @@ async function deleteBeer(id) {
     await api('DELETE', `/api/beers/${id}`);
     S.beers = S.beers.filter(b => b.id !== id);
     renderCave();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('cave.beer_deleted'), 'success');
     _autoPushVitrineDebounced();
   } catch(e) { toast(t('cave.err_save'), 'error'); }

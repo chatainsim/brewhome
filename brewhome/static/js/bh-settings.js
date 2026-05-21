@@ -6,8 +6,8 @@ function getTzOffset() {
 }
 function fmtReadingDate(dateStr) {
   if (!dateStr) return '—';
-  // SQLite renvoie '2024-01-15 14:30:00' — remplacer l'espace par T pour un parsing ISO fiable
-  const d = new Date(dateStr.replace(' ', 'T'));
+  // SQLite renvoie '2024-01-15 14:30:00' (UTC) — suffixe Z pour parsing UTC fiable
+  const d = new Date(dateStr.replace(' ', 'T') + 'Z');
   if (isNaN(d.getTime())) return dateStr;
   d.setHours(d.getHours() + getTzOffset());
   return d.toLocaleString(_lang || 'fr', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
@@ -930,29 +930,66 @@ async function loadDbStats() {
   try {
     const data = await api('GET', '/api/admin/db-stats');
     const fmt = b => b >= 1048576 ? (b/1048576).toFixed(2)+' Mo' : (b/1024).toFixed(1)+' Ko';
-    const mainTotal = Object.values(data.main.tables).reduce((a,b)=>a+b, 0);
-    const readTotal = Object.values(data.readings.tables).reduce((a,b)=>a+b, 0);
+    const mainTotal = Object.values(data.main.tables).reduce((a,b)=>a+b.count, 0);
+    const readTotal = Object.values(data.readings.tables).reduce((a,b)=>a+b.count, 0);
     document.getElementById('dbadmin-summary').innerHTML = `
       <div class="stat"><div class="stat-val" style="color:var(--info)">${fmt(data.main.size)}</div><div class="stat-lbl">${t('dbadmin.main_size')}</div></div>
       <div class="stat"><div class="stat-val" style="color:var(--info)">${fmt(data.readings.size)}</div><div class="stat-lbl">${t('dbadmin.readings_size')}</div></div>
       <div class="stat"><div class="stat-val">${fmt(data.main.size + data.readings.size)}</div><div class="stat-lbl">${t('dbadmin.total_size')}</div></div>
       <div class="stat"><div class="stat-val" style="color:var(--success)">${(mainTotal + readTotal).toLocaleString()}</div><div class="stat-lbl">${t('dbadmin.total_rows')}</div></div>`;
     const renderTbl = (tables, id) => {
-      const rows = Object.entries(tables).sort((a,b) => b[1]-a[1]);
-      document.getElementById(id).innerHTML = rows.map(([name, count]) =>
-        `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-          <span style="font-size:.82rem;font-family:monospace;color:var(--text)">${name}</span>
-          <span class="nav-badge">${count.toLocaleString()}</span>
-        </div>`
-      ).join('');
+      const entries = Object.entries(tables); // sorted by size desc from backend
+      const maxSize = entries.reduce((m, [, v]) => Math.max(m, v.size), 0);
+      document.getElementById(id).innerHTML = entries.map(([name, {count, size}]) => {
+        const pct = maxSize > 0 ? (size / maxSize * 100).toFixed(1) : 0;
+        const sizeStr = size >= 1048576 ? (size/1048576).toFixed(2)+' Mo'
+                      : size >= 1024    ? (size/1024).toFixed(1)+' Ko'
+                      :                   size+' o';
+        return `<div style="padding:5px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+            <span style="font-size:.82rem;font-family:monospace;color:var(--text)">${name}</span>
+            <span style="display:flex;gap:6px;align-items:center">
+              <span style="font-size:.75rem;color:var(--text-muted)">${count.toLocaleString()}</span>
+              <span class="nav-badge">${sizeStr}</span>
+            </span>
+          </div>
+          <div style="height:3px;background:var(--border);border-radius:2px">
+            <div style="height:100%;width:${pct}%;background:var(--info);border-radius:2px"></div>
+          </div>
+        </div>`;
+      }).join('');
     };
     renderTbl(data.main.tables, 'dbadmin-main-tables');
     renderTbl(data.readings.tables, 'dbadmin-readings-tables');
+    const retEl = document.getElementById('purge-retention-days');
+    if (retEl && data.purge_retention_days != null) retEl.value = data.purge_retention_days;
     if (loading) loading.style.display = 'none';
     if (content) content.style.display = '';
   } catch(e) {
     if (loading) loading.innerHTML = `<i class="fas fa-triangle-exclamation"></i><p>${esc(e.message||'Error')}</p>`;
   }
+}
+
+async function savePurgeSettings() {
+  const days = parseInt(document.getElementById('purge-retention-days').value);
+  if (!days || days < 1) return;
+  await api('PUT', '/api/app-settings', { purge_retention_days: String(days) });
+  toast(t('dbadmin.purge_saved'), 'success');
+}
+
+async function runManualPurge() {
+  const res = await api('POST', '/api/admin/purge-deleted');
+  const el  = document.getElementById('dbadmin-purge-result');
+  if (el) {
+    if (res.total === 0) {
+      el.textContent = t('dbadmin.purge_nothing');
+    } else {
+      const parts = Object.entries(res.deleted).map(([tbl, n]) => `${tbl}: ${n}`);
+      el.textContent = t('dbadmin.purge_done').replace('${n}', res.total) + ' (' + parts.join(', ') + ')';
+    }
+    el.style.display = '';
+  }
+  toast(res.total > 0 ? t('dbadmin.purge_done').replace('${n}', res.total) : t('dbadmin.purge_nothing'), 'success');
 }
 
 async function runVacuum() {
@@ -974,12 +1011,38 @@ async function runVacuum() {
 
 function exportSql() {
   const a = document.createElement('a');
-  a.href = '/api/admin/export-sql';
+  a.href = '/api/admin/export-sql?token=' + encodeURIComponent(_BH_EXPORT_TOKEN);
   a.download = `brewhome_${new Date().toISOString().slice(0,10)}.sql`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   toast(t('dbadmin.exported_sql'), 'success');
+}
+
+async function migrateDraftImages() {
+  const res = await api('POST', '/api/admin/migrate-draft-images');
+  const el  = document.getElementById('dbadmin-migrate-result');
+  const parts = [];
+  if (res.migrated > 0) parts.push(t('dbadmin.migrate_images_done').replace('${n}', res.migrated));
+  if (res.purged   > 0) parts.push(t('dbadmin.migrate_images_purged').replace('${n}', res.purged));
+  if (res.errors   > 0) parts.push(t('dbadmin.migrate_images_errors').replace('${n}', res.errors));
+  const msg = parts.length ? parts.join(' — ') : t('dbadmin.migrate_images_none');
+  if (el) { el.textContent = msg; el.style.display = ''; }
+  toast(msg, res.errors > 0 ? 'warning' : 'success');
+  await loadDbStats();
+}
+
+async function migrateBeerImages() {
+  const res = await api('POST', '/api/admin/migrate-beer-images');
+  const el  = document.getElementById('dbadmin-migrate-beer-result');
+  const parts = [];
+  if (res.migrated > 0) parts.push(t('dbadmin.migrate_beer_images_done').replace('${n}', res.migrated));
+  if (res.purged   > 0) parts.push(t('dbadmin.migrate_beer_images_purged').replace('${n}', res.purged));
+  if (res.errors   > 0) parts.push(t('dbadmin.migrate_beer_images_errors').replace('${n}', res.errors));
+  const msg = parts.length ? parts.join(' — ') : t('dbadmin.migrate_beer_images_none');
+  if (el) { el.textContent = msg; el.style.display = ''; }
+  toast(msg, res.errors > 0 ? 'warning' : 'success');
+  await loadDbStats();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

@@ -360,6 +360,17 @@ function renderCalendar() {
     addEv(d.target_date, { type: 'draft', label: d.title || 'Brouillon', color: d.color || '#8b5cf6', draftId: d.id });
   });
 
+  // Étapes planifiées des brassins
+  (S.brewSteps || []).filter(s => !s.done).forEach(s => {
+    const brew = (S.brews || []).find(b => b.id === s.brew_id);
+    const brewName = brew ? brew.name : `#${s.brew_id}`;
+    addEv(s.scheduled_date, {
+      type: 'brew_step', label: `⚙️ ${brewName} — ${s.title}`,
+      notes: s.notes || null, stepId: s.id, brewId: s.brew_id,
+      color: '#06b6d4',
+    });
+  });
+
   // Événements personnalisés + leur rappel J-45
   (S.customEvents || []).forEach(ev => {
     const c = ev.color || '#f59e0b';
@@ -434,6 +445,13 @@ function renderCalendar() {
         return `<div class="cal-event" style="background:${c}22;color:${c};border:1px solid ${c}44"
           onclick="calEvClick(event,${idx})">
           <i class="fas fa-book-open" style="flex-shrink:0;font-size:.65rem"></i>
+          <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
+        </div>`;
+      }
+      if (ev.type === 'brew_step') {
+        return `<div class="cal-event" style="background:#06b6d422;color:#06b6d4;border:1px solid #06b6d444"
+          onclick="openBrewStepsModal(${ev.brewId})">
+          <i class="fas fa-gear" style="flex-shrink:0;font-size:.65rem"></i>
           <span style="overflow:hidden;text-overflow:ellipsis">${esc(ev.label)}</span>
         </div>`;
       }
@@ -1019,7 +1037,7 @@ function ceStyleSearch(input) {
   for (const types of Object.values(BEER_TYPES))
     types.forEach(t => { if (!q || t.toLowerCase().includes(q)) commonMatches.push(t); });
   if (commonMatches.length) {
-    html += `<div class="ing-suggest-cat">Styles courants</div>`;
+    html += `<div class="ing-suggest-cat">${t('rec.common_styles')}</div>`;
     commonMatches.slice(0, q ? 30 : 10).forEach(t => {
       html += `<div class="ing-suggest-item" onmousedown="selectCeStyle(${JSON.stringify(t).replace(/"/g,'&quot;')})"><span>${esc(t)}</span></div>`;
       count++;

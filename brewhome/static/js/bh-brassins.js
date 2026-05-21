@@ -95,6 +95,7 @@ function openBrewingGuide() {
 let _scaleGuideActive = false;
 let _scaleGuidePollInterval = null;
 let _scaleGuideStep = 0;
+let _scaleGuidePollErrors = 0;
 
 function _sgUpdateUi(active, statusText) {
   const col   = active ? 'var(--hop)'              : '#f0883e';
@@ -120,6 +121,7 @@ function _sgUpdateUi(active, statusText) {
 
 function _scaleGuidePollFn() {
   fetch('/api/scale-guide').then(r => r.json()).then(data => {
+    _scaleGuidePollErrors = 0;
     if (!_scaleGuideActive) return;
     if (!data.active) {
       // Terminé par l'appareil — cocher tous les malts restants
@@ -145,12 +147,23 @@ function _scaleGuidePollFn() {
       _scaleGuideStep = newStep;
     }
     const sg = t('rec.scale_guide_active')
-      .replace('${malt}', data.malt_name || '')
-      .replace('${kg}', data.target_kg ?? '—')
-      .replace('${step}', data.step || 1)
-      .replace('${total}', data.total || 1);
+      .replace('${malt}', () => data.malt_name || '')
+      .replace('${kg}',   () => String(data.target_kg ?? '—'))
+      .replace('${step}', () => String(data.step || 1))
+      .replace('${total}',() => String(data.total || 1));
     _sgUpdateUi(true, sg);
-  }).catch(() => {});
+  }).catch(() => {
+    _scaleGuidePollErrors++;
+    if (_scaleGuidePollErrors >= 3) {
+      _scaleGuideActive = false;
+      clearInterval(_scaleGuidePollInterval);
+      _scaleGuidePollInterval = null;
+      _scaleGuideStep = 0;
+      _scaleGuidePollErrors = 0;
+      _sgUpdateUi(false, '');
+      toast(t('rec.scale_guide_err_poll'), 'error');
+    }
+  });
 }
 
 async function _bgToggleScaleGuide() {
@@ -158,6 +171,7 @@ async function _bgToggleScaleGuide() {
     clearInterval(_scaleGuidePollInterval);
     _scaleGuidePollInterval = null;
     _scaleGuideStep = 0;
+    _scaleGuidePollErrors = 0;
     await fetch('/api/scale-guide/stop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
     _scaleGuideActive = false;
     _sgUpdateUi(false, '');
@@ -175,10 +189,10 @@ async function _bgToggleScaleGuide() {
       _scaleGuideStep = 1;
       _scaleGuidePollInterval = setInterval(_scaleGuidePollFn, 2000);
       const sg = t('rec.scale_guide_active')
-        .replace('${malt}', res.first_malt || '')
-        .replace('${kg}', '—')
-        .replace('${step}', 1)
-        .replace('${total}', res.total || 1);
+        .replace('${malt}', () => res.first_malt || '')
+        .replace('${kg}',   () => '—')
+        .replace('${step}', () => '1')
+        .replace('${total}',() => String(res.total || 1));
       _sgUpdateUi(true, sg);
     }
   }
@@ -345,23 +359,23 @@ function _bgHtmlPrep() {
   if (allHops.length) {
     h += `<div style="font-weight:600;margin-bottom:8px;color:var(--hop)"><i class="fas fa-leaf"></i> ${t('rec.guide_hops')}</div>`;
     allHops.forEach((hop,i) => {
-      const qty = hop.unit==='kg' ? `${hop.quantity*1000} g` : `${hop.quantity} ${hop.unit}`;
+      const qty = hop.unit==='kg' ? `${hop.quantity*1000} g` : `${hop.quantity} ${esc(hop.unit)}`;
       const info = hop.hop_type==='dryhop' ? '(Dry Hop)'
         : hop.hop_type==='whirlpool' ? '(Whirlpool)'
         : hop.hop_type==='flameout'  ? '(Flameout)'
-        : `T-${hop.hop_time??'?'} min`;
+        : `T-${esc(String(hop.hop_time??'?'))} min`;
       h += _bgCheckItem(`hop-${i}`, `<strong>${qty}</strong> — ${esc(hop.name)} <span style="color:var(--muted);font-size:.8rem">${info}</span>`);
     });
     h += '<div style="height:12px"></div>';
   }
   if (s.yeasts.length) {
     h += `<div style="font-weight:600;margin-bottom:8px;color:var(--amber)"><i class="fas fa-flask"></i> ${t('rec.guide_yeast')}</div>`;
-    s.yeasts.forEach((y,i) => h += _bgCheckItem(`yeast-${i}`, `<strong>${y.quantity} ${y.unit}</strong> — ${esc(y.name)}`));
+    s.yeasts.forEach((y,i) => h += _bgCheckItem(`yeast-${i}`, `<strong>${y.quantity} ${esc(y.unit)}</strong> — ${esc(y.name)}`));
     h += '<div style="height:12px"></div>';
   }
   if (s.others.length) {
     h += `<div style="font-weight:600;margin-bottom:8px;color:var(--muted)"><i class="fas fa-mortar-pestle"></i> ${t('rec.guide_others')}</div>`;
-    s.others.forEach((o,i) => h += _bgCheckItem(`other-${i}`, `<strong>${o.quantity} ${o.unit}</strong> — ${esc(o.name)}`));
+    s.others.forEach((o,i) => h += _bgCheckItem(`other-${i}`, `<strong>${o.quantity} ${esc(o.unit)}</strong> — ${esc(o.name)}`));
   }
   return h;
 }
@@ -485,6 +499,21 @@ function _bgHtmlPitch() {
 
 // ── Render orchestration ──────────────────────────────────────────────────────
 let _bgFs = false;
+let _bgFsEls = null;
+
+function _bgFsCacheEls() {
+  _bgFsEls = {
+    timer:     document.getElementById('bfs-timer'),
+    prog:      document.getElementById('bfs-prog'),
+    timerBtns: document.getElementById('bfs-timer-btns'),
+    pTimer:    document.getElementById('bfs-p-timer'),
+    pProg:     document.getElementById('bfs-p-prog'),
+    pBtn:      document.getElementById('bfs-p-btn'),
+    hops:      _bgState
+      ? _bgState.boilHops.map((_, idx) => document.getElementById(`bfs-hop-${idx}`))
+      : [],
+  };
+}
 
 function _bgRenderAll() {
   if (_bgFs) { _bgFsRenderAll(); return; }
@@ -568,6 +597,7 @@ function _bgFsOpen() {
 
 function _bgFsClose() {
   _bgFs = false;
+  _bgFsEls = null;
   document.getElementById('brew-fs').style.display = 'none';
   const mg = document.getElementById('modal-brew-guide');
   mg.style.opacity = ''; mg.style.pointerEvents = '';
@@ -882,6 +912,7 @@ function _bgFsRenderAll() {
   if (portrait) {
     center.innerHTML = _bgFsPortraitHtml();
     document.getElementById('bfs-footer').innerHTML = _bgFsPortraitFooter(s);
+    _bgFsCacheEls();
     return;
   }
 
@@ -898,6 +929,7 @@ function _bgFsRenderAll() {
     ? _bfsBtn(`${t('common.next')} <i class="fas fa-arrow-right"></i>`, `_bgGoStep(${s.step+1})`, 'primary')
     : _bfsBtn(`<i class="fas fa-check"></i> ${t('rec.guide_done')}`, '_bgFsClose()', 'success');
   document.getElementById('bfs-footer').innerHTML = foot;
+  _bgFsCacheEls();
 }
 
 function _bgFsRenderTimer() {
@@ -909,9 +941,9 @@ function _bgFsRenderTimer() {
 
   if (_bgIsMobilePortrait()) {
     // Portrait mode: update portrait-specific elements
-    const tp = document.getElementById('bfs-p-timer');
-    const pp = document.getElementById('bfs-p-prog');
-    const bp = document.getElementById('bfs-p-btn');
+    const tp = _bgFsEls?.pTimer;
+    const pp = _bgFsEls?.pProg;
+    const bp = _bgFsEls?.pBtn;
     if (tp) { tp.textContent = _bgFmt(rem); tp.style.color = done ? 'var(--success)' : color; }
     if (pp) pp.style.width = pct.toFixed(2) + '%';
     if (bp) {
@@ -921,15 +953,16 @@ function _bgFsRenderTimer() {
       bp.innerHTML = playPause + _bfsBtn(`<i class="fas fa-rotate-left"></i>`, '_bgResetTimer()');
     }
     if (s.step === 3) {
+      // outerHTML replacement invalidates any cached ref — getElementById is correct here
       const wrap = document.getElementById('bfs-p-nexthop-wrap');
       if (wrap) wrap.outerHTML = _bgFsPortraitNextHopHtml();
     }
     return;
   }
 
-  const te = document.getElementById('bfs-timer');
-  const pe = document.getElementById('bfs-prog');
-  const be = document.getElementById('bfs-timer-btns');
+  const te = _bgFsEls?.timer;
+  const pe = _bgFsEls?.prog;
+  const be = _bgFsEls?.timerBtns;
   if (te) { te.textContent = _bgFmt(rem); te.style.color = done ? 'var(--success)' : color; }
   if (pe) pe.style.width = pct.toFixed(2) + '%';
   if (be) {
@@ -943,7 +976,7 @@ function _bgFsRenderTimer() {
   if (s.step === 3) {
     const em = s.timerSec / 60;
     s.boilHops.forEach((hop, idx) => {
-      const el = document.getElementById(`bfs-hop-${idx}`);
+      const el = _bgFsEls?.hops[idx];
       if (!el) return;
       const ht    = hop.hop_type || 'ebullition';
       const addAt = ['whirlpool','flameout'].includes(ht) ? s.boilTime : s.boilTime - (hop.hop_time ?? s.boilTime);
@@ -966,6 +999,27 @@ function _bgFsRenderTimer() {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── CYCLE DE VIE DU BRASSIN ───────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ── Menu "…" brassins en cave ─────────────────────────────────────────────────
+let _openBrewMoreId = null;
+function toggleBrewMoreMenu(e, id) {
+  e.stopPropagation();
+  if (_openBrewMoreId && _openBrewMoreId !== id) closeBrewMoreMenu(_openBrewMoreId);
+  const menu = document.getElementById(`brew-more-${id}`);
+  if (!menu) return;
+  const isOpen = menu.style.display !== 'none';
+  menu.style.display = isOpen ? 'none' : 'block';
+  _openBrewMoreId = isOpen ? null : id;
+  if (!isOpen) setTimeout(() => document.addEventListener('click', _brewMoreOutside, { once: true }), 0);
+}
+function closeBrewMoreMenu(id) {
+  const menu = document.getElementById(`brew-more-${id}`);
+  if (menu) menu.style.display = 'none';
+  if (_openBrewMoreId === id) _openBrewMoreId = null;
+}
+function _brewMoreOutside() {
+  if (_openBrewMoreId) closeBrewMoreMenu(_openBrewMoreId);
+}
 
 function openBrewLifecycle(id) {
   const b = S.brews.find(x => x.id === id);
@@ -1139,7 +1193,7 @@ function brewStatusBadge(s) {
 
 function _spindleAgo(dateStr) {
   if (!dateStr) return null;
-  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  const diff = Math.floor((Date.now() - new Date(dateStr.replace(' ', 'T') + 'Z').getTime()) / 1000);
   if (diff < 60)   return t('brew.ago_sec').replace('${diff}', diff);
   if (diff < 3600) return t('brew.ago_min').replace('${diff}', Math.floor(diff/60));
   if (diff < 86400)return t('brew.ago_hour').replace('${diff}', Math.floor(diff/3600));
@@ -1252,6 +1306,8 @@ function renderBrassins() {
           }
         }
         effHtml = ` · <span style="color:${effColor}" title="${effTip}">${effIcon}${t('brew.eff_real')} ${eff.toFixed(1)}%</span>`;
+      } else if (b.og && b.volume_brewed && b.recipe_id && storedEff == null) {
+        effHtml = ` · <span style="color:var(--muted)" title="${t('brew.eff_na_hint')}">${t('brew.eff_na')}</span>`;
       }
       let spindleHtml = '';
       let spindleBtn  = '';
@@ -1261,7 +1317,7 @@ function renderBrassins() {
         const gravStr = sp.last_gravity    != null ? sp.last_gravity.toFixed(3)    : null;
         const tempStr = sp.last_temperature != null ? sp.last_temperature.toFixed(1) : null;
         const ago     = _spindleAgo(sp.last_reading_at);
-        const isLive  = sp.last_reading_at && (Date.now() - new Date(sp.last_reading_at).getTime()) < 3_600_000;
+        const isLive  = sp.last_reading_at && (Date.now() - new Date(sp.last_reading_at.replace(' ', 'T') + 'Z').getTime()) < 3_600_000;
         const stableHtml = sp.gravity_stable
           ? `<span title="${t('spin.ferm_stable_hint')}" style="color:var(--success);font-size:.7rem;font-weight:700;margin-left:2px"><i class="fas fa-circle-check"></i> ${t('spin.ferm_stable')}</span>`
           : '';
@@ -1279,7 +1335,7 @@ function renderBrassins() {
       if (ts) {
         const tVal = ts.last_temperature != null ? ts.last_temperature.toFixed(1) + '°C' : null;
         const ago  = _spindleAgo(ts.last_reading_at);
-        const isLive = ts.last_reading_at && (Date.now() - new Date(ts.last_reading_at).getTime()) < 3_600_000;
+        const isLive = ts.last_reading_at && (Date.now() - new Date(ts.last_reading_at.replace(' ', 'T') + 'Z').getTime()) < 3_600_000;
         tempBadge = `
           <div class="brew-spindle-badge" style="border-color:#ef444440">
             ${isLive ? '<span class="bsb-live" style="background:#ef4444"></span>' : '<i class="fas fa-thermometer-half" style="color:#ef4444;font-size:.75rem"></i>'}
@@ -1320,26 +1376,93 @@ function renderBrassins() {
             ${keg.current_liters != null ? `<span class="bsb-grav" style="color:var(--amber)">${keg.current_liters} L</span>` : ''}
           </div>` : ''}
           ${spindleHtml}${tempBadge}
+          ${(()=>{
+            if (b.status !== 'fermenting') return '';
+            const rec2 = b.recipe_id ? recById.get(b.recipe_id) : null;
+            const fermTime2 = b.ferm_time || rec2?.ferm_time;
+            if (!rec2 || !fermTime2) return '';
+            const fermStart2 = (b.fermenting_since || '').slice(0, 10) || b.brew_date;
+            if (!fermStart2) return '';
+            const dryHops2 = (rec2.ingredients || []).filter(i => i.category==='houblon' && i.hop_type==='dryhop' && i.hop_days > 0);
+            if (!dryHops2.length) return '';
+            const dhDates2 = {};
+            dryHops2.forEach(dh => {
+              const offset = parseInt(fermTime2) - parseInt(dh.hop_days);
+              if (offset < 0) return;
+              const d2 = new Date(fermStart2 + 'T00:00:00');
+              d2.setDate(d2.getDate() + offset);
+              const key2 = `${d2.getFullYear()}-${String(d2.getMonth()+1).padStart(2,'0')}-${String(d2.getDate()).padStart(2,'0')}`;
+              if (!dhDates2[key2]) dhDates2[key2] = [];
+              dhDates2[key2].push(`${dh.quantity}\u202f${dh.unit} ${esc(dh.name)}`);
+            });
+            const today2 = new Date(); today2.setHours(0,0,0,0);
+            let doneDates2 = [];
+            try { doneDates2 = JSON.parse(b.dryhop_done_dates || '[]'); } catch(e) {}
+            return Object.entries(dhDates2).map(([ds2, hops2]) => {
+              if (doneDates2.includes(ds2)) return '';
+              const delta2 = Math.round((new Date(ds2+'T00:00:00') - today2) / 86400000);
+              if (delta2 > 1 || delta2 < -3) return '';
+              const lbl2 = delta2 === 0 ? t('brew.dryhop_today')
+                : delta2 === 1 ? t('brew.dryhop_tomorrow')
+                : t('brew.dryhop_overdue').replace('${n}', Math.abs(delta2));
+              const col2 = delta2 < 0 ? 'var(--danger)' : delta2 === 0 ? 'var(--hop)' : 'var(--muted)';
+              const bdr2 = delta2 < 0 ? 'rgba(239,68,68,.35)' : delta2 === 0 ? 'rgba(74,222,128,.35)' : 'var(--border)';
+              return `<div class="brew-spindle-badge" style="border-color:${bdr2};margin-top:6px">
+                <i class="fas fa-leaf" style="color:${col2};font-size:.75rem"></i>
+                <span style="font-size:.78rem;flex:1">${hops2.join(', ')} — <span style="color:${col2};font-weight:600">${lbl2}</span></span>
+                <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();markDryhopDone(${b.id},'${ds2}')"
+                  title="${t('brew.dryhop_mark_done')}" style="padding:1px 7px;font-size:.7rem;color:var(--hop);border-color:rgba(74,222,128,.35)">
+                  <i class="fas fa-check"></i>
+                </button>
+              </div>`;
+            }).join('');
+          })()}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           ${spindleBtn}${tempBtn}
           ${b.recipe_id && !['fermenting','completed'].includes(b.status) ? `<button class="btn btn-ghost btn-sm btn-icon" onclick="event.stopPropagation();openBrewTimerForBrew(${b.id})" title="${t('brew.timer_title')}"><i class="fas fa-stopwatch" style="color:var(--amber)"></i></button>` : ''}
           ${b.recipe_id && !['fermenting','completed'].includes(b.status) ? `<button class="btn btn-ghost btn-sm btn-icon" onclick="event.stopPropagation();openBrewingGuideFromBrew(${b.id})" title="${t('rec.guide_btn')}"><i class="fas fa-fire-burner" style="color:var(--amber)"></i></button>` : ''}
           ${b.fermentation_count > 0 ? `<button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewFermentationChart(${b.id})" title="${t('brew.readings')} (${b.fermentation_count})"><i class="fas fa-chart-line" style="color:var(--info)"></i></button>` : ''}
+          ${(() => {
+            const hasCaveEntry = (S.beers || []).some(bx => bx.brew_id === b.id);
+            const hasSteps     = (S.brewSteps || []).some(s => s.brew_id === b.id && !s.done);
+            const photosBtn    = b.photos_url
+              ? `<a href="${esc(b.photos_url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm btn-icon" title="${t('brew.photos_url_open')}" style="color:var(--amber);text-decoration:none"><i class="fas fa-images"></i></a>`
+              : `<button class="btn btn-ghost btn-sm btn-icon" onclick="event.stopPropagation();toggleBrewPhotos(${b.id})" title="${t('brew.photos')}${b.photo_count > 0 ? ` (${b.photo_count})` : ''}" style="${b.photo_count > 0 ? 'color:var(--amber)' : ''}"><i class="fas fa-camera"></i></button>`;
+            if (hasCaveEntry) {
+              return `
+          ${photosBtn}
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewLifecycle(${b.id})" title="${t('brew.lifecycle_btn')}"><i class="fas fa-timeline" style="color:var(--amber)"></i></button>
+          <button class="btn btn-icon btn-ghost btn-sm" onclick="event.stopPropagation();toggleBrewQuickNote(${b.id})" title="${t('brew.field_notes')}" id="brew-qnote-btn-${b.id}"><i class="fas fa-note-sticky"></i></button>
+          <button class="btn btn-icon btn-ghost btn-sm" onclick="openBrewEditModal(${b.id})" title="${t('common.edit')}"><i class="fas fa-pen"></i></button>
+          <div style="position:relative">
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="toggleBrewMoreMenu(event,${b.id})" title="${t('brew.more_actions')}"><i class="fas fa-ellipsis"></i></button>
+            <div id="brew-more-${b.id}" class="rec-menu" style="display:none">
+              <button class="rec-menu-item" onclick="openBrewStepsModal(${b.id});closeBrewMoreMenu(${b.id})" style="${hasSteps ? 'color:var(--info)' : ''}"><i class="fas fa-list-check" style="width:14px"></i> ${t('brew.steps_btn')}${hasSteps ? ' ●' : ''}</button>
+              <button class="rec-menu-item" onclick="openBrewKegModal(${b.id});closeBrewMoreMenu(${b.id})" style="${keg ? 'color:var(--amber)' : ''}"><i class="fas fa-jar" style="width:14px"></i> ${keg ? esc(keg.name) : t('brew.keg_assign')}</button>
+              <button class="rec-menu-item" onclick="openFermLog(${b.id},this);closeBrewMoreMenu(${b.id})" style="${b.fermentation_count > 0 ? 'color:var(--info)' : ''}"><i class="fas fa-flask" style="width:14px"></i> ${t('brew.ferm_log_title')}${b.fermentation_count > 0 ? ` (${b.fermentation_count})` : ''}</button>
+              <button class="rec-menu-item" onclick="openBrewLog(${b.id},this);closeBrewMoreMenu(${b.id})" style="${b.log_count > 0 ? 'color:var(--amber)' : ''}"><i class="fas fa-book-open" style="width:14px"></i> ${t('brew.blog_title')}${b.log_count > 0 ? ` (${b.log_count})` : ''}</button>
+              <div class="rec-menu-sep"></div>
+              <button class="rec-menu-item" onclick="withBtn(this,()=>archiveItem('brew',${b.id},${b.archived?0:1}));closeBrewMoreMenu(${b.id})"><i class="fas fa-${b.archived?'box-open':'box-archive'}" style="width:14px"></i> ${b.archived ? t('common.restore') : t('common.archive')}</button>
+              <button class="rec-menu-item" onclick="deleteBrew(${b.id});closeBrewMoreMenu(${b.id})" style="color:var(--danger)"><i class="fas fa-trash" style="width:14px"></i> ${t('common.delete')}</button>
+            </div>
+          </div>`;
+            } else {
+              return `
           <button class="btn btn-ghost btn-sm btn-icon" onclick="openFermLog(${b.id},this)" data-brew-name="${esc(b.name)}" title="${t('brew.ferm_log_title')}${b.fermentation_count > 0 ? ` (${b.fermentation_count})` : ''}" style="${b.fermentation_count > 0 ? 'color:var(--info)' : ''}"><i class="fas fa-flask"></i></button>
           <button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewLog(${b.id},this)" data-brew-name="${esc(b.name)}" title="${t('brew.blog_title')}${b.log_count > 0 ? ` (${b.log_count})` : ''}" style="${b.log_count > 0 ? 'color:var(--amber)' : ''}"><i class="fas fa-book-open"></i></button>
-          ${b.photos_url
-            ? `<a href="${esc(b.photos_url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm btn-icon" title="${t('brew.photos_url_open')}" style="color:var(--amber);text-decoration:none"><i class="fas fa-images"></i></a>`
-            : `<button class="btn btn-ghost btn-sm btn-icon" onclick="event.stopPropagation();toggleBrewPhotos(${b.id})" title="${t('brew.photos')}${b.photo_count > 0 ? ` (${b.photo_count})` : ''}" style="${b.photo_count > 0 ? 'color:var(--amber)' : ''}"><i class="fas fa-camera"></i></button>`
-          }
+          ${photosBtn}
           <button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewKegModal(${b.id})" title="${keg ? esc(keg.name) : t('brew.keg_assign')}" style="${keg ? 'color:var(--amber)' : ''}"><i class="fas fa-jar"></i></button>
           ${b.status === 'completed' ? `<button class="btn btn-sm btn-success" onclick="openAfterBrewModal(${b.id})" title="${t('brew.to_cave')}"><i class="fas fa-beer-mug-empty"></i> ${t('brew.to_cave')}</button>` : ''}
           ${!['fermenting','completed'].includes(b.status) ? `<button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewChecklist(${b.id})" title="${t('checklist.open_btn')}"><i class="fas fa-clipboard-check" style="color:var(--success)"></i></button>` : ''}
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewStepsModal(${b.id})" title="${t('brew.steps_btn')}" style="${hasSteps ? 'color:var(--info)' : ''}"><i class="fas fa-list-check"></i></button>
           <button class="btn btn-ghost btn-sm btn-icon" onclick="openBrewLifecycle(${b.id})" title="${t('brew.lifecycle_btn')}"><i class="fas fa-timeline" style="color:var(--amber)"></i></button>
           <button class="btn btn-icon btn-ghost btn-sm" onclick="withBtn(this,()=>archiveItem('brew',${b.id},${b.archived?0:1}))" title="${b.archived?t('common.restore'):t('common.archive')}"><i class="fas fa-${b.archived?'box-open':'box-archive'}"></i></button>
           <button class="btn btn-icon btn-ghost btn-sm" onclick="event.stopPropagation();toggleBrewQuickNote(${b.id})" title="${t('brew.field_notes')}" id="brew-qnote-btn-${b.id}"><i class="fas fa-note-sticky"></i></button>
           <button class="btn btn-icon btn-ghost btn-sm" onclick="openBrewEditModal(${b.id})" title="${t('common.edit')}"><i class="fas fa-pen"></i></button>
-          <button class="btn btn-icon btn-danger btn-sm" onclick="deleteBrew(${b.id})"><i class="fas fa-trash"></i></button>
+          <button class="btn btn-icon btn-danger btn-sm" onclick="deleteBrew(${b.id})"><i class="fas fa-trash"></i></button>`;
+            }
+          })()}
         </div>
       </div>`;
     };
@@ -1435,7 +1558,7 @@ function openBrewModal(recipeId = null) {
       `<option value="${r.id}">${esc(r.name)}${r.style ? ' · ' + esc(r.style) : ''} (${r.volume}L)</option>`
     ).join('');
   document.getElementById('brew-f-name').value  = '';
-  document.getElementById('brew-f-date').value  = new Date().toISOString().split('T')[0];
+  document.getElementById('brew-f-date').value  = (() => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
   document.getElementById('brew-f-vol').value   = '';
   document.getElementById('brew-f-og').value    = '';
   document.getElementById('brew-f-fg').value    = '';
@@ -1513,18 +1636,18 @@ function onBrewRecipeChange() {
     const neededBase = toBaseUnit(ing.quantity, ing.unit);
     let sbcls='sb-na', stockTxt=t('inv.not_linked');
     if (stockBase !== null) {
-      if (stockBase >= neededBase) { sbcls='sb-ok'; stockTxt=t('inv.qty_avail').replace('${qty}', inv.quantity).replace('${unit}', inv.unit); }
-      else if (stockBase > 0)     { sbcls='sb-low'; stockTxt=`${inv.quantity} ${inv.unit} / besoin ${ing.quantity} ${ing.unit}`; }
+      if (stockBase >= neededBase) { sbcls='sb-ok'; stockTxt=t('inv.qty_avail').replace('${qty}', () => String(inv.quantity)).replace('${unit}', () => esc(inv.unit)); }
+      else if (stockBase > 0)     { sbcls='sb-low'; stockTxt=`${inv.quantity} ${esc(inv.unit)} / besoin ${ing.quantity} ${esc(ing.unit)}`; }
       else                        { sbcls='sb-empty'; stockTxt=t('inv.empty_all'); }
     }
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border)">
       <div>
         <span class="badge badge-${ing.category}" style="margin-right:8px">${catLabel(ing.category)}</span>
-        <strong>${esc(ing.name)}</strong> — ${ing.quantity} ${ing.unit}
+        <strong>${esc(ing.name)}</strong> — ${ing.quantity} ${esc(ing.unit)}
         ${ing.category==='houblon' ? (
-            ing.hop_type==='dryhop'    ? `<span style="color:var(--info);font-size:.8rem"> [Dry Hop${ing.hop_days!=null?' · '+ing.hop_days+' j':''}]</span>`
-          : ing.hop_type==='whirlpool' ? `<span style="color:var(--muted);font-size:.8rem"> [Whirlpool${ing.hop_time!=null?' −'+ing.hop_time+' min':''}]</span>`
-          : ing.hop_time!=null         ? `<span style="color:var(--muted);font-size:.8rem"> (−${ing.hop_time} min)</span>`
+            ing.hop_type==='dryhop'    ? `<span style="color:var(--info);font-size:.8rem"> [Dry Hop${ing.hop_days!=null?' · '+Number(ing.hop_days)+' j':''}]</span>`
+          : ing.hop_type==='whirlpool' ? `<span style="color:var(--muted);font-size:.8rem"> [Whirlpool${ing.hop_time!=null?' −'+Number(ing.hop_time)+' min':''}]</span>`
+          : ing.hop_time!=null         ? `<span style="color:var(--muted);font-size:.8rem"> (−${Number(ing.hop_time)} min)</span>`
           : '') : ''}
       </div>
       <span class="stock-badge ${sbcls}">${stockTxt}</span>
@@ -1844,9 +1967,11 @@ async function confirmBrew(force = false) {
     renderBrassins();
     closeModal('brew-modal');
     closeModal('stock-warn-modal');
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('brew.saved_toast'), 'success');
+    if (force && _swItems && _swItems.length) {
+      setTimeout(() => toast(t('brew.saved_forced_toast').replace('${n}', _swItems.length), 'warning'), 400);
+    }
   } catch(err) {
     if (err.error === 'stock_insuffisant') {
       _swItems = err.items;
@@ -1889,18 +2014,27 @@ async function confirmBrew(force = false) {
   }
 }
 
+async function markDryhopDone(brewId, dateStr) {
+  try {
+    const res = await api('POST', `/api/brews/${brewId}/dryhop_done`, { date: dateStr });
+    const b = S.brews.find(b => b.id === brewId);
+    if (b) b.dryhop_done_dates = JSON.stringify(res.done_dates);
+    renderBrassins();
+    toast(t('brew.dryhop_done_toast'), 'success');
+  } catch(e) { toast(t('common.error'), 'error'); }
+}
+
 async function deleteBrew(id) {
   const brew = S.brews.find(b => b.id === id);
   const msg  = brew
-    ? t('brew.confirm_delete_named').replace('${name}', brew.name)
+    ? t('brew.confirm_delete_named').replace('${name}', () => brew.name)
     : t('brew.confirm_delete');
   if (!await confirmModal(msg, { danger: true })) return;
   try {
     await api('DELETE', `/api/brews/${id}`);
     S.brews = S.brews.filter(b => b.id !== id);
     renderBrassins();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('brew.deleted'), 'success');
   } catch(e) { toast(t('common.delete') + ' — ' + t('common.error'), 'error'); }
 }
@@ -2206,8 +2340,7 @@ async function createBeerFromBrew() {
     S.beers.unshift(beer);
     renderCave();
     closeModal('after-brew-modal');
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     navigate('cave');
     toast(t('cave.beer_added_from_brew'), 'success');
   } catch(e) { toast(t('cave.err_add'), 'error'); }
@@ -2580,5 +2713,154 @@ function renderBrewAnalytics() {
       cplCtx.parentElement.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:.8rem">${t('brew.analytics_no_data')}</div>`;
     }
   }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── ÉTAPES PLANIFIÉES DU BRASSIN ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _stepsBrewId = null;
+
+async function openBrewStepsModal(brewId) {
+  _stepsBrewId = brewId;
+  const brew = S.brews.find(b => b.id === brewId);
+  document.getElementById('bsteps-title').textContent =
+    (brew ? brew.name : `#${brewId}`) + ' — ' + t('brew.steps_btn');
+  document.getElementById('bsteps-date').value = '';
+  document.getElementById('bsteps-titleinput').value = '';
+  document.getElementById('bsteps-notes').value = '';
+  document.getElementById('bsteps-tg').checked = true;
+  _renderBrewStepsList(brewId);
+  openModal('modal-brew-steps');
+}
+
+function _renderBrewStepsList(brewId) {
+  const steps = (S.brewSteps || []).filter(s => s.brew_id === brewId)
+    .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date) || a.id - b.id);
+  const el = document.getElementById('bsteps-list');
+  if (!steps.length) {
+    el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:1rem 0;font-size:.85rem">${t('brew.steps_empty')}</p>`;
+    return;
+  }
+  const today = new Date(); today.setHours(0,0,0,0);
+  el.innerHTML = steps.map(s => {
+    const d = new Date(s.scheduled_date + 'T00:00:00');
+    const isPast = d < today && !s.done;
+    const isFuture = d > today;
+    let dateColor = 'var(--text)';
+    if (s.done) dateColor = 'var(--success)';
+    else if (isPast) dateColor = 'var(--danger)';
+    else if (d.getTime() === today.getTime()) dateColor = 'var(--amber)';
+    return `
+      <div class="brew-step-row${s.done ? ' brew-step-done' : ''}" data-step-id="${s.id}">
+        <button class="btn btn-icon btn-ghost btn-sm" onclick="toggleBrewStepDone(${s.id})"
+          title="${s.done ? t('brew.steps_unmark') : t('brew.steps_mark')}" style="color:${s.done?'var(--success)':'var(--muted)'}">
+          <i class="fas fa-${s.done ? 'circle-check' : 'circle'}"></i>
+        </button>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-weight:600;${s.done?'text-decoration:line-through;opacity:.6':''}">${esc(s.title)}</span>
+            ${s.telegram_notify ? `<i class="fab fa-telegram" style="font-size:.72rem;color:#229ED9" title="${t('brew.steps_tg_on')}"></i>` : ''}
+          </div>
+          <div style="font-size:.78rem;color:${dateColor};margin-top:1px">
+            <i class="fas fa-calendar" style="margin-right:4px"></i>${s.scheduled_date}
+          </div>
+          ${s.notes ? `<div style="font-size:.75rem;color:var(--muted);margin-top:2px;font-style:italic">${esc(s.notes)}</div>` : ''}
+        </div>
+        <button class="btn btn-icon btn-ghost btn-sm" onclick="editBrewStepInline(${s.id})" title="${t('common.edit')}"><i class="fas fa-pen"></i></button>
+        <button class="btn btn-icon btn-danger btn-sm" onclick="deleteBrewStep(${s.id})" title="${t('common.delete')}"><i class="fas fa-trash"></i></button>
+      </div>`;
+  }).join('');
+}
+
+async function addBrewStep() {
+  const date  = document.getElementById('bsteps-date').value.trim();
+  const title = document.getElementById('bsteps-titleinput').value.trim();
+  if (!date || !title) { toast(t('brew.steps_required'), 'error'); return; }
+  const payload = {
+    scheduled_date: date,
+    title,
+    notes: document.getElementById('bsteps-notes').value.trim() || null,
+    telegram_notify: document.getElementById('bsteps-tg').checked,
+  };
+  try {
+    const step = await api('POST', `/api/brews/${_stepsBrewId}/steps`, payload);
+    if (!S.brewSteps) S.brewSteps = [];
+    S.brewSteps.push(step);
+    document.getElementById('bsteps-date').value = '';
+    document.getElementById('bsteps-titleinput').value = '';
+    document.getElementById('bsteps-notes').value = '';
+    _renderBrewStepsList(_stepsBrewId);
+    renderCalendar();
+    toast(t('brew.steps_added'), 'success');
+  } catch(e) { toast(t('common.error'), 'error'); }
+}
+
+async function toggleBrewStepDone(stepId) {
+  const step = (S.brewSteps || []).find(s => s.id === stepId);
+  if (!step) return;
+  try {
+    const updated = await api('PUT', `/api/brew-steps/${stepId}`, { done: step.done ? 0 : 1 });
+    Object.assign(step, updated);
+    _renderBrewStepsList(_stepsBrewId);
+    renderCalendar();
+  } catch(e) { toast(t('common.error'), 'error'); }
+}
+
+async function deleteBrewStep(stepId) {
+  if (!await confirmModal(t('common.confirm_delete'), { danger: true })) return;
+  try {
+    await api('DELETE', `/api/brew-steps/${stepId}`);
+    S.brewSteps = (S.brewSteps || []).filter(s => s.id !== stepId);
+    _renderBrewStepsList(_stepsBrewId);
+    renderCalendar();
+  } catch(e) { toast(t('common.error'), 'error'); }
+}
+
+function editBrewStepInline(stepId) {
+  const s = (S.brewSteps || []).find(x => x.id === stepId);
+  if (!s) return;
+  const row = document.querySelector(`#bsteps-list [data-step-id="${stepId}"]`);
+  if (!row) return;
+  row.outerHTML = `
+    <div class="brew-step-row" data-step-id="${stepId}" style="flex-wrap:wrap;gap:6px;align-items:flex-start">
+      <div style="display:flex;gap:6px;width:100%;flex-wrap:wrap">
+        <input type="date" id="bsedit-date-${stepId}" value="${s.scheduled_date}" style="width:150px;flex-shrink:0">
+        <input type="text" id="bsedit-title-${stepId}" value="${esc(s.title)}" style="flex:1;min-width:140px" placeholder="${t('brew.steps_title_ph')}">
+      </div>
+      <textarea id="bsedit-notes-${stepId}" rows="2" style="width:100%;resize:vertical;font-size:.85rem">${esc(s.notes || '')}</textarea>
+      <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:.83rem;cursor:pointer">
+          <input type="checkbox" id="bsedit-tg-${stepId}" ${s.telegram_notify ? 'checked' : ''}>
+          <i class="fab fa-telegram" style="color:#229ED9"></i>
+          <span>${t('brew.steps_tg_label')}</span>
+        </label>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-success btn-icon btn-sm" onclick="saveBrewStepEdit(${stepId})" title="${t('common.save')}"><i class="fas fa-check"></i></button>
+          <button class="btn btn-ghost  btn-icon btn-sm" onclick="_renderBrewStepsList(_stepsBrewId)" title="${t('common.cancel')}"><i class="fas fa-xmark"></i></button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById(`bsedit-title-${stepId}`).focus();
+}
+
+async function saveBrewStepEdit(stepId) {
+  const date  = document.getElementById(`bsedit-date-${stepId}`).value.trim();
+  const title = document.getElementById(`bsedit-title-${stepId}`).value.trim();
+  if (!date || !title) { toast(t('brew.steps_required'), 'error'); return; }
+  const payload = {
+    scheduled_date: date,
+    title,
+    notes: document.getElementById(`bsedit-notes-${stepId}`).value.trim() || null,
+    telegram_notify: document.getElementById(`bsedit-tg-${stepId}`).checked ? 1 : 0,
+  };
+  try {
+    const updated = await api('PUT', `/api/brew-steps/${stepId}`, payload);
+    const idx = (S.brewSteps || []).findIndex(s => s.id === stepId);
+    if (idx !== -1) Object.assign(S.brewSteps[idx], updated);
+    _renderBrewStepsList(_stepsBrewId);
+    renderCalendar();
+  } catch(e) { toast(t('common.error'), 'error'); }
 }
 

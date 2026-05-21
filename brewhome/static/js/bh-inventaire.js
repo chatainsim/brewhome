@@ -324,6 +324,57 @@ function calcStrikeWater() {
   }
 }
 
+// ── Calculateur de bouteilles ─────────────────────────────────────────────────
+
+function calcBottles(changed) {
+  const volEl = document.getElementById('ot-bottles-vol');
+  const n33El = document.getElementById('ot-bottles-n33');
+  const n75El = document.getElementById('ot-bottles-n75');
+  const sumEl = document.getElementById('ot-bottles-summary');
+  if (!volEl || !n33El || !n75El) return;
+
+  const vol = parseFloat(volEl.value);
+  if (isNaN(vol) || vol <= 0) {
+    n33El.value = ''; n75El.value = '';
+    if (sumEl) sumEl.textContent = '';
+    return;
+  }
+
+  const ml = Math.round(vol * 1000);
+
+  if (changed === '33') {
+    const n33 = Math.max(0, parseInt(n33El.value) || 0);
+    const rem = ml - n33 * 330;
+    n75El.value = rem >= 750 ? Math.floor(rem / 750) : 0;
+  } else if (changed === '75') {
+    const n75 = Math.max(0, parseInt(n75El.value) || 0);
+    const rem = ml - n75 * 750;
+    n33El.value = rem >= 330 ? Math.floor(rem / 330) : 0;
+  } else {
+    // volume changé : tout en 33cl par défaut
+    n33El.value = Math.floor(ml / 330);
+    n75El.value = 0;
+  }
+
+  const n33 = parseInt(n33El.value) || 0;
+  const n75 = parseInt(n75El.value) || 0;
+  const used = n33 * 330 + n75 * 750;
+  const diff = ml - used;
+
+  if (sumEl) {
+    if (diff === 0) {
+      sumEl.style.color = 'var(--success)';
+      sumEl.textContent = t('ot.bottles_exact');
+    } else if (diff > 0) {
+      sumEl.style.color = 'var(--muted)';
+      sumEl.textContent = t('ot.bottles_rem').replace('${n}', diff);
+    } else {
+      sumEl.style.color = 'var(--danger)';
+      sumEl.textContent = t('ot.bottles_over').replace('${n}', Math.abs(diff));
+    }
+  }
+}
+
 // ── Dilution RO / eau distillée ───────────────────────────────────────────────
 
 const _RO_PRESET_NAMES = {
@@ -996,27 +1047,41 @@ function renderDashboard() {
   }
 
   // Alertes inventaire — même logique que la page Stats
+  const CAT_ICON = {malt:'fa-wheat-awn',houblon:'fa-seedling',levure:'fa-flask',autre:'fa-box'};
+  const depletedStock = inv.filter(i => i.quantity != null && i.quantity <= 0);
   const lowStock = inv.filter(i => {
-    if (!i.quantity || i.quantity <= 0) return false;
+    if (i.quantity == null || i.quantity <= 0) return false;
     if (i.min_stock != null) return i.quantity < i.min_stock;
     const th = getThresh(i.category);
     if (i.category === 'autre')  return false;
     if (i.category === 'levure') return i.quantity < th;
     return (i.unit === 'kg' ? i.quantity * 1000 : i.unit === 'L' ? i.quantity * 1000 : i.quantity) < th;
   });
+  if (depletedStock.length) {
+    rightHtml += `<div class="card" style="margin-bottom:12px">
+      <div class="section-label" style="margin-bottom:12px;color:var(--muted)">${t('dash.depleted').replace('${n}', depletedStock.length)}</div>
+      ${depletedStock.slice(0,8).map((i,idx) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;${idx<Math.min(depletedStock.length,8)-1?'border-bottom:1px solid var(--border)':''}">
+          <i class="fas ${CAT_ICON[i.category]||'fa-box'}" style="color:var(--muted);width:14px"></i>
+          <span style="flex:1;font-size:.83rem">${esc(i.name)}</span>
+          <span style="font-size:.75rem;color:var(--muted);font-weight:600">${t('dash.depleted_label')}</span>
+        </div>`).join('')}
+      ${depletedStock.length>8?`<div style="font-size:.75rem;color:var(--muted);margin-top:8px;text-align:center">${t('dash.depleted_more').replace('${n}', depletedStock.length-8)}</div>`:''}
+    </div>`;
+  }
   if (lowStock.length) {
-    const CAT_ICON = {malt:'fa-wheat-awn',houblon:'fa-seedling',levure:'fa-flask',autre:'fa-box'};
     rightHtml += `<div class="card">
       <div class="section-label" style="margin-bottom:12px;color:var(--danger)">${t('dash.low_stock').replace('${n}', lowStock.length)}</div>
-      ${lowStock.slice(0,8).map(i => `
-        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;${lowStock.indexOf(i)<lowStock.length-1?'border-bottom:1px solid var(--border)':''}">
+      ${lowStock.slice(0,8).map((i,idx) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;${idx<Math.min(lowStock.length,8)-1?'border-bottom:1px solid var(--border)':''}">
           <i class="fas ${CAT_ICON[i.category]||'fa-box'}" style="color:var(--muted);width:14px"></i>
           <span style="flex:1;font-size:.83rem">${esc(i.name)}</span>
           <span style="font-size:.78rem;color:var(--danger);font-weight:600">${i.quantity||0} ${i.unit}</span>
         </div>`).join('')}
       ${lowStock.length>8?`<div style="font-size:.75rem;color:var(--muted);margin-top:8px;text-align:center">${t('dash.low_stock_more').replace('${n}', lowStock.length-8)}</div>`:''}
     </div>`;
-  } else {
+  }
+  if (!depletedStock.length && !lowStock.length) {
     rightHtml += `<div class="card" style="color:var(--success);font-size:.85rem;padding:16px;text-align:center"><i class="fas fa-check-circle"></i> ${t('dash.inv_ok')}</div>`;
   }
 
@@ -1773,6 +1838,7 @@ function renderStatsPage() {
     const todayD = new Date(); todayD.setHours(0,0,0,0);
     const soonD  = new Date(todayD); soonD.setDate(soonD.getDate() + 30);
     const invActive = (S.inventory||[]).filter(i => !i.archived);
+    const zeroItems = invActive.filter(i => i.quantity <= 0);
     const lowItems  = invActive.filter(i => {
       if (i.quantity <= 0) return false;
       if (i.min_stock != null) return i.quantity < i.min_stock;
@@ -1793,6 +1859,11 @@ function renderStatsPage() {
     const catsPresent = catOrder.filter(c => catCounts[c]);
 
     const alertsHtml = [
+      ...zeroItems.map(i =>
+        '<div style="font-size:.78rem;margin-bottom:4px;display:flex;align-items:center;gap:6px">' +
+        '<i class="fas fa-box-open" style="color:var(--danger);font-size:.65rem;flex-shrink:0"></i>' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(i.name) + '</span>' +
+        '<span style="color:var(--danger);flex-shrink:0">0 ' + i.unit + '</span></div>'),
       ...lowItems.map(i =>
         '<div style="font-size:.78rem;margin-bottom:4px;display:flex;align-items:center;gap:6px">' +
         '<i class="fas fa-triangle-exclamation" style="color:#f59e0b;font-size:.65rem;flex-shrink:0"></i>' +
@@ -1807,14 +1878,15 @@ function renderStatsPage() {
           '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(i.name) + '</span>' +
           '<span style="color:var(--danger);flex-shrink:0">' + lbl + '</span></div>';
       }),
-    ].slice(0, 8);
+    ].slice(0, 12);
 
     invHealthEl.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">' +
         '<div class="section-label">' + t('stat.inv_health_title') + '</div>' +
       '</div>' +
-      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">' +
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">' +
         '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800">' + invActive.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_items') + '</div></div>' +
+        '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800;color:' + (zeroItems.length?'var(--danger)':'var(--text)') + '">' + zeroItems.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_zero') + '</div></div>' +
         '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800;color:' + (lowItems.length?'#f59e0b':'var(--text)') + '">' + lowItems.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_low') + '</div></div>' +
         '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:1.5rem;font-weight:800;color:' + (expiringItems.length?'var(--danger)':'var(--text)') + '">' + expiringItems.length + '</div><div style="font-size:.74rem;color:var(--muted);margin-top:3px">' + t('stat.inv_expiring') + '</div></div>' +
       '</div>' +
@@ -2197,10 +2269,11 @@ function _invRowHtml(item) {
     const gen = r.gen > 1 ? ` · G${r.gen}` : '';
     return `<div style="margin-top:3px"><span style="font-size:.7rem;padding:1px 6px;border-radius:8px;background:${c}18;color:${c};border:1px solid ${c}44;font-weight:600"><i class="fas fa-flask" style="font-size:.6rem;margin-right:2px"></i>${r.pct}%${gen}</span></div>`;
   })();
-  return `<tr class="inv-row ${item.archived ? 'archived-item' : ''}" draggable="true" data-id="${item.id}">
+  const emptyBadge = isEmpty ? `<div style="margin-top:2px"><span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:rgba(239,68,68,.15);color:var(--danger);font-weight:600"><i class="fas fa-box-open" style="font-size:.6rem;margin-right:2px"></i>${t('inv.empty_badge')}</span></div>` : '';
+  return `<tr class="inv-row ${item.archived ? 'archived-item' : ''}${isEmpty ? ' inv-row-empty' : ''}" draggable="true" data-id="${item.id}">
         <td style="padding:2px 4px;width:18px"><span class="inv-drag-handle" onmousedown="_invDragFromHandle=true" onmouseup="_invDragFromHandle=false"><i class="fas fa-grip-vertical"></i></span></td>
         <td style="padding:0;width:44px"><label class="inv-cb-label" onclick="event.stopPropagation()"><input type="checkbox" class="inv-cb" data-id="${item.id}" onchange="_invSelToggle(${item.id},this.checked)"></label></td>
-        <td><strong>${esc(item.name)}</strong>${aromaHtml}${item.notes ? `<div style="font-size:.78rem;color:var(--muted)">${esc(item.notes)}</div>` : ''}${expiryBadge}${viabHtml}</td>
+        <td><strong>${esc(item.name)}</strong>${aromaHtml}${item.notes ? `<div style="font-size:.78rem;color:var(--muted)">${esc(item.notes)}</div>` : ''}${emptyBadge}${expiryBadge}${viabHtml}</td>
         <td><span class="badge badge-${item.category}">${catLabel(item.category)}</span></td>
         <td class="col-hide-sm" style="color:var(--muted);font-size:.85rem">${esc(item.origin||'')}</td>
         <td class="col-hide-sm">${specs.join(' ')}</td>
@@ -2217,6 +2290,7 @@ function _invRowHtml(item) {
         </td>
         <td style="text-align:right">
           <div style="display:flex;gap:4px;justify-content:flex-end">
+            <button class="btn btn-icon btn-ghost btn-sm" onclick="openInvHistory(${item.id})" title="${t('inv.history_btn')}"><i class="fas fa-clock-rotate-left"></i></button>
             <button class="btn btn-icon btn-ghost btn-sm" onclick="withBtn(this,()=>archiveItem('inv',${item.id},${item.archived?0:1}))" title="${item.archived?t('common.restore'):t('common.archive')}"><i class="fas fa-${archIcon}"></i></button>
             <button class="btn btn-icon btn-ghost btn-sm" onclick="editInventoryItem(${item.id})" title="${t('common.edit')}"><i class="fas fa-pen"></i></button>
             <button class="btn btn-icon btn-danger btn-sm" onclick="deleteInventoryItem(${item.id})" title="${t('common.delete')}"><i class="fas fa-trash"></i></button>
@@ -2229,7 +2303,7 @@ let _invSel = new Set();
 let _invDragFromHandle = false;
 let _invAC = null;
 
-function renderInventaire() {
+function renderInventaire(searchOnly = false) {
   const q = (document.getElementById('inv-search')?.value || '').toLowerCase().trim();
   const catFiltered = S.inventory.filter(i => invFilter === 'all' || i.category === invFilter);
   const catActive = catFiltered.filter(i => !i.archived);
@@ -2292,30 +2366,32 @@ function renderInventaire() {
     }, { signal: invSig });
   });
 
-  // Stats (active only)
-  const activeAll = S.inventory.filter(i => !i.archived);
-  const counts = { malt:0, houblon:0, levure:0, autre:0 };
-  activeAll.forEach(i => counts[i.category] = (counts[i.category]||0)+1);
+  if (!searchOnly) {
+    // Stats (active only) \u2014 invariant to search query, skip on keystrokes
+    const activeAll = S.inventory.filter(i => !i.archived);
+    const counts = { malt:0, houblon:0, levure:0, autre:0 };
+    activeAll.forEach(i => counts[i.category] = (counts[i.category]||0)+1);
 
-  const maltKgTotal = activeAll.filter(i => i.category === 'malt')
-    .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.unit === 'g' ? i.quantity / 1000 : 0), 0);
-  const hopGTotal = activeAll.filter(i => i.category === 'houblon')
-    .reduce((s, i) => s + (i.unit === 'g' ? i.quantity : i.unit === 'kg' ? i.quantity * 1000 : 0), 0);
-  const maltQtyLabel = maltKgTotal > 0 ? (maltKgTotal >= 1 ? maltKgTotal.toFixed(2) + ' kg' : (maltKgTotal * 1000).toFixed(0) + ' g') : '';
-  const hopQtyLabel  = hopGTotal  > 0 ? (hopGTotal >= 1000 ? (hopGTotal / 1000).toFixed(2) + ' kg' : hopGTotal.toFixed(0) + ' g') : '';
+    const maltKgTotal = activeAll.filter(i => i.category === 'malt')
+      .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : i.unit === 'g' ? i.quantity / 1000 : 0), 0);
+    const hopGTotal = activeAll.filter(i => i.category === 'houblon')
+      .reduce((s, i) => s + (i.unit === 'g' ? i.quantity : i.unit === 'kg' ? i.quantity * 1000 : 0), 0);
+    const maltQtyLabel = maltKgTotal > 0 ? (maltKgTotal >= 1 ? maltKgTotal.toFixed(2) + ' kg' : (maltKgTotal * 1000).toFixed(0) + ' g') : '';
+    const hopQtyLabel  = hopGTotal  > 0 ? (hopGTotal >= 1000 ? (hopGTotal / 1000).toFixed(2) + ' kg' : hopGTotal.toFixed(0) + ' g') : '';
 
-  document.getElementById('inv-stats').innerHTML = `
-    <div class="stat"><div class="stat-val" style="color:var(--text)">${activeAll.length}</div><div class="stat-lbl">${t('inv.total_articles')}</div></div>
-    <div class="stat"><div class="stat-val" style="color:var(--malt)">${counts.malt}</div><div class="stat-lbl">${t('cat.malts')}</div>${maltQtyLabel ? `<div style="font-size:.78rem;color:var(--malt);opacity:.75;margin-top:3px">${maltQtyLabel}</div>` : ''}</div>
-    <div class="stat"><div class="stat-val" style="color:var(--hop)">${counts.houblon}</div><div class="stat-lbl">${t('cat.houblons')}</div>${hopQtyLabel ? `<div style="font-size:.78rem;color:var(--hop);opacity:.75;margin-top:3px">${hopQtyLabel}</div>` : ''}</div>
-    <div class="stat"><div class="stat-val" style="color:var(--yeast)">${counts.levure}</div><div class="stat-lbl">${t('cat.levures')}</div></div>
-    <div class="stat"><div class="stat-val" style="color:var(--other)">${counts.autre}</div><div class="stat-lbl">${t('cat.autres')}</div></div>`;
+    document.getElementById('inv-stats').innerHTML = `
+      <div class="stat"><div class="stat-val" style="color:var(--text)">${activeAll.length}</div><div class="stat-lbl">${t('inv.total_articles')}</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--malt)">${counts.malt}</div><div class="stat-lbl">${t('cat.malts')}</div>${maltQtyLabel ? `<div style="font-size:.78rem;color:var(--malt);opacity:.75;margin-top:3px">${maltQtyLabel}</div>` : ''}</div>
+      <div class="stat"><div class="stat-val" style="color:var(--hop)">${counts.houblon}</div><div class="stat-lbl">${t('cat.houblons')}</div>${hopQtyLabel ? `<div style="font-size:.78rem;color:var(--hop);opacity:.75;margin-top:3px">${hopQtyLabel}</div>` : ''}</div>
+      <div class="stat"><div class="stat-val" style="color:var(--yeast)">${counts.levure}</div><div class="stat-lbl">${t('cat.levures')}</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--other)">${counts.autre}</div><div class="stat-lbl">${t('cat.autres')}</div></div>`;
 
-  // Archive button
-  const archBtn = document.getElementById('inv-arch-btn');
-  if (archBtn) {
-    const archCount = S.inventory.filter(i => i.archived).length;
-    archBtn.textContent = showArchivedInv ? t('inv.show_archives') : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
+    // Archive button
+    const archBtn = document.getElementById('inv-arch-btn');
+    if (archBtn) {
+      const archCount = S.inventory.filter(i => i.archived).length;
+      archBtn.textContent = showArchivedInv ? t('inv.show_archives') : `\uD83D\uDDC3\uFE0F Archives (${archCount})`;
+    }
   }
 }
 
@@ -2548,8 +2624,7 @@ async function saveInventoryItem() {
     }
     closeModal('inv-modal');
     renderInventaire();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(id ? t('inv.updated') : t('inv.added'), 'success');
   } catch(e) { toast(t('inv.err_save'), 'error'); }
 }
@@ -2560,10 +2635,66 @@ async function deleteInventoryItem(id) {
     await api('DELETE', `/api/inventory/${id}`);
     S.inventory = S.inventory.filter(i => i.id !== id);
     renderInventaire();
-    const stats = await api('GET', '/api/stats');
-    updateNavBadges(stats);
+    syncNavBadges();
     toast(t('inv.deleted'), 'success');
   } catch(e) { toast(t('common.delete') + ' — ' + t('common.error'), 'error'); }
+}
+
+async function openInvHistory(itemId) {
+  const body = document.getElementById('inv-history-body');
+  const title = document.getElementById('inv-history-title');
+  body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i></div>`;
+  openModal('inv-history-modal');
+  try {
+    const { item_name, item_unit, entries } = await api('GET', `/api/inventory/${itemId}/history`);
+    title.textContent = item_name;
+    if (!entries.length) {
+      body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:.85rem"><i class="fas fa-clock-rotate-left" style="margin-right:6px"></i>${t('inv.history_empty')}</div>`;
+      return;
+    }
+    const fmtTs = ts => {
+      if (!ts) return '';
+      const d = new Date(ts.replace(' ', 'T') + 'Z');
+      return d.toLocaleDateString(_lang || 'fr', { day:'2-digit', month:'short', year:'numeric' })
+             + ' ' + d.toLocaleTimeString(_lang || 'fr', { hour:'2-digit', minute:'2-digit' });
+    };
+    const reasonLabel = r => {
+      if (r === 'brew_deduction') return `<i class="fas fa-fire-flame-curved" style="color:var(--amber)"></i> ${t('inv.hist_brew_deduction')}`;
+      if (r === 'manual_update')  return `<i class="fas fa-pen" style="color:var(--info)"></i> ${t('inv.hist_manual_update')}`;
+      if (r === 'created')        return `<i class="fas fa-plus-circle" style="color:var(--success)"></i> ${t('inv.hist_created')}`;
+      if (r === 'full_edit')      return `<i class="fas fa-floppy-disk" style="color:var(--muted)"></i> ${t('inv.hist_full_edit')}`;
+      return esc(r || '');
+    };
+    body.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+        <thead>
+          <tr style="position:sticky;top:0;background:var(--card);z-index:1">
+            <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border)">${t('inv.hist_col_date')}</th>
+            <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border)">${t('inv.hist_col_reason')}</th>
+            <th style="padding:10px 14px;text-align:right;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border)">${t('inv.hist_col_delta')}</th>
+            <th style="padding:10px 14px;text-align:right;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border)">${t('inv.hist_col_new_qty')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${entries.map(e => {
+            const isPos = e.delta >= 0;
+            const deltaColor = isPos ? 'var(--success)' : 'var(--danger)';
+            const deltaSign  = isPos ? '+' : '';
+            const label = e.brew_name
+              ? `${reasonLabel(e.reason)} — <span style="color:var(--text)">${esc(e.brew_name)}</span>`
+              : reasonLabel(e.reason);
+            return `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(fmtTs(e.ts))}</td>
+              <td style="padding:9px 14px">${label}</td>
+              <td style="padding:9px 14px;text-align:right;font-weight:700;color:${deltaColor}">${deltaSign}${e.delta != null ? Number(e.delta).toFixed(3).replace(/\.?0+$/, '') : '—'} ${esc(item_unit)}</td>
+              <td style="padding:9px 14px;text-align:right;color:var(--muted)">${e.new_qty != null ? Number(e.new_qty).toFixed(3).replace(/\.?0+$/, '') : '—'} ${esc(item_unit)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  } catch(e) {
+    body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--danger);font-size:.85rem">${t('common.error')}</div>`;
+  }
 }
 
 function _invSelToggle(id, checked) {
@@ -2616,8 +2747,7 @@ async function deleteInvSelection() {
   S.inventory = await api('GET', '/api/inventory');
   _invSel.clear();
   renderInventaire();
-  const stats = await api('GET', '/api/stats');
-  updateNavBadges(stats);
+  syncNavBadges();
   toast(t('inv.bulk_deleted').replace('${n}', ids.length), 'success');
 }
 
