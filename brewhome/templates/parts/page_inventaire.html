@@ -43,8 +43,8 @@
     <table id="inv-table">
       <thead>
         <tr>
-          <th style="width:18px;padding:2px 4px"></th><th style="width:44px;padding:0"><label class="inv-cb-label"><input type="checkbox" id="inv-sel-all" onchange="_invSelAll(this.checked)"></label></th><th data-i18n="inv.col_ingredient">Ingrédient</th><th data-i18n="inv.col_cat">Catégorie</th><th class="col-hide-sm" data-i18n="inv.col_origin">Origine</th>
-          <th class="col-hide-sm" data-i18n="inv.col_specs">Specs</th><th style="text-align:right" data-i18n="inv.col_qty">Quantité</th><th style="text-align:right" data-i18n="common.actions">Actions</th>
+          <th class="inv-drag-col" style="width:18px;padding:2px 4px"></th><th style="width:44px;padding:0"><label class="inv-cb-label"><input type="checkbox" id="inv-sel-all" onchange="_invSelAll(this.checked)"></label></th><th id="inv-th-name" onclick="setInvSort('name')" style="cursor:pointer;user-select:none" data-i18n="inv.col_ingredient">Ingrédient <i class="sort-icon fas fa-sort" style="color:var(--muted);font-size:.7rem;margin-left:3px"></i></th><th data-i18n="inv.col_cat">Catégorie</th><th class="col-hide-sm" data-i18n="inv.col_origin">Origine</th>
+          <th class="col-hide-sm" data-i18n="inv.col_specs">Specs</th><th id="inv-th-qty" onclick="setInvSort('qty')" style="text-align:right;cursor:pointer;user-select:none" data-i18n="inv.col_qty">Quantité <i class="sort-icon fas fa-sort" style="color:var(--muted);font-size:.7rem;margin-left:3px"></i></th><th style="text-align:right" data-i18n="common.actions">Actions</th>
         </tr>
       </thead>
       <tbody id="inv-body"></tbody>

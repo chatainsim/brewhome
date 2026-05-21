@@ -4,7 +4,14 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
-## [2026-05-21]
+## [2026-05-21] — 2
+
+### Ajouté
+- **Inventaire — tri des colonnes** : les en-têtes **Ingrédient** et **Quantité** sont maintenant cliquables pour trier la liste (A→Z, Z→A, ↑, ↓) avec indicateur visuel. Le glisser-déposer est automatiquement désactivé quand un tri est actif.
+
+---
+
+## [2026-05-21] — 1
 
 ### Ajouté
 - **Catalogue — recherche en temps réel** : dans Paramètres > Catalogue, un champ de recherche filtre instantanément la liste par nom et sous-catégorie

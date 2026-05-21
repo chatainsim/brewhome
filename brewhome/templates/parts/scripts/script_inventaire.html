@@ -2272,7 +2272,7 @@ function _invRowHtml(item) {
   })();
   const emptyBadge = isEmpty ? `<div style="margin-top:2px"><span style="font-size:.68rem;padding:1px 5px;border-radius:4px;background:rgba(239,68,68,.15);color:var(--danger);font-weight:600"><i class="fas fa-box-open" style="font-size:.6rem;margin-right:2px"></i>${t('inv.empty_badge')}</span></div>` : '';
   return `<tr class="inv-row ${item.archived ? 'archived-item' : ''}${isEmpty ? ' inv-row-empty' : ''}" draggable="true" data-id="${item.id}">
-        <td style="padding:2px 4px;width:18px"><span class="inv-drag-handle" onmousedown="_invDragFromHandle=true" onmouseup="_invDragFromHandle=false"><i class="fas fa-grip-vertical"></i></span></td>
+        <td class="inv-drag-col" style="padding:2px 4px;width:18px"><span class="inv-drag-handle" onmousedown="_invDragFromHandle=true" onmouseup="_invDragFromHandle=false"><i class="fas fa-grip-vertical"></i></span></td>
         <td style="padding:0;width:44px"><label class="inv-cb-label" onclick="event.stopPropagation()"><input type="checkbox" class="inv-cb" data-id="${item.id}" onchange="_invSelToggle(${item.id},this.checked)"></label></td>
         <td><strong>${esc(item.name)}</strong>${aromaHtml}${item.notes ? `<div style="font-size:.78rem;color:var(--muted)">${esc(item.notes)}</div>` : ''}${emptyBadge}${expiryBadge}${viabHtml}</td>
         <td><span class="badge badge-${item.category}">${catLabel(item.category)}</span></td>
@@ -2303,6 +2303,31 @@ function _invRowHtml(item) {
 let _invSel = new Set();
 let _invDragFromHandle = false;
 let _invAC = null;
+let _invSort = { field: null, dir: 1 }; // field: 'name'|'qty'|null, dir: 1=asc -1=desc
+
+function setInvSort(field) {
+  if (_invSort.field === field) {
+    if (_invSort.dir === 1) { _invSort.dir = -1; }
+    else { _invSort.field = null; _invSort.dir = 1; }
+  } else {
+    _invSort.field = field;
+    _invSort.dir = 1;
+  }
+  // Update header indicators
+  ['name','qty'].forEach(f => {
+    const th = document.getElementById('inv-th-' + f);
+    if (!th) return;
+    const icon = th.querySelector('.sort-icon');
+    if (_invSort.field === f) {
+      icon.className = 'sort-icon fas fa-arrow-' + (_invSort.dir === 1 ? 'up' : 'down');
+      icon.style.color = 'var(--accent)';
+    } else {
+      icon.className = 'sort-icon fas fa-sort';
+      icon.style.color = 'var(--muted)';
+    }
+  });
+  renderInventaire();
+}
 
 function renderInventaire(searchOnly = false) {
   const q = (document.getElementById('inv-search')?.value || '').toLowerCase().trim();
@@ -2310,10 +2335,23 @@ function renderInventaire(searchOnly = false) {
   const catActive = catFiltered.filter(i => !i.archived);
   const catArch   = catFiltered.filter(i => i.archived);
   const all    = showArchivedInv ? [...catActive, ...catArch] : catActive;
-  const shown  = q ? all.filter(i => {
+  let shown  = q ? all.filter(i => {
     const hay = (i.name + ' ' + (i.origin || '') + ' ' + (i.notes || '')).toLowerCase();
     return hay.includes(q);
   }) : all;
+
+  // Tri actif
+  if (_invSort.field) {
+    shown = [...shown].sort((a, b) => {
+      if (_invSort.field === 'name') return _invSort.dir * a.name.localeCompare(b.name);
+      if (_invSort.field === 'qty')  return _invSort.dir * ((a.quantity || 0) - (b.quantity || 0));
+      return 0;
+    });
+  }
+
+  // Afficher/masquer la colonne drag handle selon le tri
+  const dragCols = document.querySelectorAll('.inv-drag-col');
+  dragCols.forEach(el => el.style.display = _invSort.field ? 'none' : '');
 
   const tbody = document.getElementById('inv-body');
   const emptyEl = document.getElementById('inv-empty');
@@ -2332,8 +2370,9 @@ function renderInventaire(searchOnly = false) {
   });
   _invUpdateBulkBar();
 
-  // Drag-and-drop reorder
+  // Drag-and-drop reorder (désactivé quand un tri est actif)
   if (_invAC) _invAC.abort();
+  if (_invSort.field) return;
   _invAC = new AbortController();
   const { signal: invSig } = _invAC;
   let invDragSrcIdx = null;
