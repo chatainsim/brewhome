@@ -131,10 +131,21 @@ def get_custom_events():
     return jsonify([dict(r) for r in rows])
 
 
+def _default_reminder_days(conn):
+    row = conn.execute("SELECT value FROM app_settings WHERE key='default_brew_reminder_days'").fetchone()
+    try:
+        return int(row['value']) if row and row['value'] else 45
+    except (ValueError, TypeError):
+        return 45
+
+
 @bp.route('/api/custom_events', methods=['POST'])
 def create_custom_event():
     data = request.json or {}
     with get_db() as conn:
+        reminder_days = _safe_int(data.get('brew_reminder_days'))
+        if reminder_days is None:
+            reminder_days = _default_reminder_days(conn)
         cur = conn.execute(
             '''INSERT INTO custom_calendar_events
                (title, emoji, event_date, color, notes, brew_reminder, telegram_notify,
@@ -152,7 +163,7 @@ def create_custom_event():
                 data.get('recipe_id') or None,
                 data.get('draft_id') or None,
                 data.get('recurrence') or None,
-                _safe_int(data.get('brew_reminder_days')) or 0,
+                reminder_days,
             )
         )
         row = conn.execute('SELECT * FROM custom_calendar_events WHERE id=?', (cur.lastrowid,)).fetchone()
@@ -163,6 +174,9 @@ def create_custom_event():
 def update_custom_event(event_id):
     data = request.json or {}
     with get_db() as conn:
+        reminder_days = _safe_int(data.get('brew_reminder_days'))
+        if reminder_days is None:
+            reminder_days = _default_reminder_days(conn)
         cur = conn.execute(
             '''UPDATE custom_calendar_events
                SET title=?, emoji=?, event_date=?, color=?, notes=?, brew_reminder=?, telegram_notify=?,
@@ -180,7 +194,7 @@ def update_custom_event(event_id):
                 data.get('recipe_id') or None,
                 data.get('draft_id') or None,
                 data.get('recurrence') or None,
-                _safe_int(data.get('brew_reminder_days')) or 0,
+                reminder_days,
                 event_id,
             )
         )
