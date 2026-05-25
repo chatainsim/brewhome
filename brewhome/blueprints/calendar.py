@@ -912,22 +912,28 @@ def import_calendar():
                 if existing:
                     conn.execute(
                         '''UPDATE custom_calendar_events SET emoji=?,color=?,notes=?,
-                           brew_reminder=?,telegram_notify=?,style=?,recipe_id=?,draft_id=?
+                           brew_reminder=?,telegram_notify=?,style=?,recipe_id=?,draft_id=?,
+                           recurrence=?,brew_reminder_days=?
                            WHERE id=?''',
                         (ev.get('emoji', '📅'), ev.get('color', '#f59e0b'), ev.get('notes'),
                          ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
-                         ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'), existing['id'])
+                         ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'),
+                         ev.get('recurrence') or None,
+                         _safe_int(ev.get('brew_reminder_days')) or 0, existing['id'])
                     )
                 else:
                     conn.execute(
                         '''INSERT INTO custom_calendar_events
                            (title, emoji, event_date, color, notes,
-                            brew_reminder, telegram_notify, style, recipe_id, draft_id)
-                           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                            brew_reminder, telegram_notify, style, recipe_id, draft_id,
+                            recurrence, brew_reminder_days)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
                         (ev.get('title'), ev.get('emoji', '📅'), ev['event_date'],
                          ev.get('color', '#f59e0b'), ev.get('notes'),
                          ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
-                         ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'))
+                         ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'),
+                         ev.get('recurrence') or None,
+                         _safe_int(ev.get('brew_reminder_days')) or 0)
                     )
                 imported += 1
             except Exception as e:
@@ -1326,21 +1332,27 @@ def _import_section_direct(section, items, mode='merge'):
                     if existing:
                         conn.execute(
                             '''UPDATE custom_calendar_events SET emoji=?,color=?,notes=?,
-                               brew_reminder=?,telegram_notify=?,style=?,recipe_id=?,draft_id=? WHERE id=?''',
+                               brew_reminder=?,telegram_notify=?,style=?,recipe_id=?,draft_id=?,
+                               recurrence=?,brew_reminder_days=? WHERE id=?''',
                             (ev.get('emoji', '📅'), ev.get('color', '#f59e0b'), ev.get('notes'),
                              ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
-                             ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'), existing['id'])
+                             ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'),
+                             ev.get('recurrence') or None,
+                             _safe_int(ev.get('brew_reminder_days')) or 0, existing['id'])
                         )
                     else:
                         conn.execute(
                             '''INSERT INTO custom_calendar_events
                                (title, emoji, event_date, color, notes,
-                                brew_reminder, telegram_notify, style, recipe_id, draft_id)
-                               VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                                brew_reminder, telegram_notify, style, recipe_id, draft_id,
+                                recurrence, brew_reminder_days)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
                             (ev.get('title'), ev.get('emoji', '📅'), ev['event_date'],
                              ev.get('color', '#f59e0b'), ev.get('notes'),
                              ev.get('brew_reminder', 0), ev.get('telegram_notify', 0),
-                             ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'))
+                             ev.get('style'), ev.get('recipe_id'), ev.get('draft_id'),
+                             ev.get('recurrence') or None,
+                             _safe_int(ev.get('brew_reminder_days')) or 0)
                         )
                     imported += 1
                 except Exception as e:

@@ -7,7 +7,8 @@ Toutes les modifications notables de ce projet sont documentées ici.
 ## [2026-05-25] — 4
 
 ### Corrigé
-- **Calendrier — création d'événement** : erreur 500 `NOT NULL constraint failed: custom_calendar_events.brew_reminder_days` lors de l'enregistrement d'un nouvel événement quand le champ "rappel de brassage (jours)" n'était pas renseigné. La valeur par défaut est maintenant `0`.
+- **Calendrier — création / mise à jour d'événement** : erreur 500 `NOT NULL constraint failed: custom_calendar_events.brew_reminder_days` lors de l'enregistrement d'un événement sans rappel configuré. Valeur par défaut `0` appliquée (POST et PUT).
+- **Calendrier — import backup** : les endpoints `import_calendar` et `restore_from_git` (section calendrier) omettaient `brew_reminder_days` et `recurrence` dans les requêtes INSERT et UPDATE, causant le même crash 500 à l'import et perdant silencieusement la récurrence à la mise à jour.
 
 ---
 
