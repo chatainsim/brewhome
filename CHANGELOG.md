@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-05-25] — 4
+
+### Corrigé
+- **Calendrier — création d'événement** : erreur 500 `NOT NULL constraint failed: custom_calendar_events.brew_reminder_days` lors de l'enregistrement d'un nouvel événement quand le champ "rappel de brassage (jours)" n'était pas renseigné. La valeur par défaut est maintenant `0`.
+
+---
+
 ## [2026-05-21] — 3
 
 ### Corrigé

@@ -152,7 +152,7 @@ def create_custom_event():
                 data.get('recipe_id') or None,
                 data.get('draft_id') or None,
                 data.get('recurrence') or None,
-                _safe_int(data.get('brew_reminder_days')),
+                _safe_int(data.get('brew_reminder_days')) or 0,
             )
         )
         row = conn.execute('SELECT * FROM custom_calendar_events WHERE id=?', (cur.lastrowid,)).fetchone()
@@ -180,7 +180,7 @@ def update_custom_event(event_id):
                 data.get('recipe_id') or None,
                 data.get('draft_id') or None,
                 data.get('recurrence') or None,
-                _safe_int(data.get('brew_reminder_days')),
+                _safe_int(data.get('brew_reminder_days')) or 0,
                 event_id,
             )
         )
