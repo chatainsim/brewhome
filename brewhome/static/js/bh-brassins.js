@@ -2277,6 +2277,16 @@ function ab33Changed() {
   updateAbBottleHint();
 }
 
+function abFgChanged() {
+  const og = parseFloat(document.getElementById('ab-og').value);
+  const fg = parseFloat(document.getElementById('ab-fg').value);
+  if (og && fg && fg < og) {
+    const abv = Math.round((og - fg) * 131.25 * 10) / 10;
+    document.getElementById('ab-abv').value = abv;
+    document.getElementById('ab-abv-display').value = abv;
+  }
+}
+
 function openAfterBrewModal(id) {
   // Réinitialiser le mode manuel à chaque ouverture
   if (_abManualMode) toggleAbManual();
@@ -2288,6 +2298,9 @@ function openAfterBrewModal(id) {
   document.getElementById('ab-name').value     = b.name;
   document.getElementById('ab-type').value     = recipe ? (recipe.style || '') : '';
   document.getElementById('ab-abv').value      = b.abv || '';
+  document.getElementById('ab-og').value       = b.og || '';
+  document.getElementById('ab-fg').value       = b.fg || '';
+  document.getElementById('ab-abv-display').value = b.abv || '';
   document.getElementById('ab-keg').value      = '';
   document.getElementById('ab-brew-vol').value = b.volume_brewed || 0;
   // Calcul optimal bouteilles depuis le volume total
@@ -2335,9 +2348,34 @@ async function createBeerFromBrew() {
     bottling_date:document.getElementById('ab-bottling-date').value || null,
     photo:        document.getElementById('ab-draft-image').value || null,
   };
+  const brewId = parseInt(document.getElementById('ab-brew-id').value) || null;
+  const fg     = parseFloat(document.getElementById('ab-fg').value) || null;
   try {
     const beer = await api('POST', '/api/beers', payload);
     S.beers.unshift(beer);
+    // Marquer le brassin comme terminé et enregistrer la FG si saisie
+    if (brewId) {
+      const brew = S.brews.find(b => b.id === brewId);
+      if (brew) {
+        const abv = parseFloat(document.getElementById('ab-abv').value) || brew.abv || null;
+        const brewPayload = {
+          name:          brew.name,
+          status:        'completed',
+          brew_date:     brew.brew_date || null,
+          volume_brewed: brew.volume_brewed || null,
+          og:            brew.og || null,
+          fg:            fg !== null ? fg : (brew.fg || null),
+          abv:           abv,
+          notes:         brew.notes || null,
+          ferm_time:     brew.ferm_time || null,
+          photos_url:    brew.photos_url || null,
+          batch_number:  brew.batch_number || null,
+        };
+        const updated = await api('PUT', `/api/brews/${brewId}`, brewPayload);
+        const idx = S.brews.findIndex(b => b.id === brewId);
+        if (idx !== -1) S.brews[idx] = updated;
+      }
+    }
     renderCave();
     closeModal('after-brew-modal');
     syncNavBadges();
