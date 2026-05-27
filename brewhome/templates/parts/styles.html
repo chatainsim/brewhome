@@ -540,6 +540,9 @@ input.rec-field-error,select.rec-field-error{border-color:var(--danger)!importan
 [data-theme="light"] .nav-btn.active{background:rgba(194,113,12,.1)}
 [data-theme="light"] .nav-badge{background:rgba(194,113,12,.18);color:var(--gold)}
 
+/* Boutons primaires : gradient orange vif au lieu du brun foncé de --amber light */
+[data-theme="light"] .btn-primary{background:linear-gradient(135deg,#f97316,#f59e0b);color:#fff}
+[data-theme="light"] .btn-primary:hover{box-shadow:0 4px 16px rgba(249,115,22,.4)}
 [data-theme="light"] .btn-ghost{background:rgba(0,0,0,.04);border-color:var(--border)}
 [data-theme="light"] .btn-ghost:hover{background:rgba(0,0,0,.09);border-color:rgba(194,113,12,.4)}
 
@@ -547,7 +550,13 @@ input.rec-field-error,select.rec-field-error{border-color:var(--danger)!importan
 [data-theme="light"] .stab.active{background:var(--card)}
 [data-theme="light"] .cat-chip{background:rgba(0,0,0,.04);border-color:var(--border)}
 [data-theme="light"] .filter-tabs{background:rgba(0,0,0,.04)}
+/* Onglet filtre actif : même orange vif que btn-primary */
+[data-theme="light"] .filter-tab.active{background:linear-gradient(135deg,#f97316,#f59e0b);color:#fff}
 [data-theme="light"] .filter-tab:hover{color:var(--text)}
+/* Éléments avec fond rgba(blanc) invisible sur fond clair */
+[data-theme="light"] .restore-chk{border-color:var(--border)}
+[data-theme="light"] .restore-chk:hover{background:rgba(0,0,0,.04)}
+[data-theme="light"] tbody tr{border-bottom-color:rgba(0,0,0,.08)}
 
 [data-theme="light"] .card:hover{border-color:rgba(194,113,12,.3)}
 [data-theme="light"] .modal-overlay{background:rgba(0,0,0,.45)}
