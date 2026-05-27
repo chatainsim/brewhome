@@ -1463,7 +1463,7 @@ async function loadAll() {
   // Toutes les données initiales en une seule vague parallèle
   const [
     stats, catalog, bjcp, serverAppSettings, customEvents, drafts, brewSteps, spindles, tempSensors,
-    recipes, brews, beers, inventory, sodaKegs, depletion,
+    recipes, brews, beers, inventory, sodaKegs, depletion, shoppingList,
   ] = await Promise.all([
     api('GET', '/api/stats'),
     api('GET', '/api/catalog'),
@@ -1480,6 +1480,7 @@ async function loadAll() {
     api('GET', '/api/inventory'),
     api('GET', '/api/soda-kegs'),
     api('GET', '/api/consumption/depletion').catch(() => []),
+    api('GET', '/api/shopping-list').catch(() => []),
   ]);
 
   await lazyForInit; // s'assurer que les scripts sont prêts avant les renders
@@ -1497,6 +1498,7 @@ async function loadAll() {
   S.inventory    = inventory;
   S.sodaKegs     = sodaKegs;
   S.depletion    = depletion;
+  S.shoppingList = shoppingList;
   updateNavBadges(stats);
   renderCalendar();     // peuple _calEvStore → badge calendrier
   renderSpindles();
