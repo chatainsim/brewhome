@@ -490,7 +490,6 @@ def _calc_brewing_events(year):
             pass
     evs.append((_nth_dow(year, 8, 3, 1),  "IPA Day",               "🌿"))
     evs.append((_nth_dow(year, 8, 4, 1),  "International Beer Day","🍺"))
-    evs.append((_nth_dow(year, 7, 5, 1),  "Sour Beer Day",         "🍋"))
     evs.append((_nth_dow(year, 11, 3, 3), "Beaujolais Nouveau",    "🍷"))
     okt = date(year, 9, 22)
     while okt.weekday() != 5:

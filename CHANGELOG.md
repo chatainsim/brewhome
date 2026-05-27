@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-05-27] — 5
+
+### Corrigé
+- **Calendrier — rappel Sour Beer Day en double** : "Sour Beer Day" était défini deux fois — une fois le 20 septembre (date fixe correcte) et une seconde fois comme le 1er samedi de juillet via un calcul dynamique erroné. Ce doublon déclenchait un rappel Telegram en mai au lieu d'août. La ligne incorrecte est supprimée.
+
+---
+
 ## [2026-05-25] — 4
 
 ### Corrigé
