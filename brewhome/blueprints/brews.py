@@ -236,10 +236,15 @@ def _do_create_brew():
                 _inv_log_pending.append((ing['inventory_item_id'], new_qty - old_qty, old_qty, new_qty))
 
             actual_eff = _compute_efficiency(conn, recipe_id, d.get('og'), d.get('volume_brewed'))
+            if not d.get('name'):
+                rec_row = conn.execute('SELECT name FROM recipes WHERE id=?', (recipe_id,)).fetchone()
+                brew_name_val = rec_row['name'] if rec_row else ''
+            else:
+                brew_name_val = d['name']
             cur = conn.execute(
                 '''INSERT INTO brews (recipe_id,name,batch_number,brew_date,volume_brewed,og,fg,abv,notes,status,actual_efficiency,cost_snapshot,cost_per_liter_snapshot)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (recipe_id, d.get('name'),
+                (recipe_id, brew_name_val,
                  d.get('batch_number') if d.get('batch_number') else None,
                  d.get('brew_date'), d.get('volume_brewed'),
                  d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
@@ -271,7 +276,7 @@ def update_brew(brew_id):
     if errors:
         return api_error('validation', 400, fields=errors)
     with get_db() as conn:
-        brew_row = conn.execute('SELECT status, recipe_id, fermenting_since FROM brews WHERE id=?', (brew_id,)).fetchone()
+        brew_row = conn.execute('SELECT status, recipe_id, fermenting_since, name FROM brews WHERE id=?', (brew_id,)).fetchone()
         if not brew_row:
             return api_error('not_found', 404)
         old_status = brew_row['status']
@@ -295,7 +300,7 @@ def update_brew(brew_id):
             fermenting_since = brew_row['fermenting_since']
         cur = conn.execute(
             'UPDATE brews SET name=?,brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,notes=?,status=?,ferm_time=?,photos_url=?,actual_efficiency=?,cost_snapshot=?,cost_per_liter_snapshot=?,fermenting_since=?,batch_number=? WHERE id=?',
-            (d.get('name'), d.get('brew_date'), d.get('volume_brewed'),
+            (d.get('name') or brew_row['name'], d.get('brew_date'), d.get('volume_brewed'),
              d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
              new_status,
              int(d['ferm_time']) if d.get('ferm_time') is not None else None,

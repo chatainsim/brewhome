@@ -51,13 +51,17 @@ def _save_recipe_snapshot(conn, recipe_id, keep=20):
 
 def _apply_recipe_data(conn, recipe_id, d):
     """Applique un dict recette (PUT ou restore) sur recipes + recipe_ingredients."""
+    name = d.get('name')
+    if not name:
+        row = conn.execute('SELECT name FROM recipes WHERE id=?', (recipe_id,)).fetchone()
+        name = row['name'] if row else ''
     conn.execute(
         '''UPDATE recipes SET batch_no=?,name=?,style=?,volume=?,brew_date=?,bottling_date=?,
            mash_temp=?,mash_time=?,boil_time=?,mash_ratio=?,evap_rate=?,grain_absorption=?,
            brewhouse_efficiency=?,ferm_temp=?,ferm_time=?,ferm_profile=?,notes=?,rating=?,draft_id=?,
            water_mash_override=?,water_sparge_override=?
            WHERE id=?''',
-        (d.get('batch_no'), d.get('name'), d.get('style'), d.get('volume', 20),
+        (d.get('batch_no'), name, d.get('style'), d.get('volume', 20),
          d.get('brew_date'), d.get('bottling_date'), d.get('mash_temp', 66),
          d.get('mash_time', 60), d.get('boil_time', 60), d.get('mash_ratio', 3.0),
          d.get('evap_rate', 3.0), d.get('grain_absorption', 0.8),

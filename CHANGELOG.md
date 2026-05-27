@@ -4,6 +4,15 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-05-27] — 6
+
+### Corrigé
+- **Brassins — création sans nom** : `POST /api/brews` sans champ `name` causait une erreur 500 `NOT NULL constraint failed: brews.name`. Le nom est désormais hérité automatiquement de la recette associée.
+- **Brassins — mise à jour sans nom** : `PUT /api/brews/<id>` sans champ `name` écrasait le nom existant avec NULL, provoquant la même erreur 500. Le nom existant est conservé si le champ est absent du payload.
+- **Recettes — mise à jour partielle** : `PUT /api/recipes/<id>` sans champ `name` écrasait le nom existant avec NULL. Le nom existant est désormais conservé si le champ est absent.
+
+---
+
 ## [2026-05-27] — 5
 
 ### Corrigé
