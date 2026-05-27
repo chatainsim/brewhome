@@ -252,9 +252,11 @@ function renderAgendaView() {
 }
 
 function _expandCustomEvent(ev) {
-  const rec = ev.recurrence
-    ? (typeof ev.recurrence === 'string' ? JSON.parse(ev.recurrence) : ev.recurrence)
-    : null;
+  const rec = (() => {
+    if (!ev.recurrence) return null;
+    if (typeof ev.recurrence !== 'string') return ev.recurrence;
+    try { return JSON.parse(ev.recurrence); } catch { return null; }
+  })();
   if (!rec?.type) return [ev.event_date];
   const years = [_calYear - 1, _calYear, _calYear + 1];
 
