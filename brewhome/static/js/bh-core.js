@@ -1570,6 +1570,26 @@ function updateCalBadge() {
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉMARRAGE DE L'APPLICATION
 // (déplacé depuis script_calendrier.html pour s'exécuter avec les scripts core)
+// ── Plugin Chart.js : couleurs de grille et ticks depuis les variables CSS ────
+// S'applique à tous les charts au moment du rendu, sans toucher les configs
+// individuelles. Lit --border (grille) et --muted (ticks neutres) en live.
+if (window.Chart) {
+  Chart.register({
+    id: 'brewhomeTheme',
+    beforeUpdate(chart) {
+      const s = getComputedStyle(document.documentElement);
+      const gridColor = s.getPropertyValue('--border').trim() || '#2a2a2a';
+      const tickColor = s.getPropertyValue('--muted').trim() || '#888';
+      Object.values(chart.options.scales || {}).forEach(axis => {
+        if (axis.grid) axis.grid.color = gridColor;
+        // Remplace uniquement les gris neutres hardcodés, pas les couleurs intentionnelles
+        if (axis.ticks?.color && /^#(888{1,3}|ccc|999|aaa)$/i.test(axis.ticks.color))
+          axis.ticks.color = tickColor;
+      });
+    }
+  });
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 (async () => {
   // Appliquer le thème sauvegardé (le bouton est mis à jour par applyAppearance via bh-ui.js)

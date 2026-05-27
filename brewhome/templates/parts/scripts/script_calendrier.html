@@ -752,6 +752,13 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('brewhome-theme', next);
   _updateThemeBtn(next);
+  // Rafraîchir tous les charts actifs pour appliquer les nouvelles couleurs CSS
+  if (window.Chart) {
+    document.querySelectorAll('canvas').forEach(canvas => {
+      const chart = Chart.getChart(canvas);
+      if (chart) try { chart.update(); } catch (_) {}
+    });
+  }
 }
 function _updateThemeBtn(theme) {
   const btn = document.getElementById('btn-theme');
