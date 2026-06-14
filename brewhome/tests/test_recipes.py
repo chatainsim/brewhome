@@ -26,7 +26,7 @@ def test_create_recipe_duplicate(client):
     client.post('/api/recipes', json={'name': 'Stout'})
     r = client.post('/api/recipes', json={'name': 'Stout'})
     assert r.status_code == 409
-    assert r.get_json()['duplicate'] is True
+    assert r.get_json()['error'] == 'duplicate'
 
 
 def test_create_recipe_duplicate_forced(client):

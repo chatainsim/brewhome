@@ -64,7 +64,7 @@ def test_create_inventory_item_duplicate(client, malt_item):
         'name': 'Pale Ale Malt', 'category': 'malt', 'quantity': 2.0,
     })
     assert r.status_code == 409
-    assert r.get_json()['duplicate'] is True
+    assert r.get_json()['error'] == 'duplicate'
 
 
 def test_create_inventory_item_duplicate_forced(client, malt_item):

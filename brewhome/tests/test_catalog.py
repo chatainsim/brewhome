@@ -2,6 +2,15 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _empty_catalog(app):
+    """init_db() préremplit le catalogue de référence ; ces tests supposent un catalogue vide."""
+    with app.app_context():
+        from db import get_db
+        with get_db() as conn:
+            conn.execute('DELETE FROM ingredient_catalog')
+
+
 @pytest.fixture()
 def hop(client):
     """Houblon minimal dans le catalogue."""

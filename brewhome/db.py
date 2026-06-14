@@ -728,7 +728,12 @@ def _apply_versioned_migrations(conn, migrations, label='main'):
         try:
             conn.execute(sql)
         except Exception as e:
-            current_app.logger.debug(f"migration [{label}] #{i:03d}: {e}")
+            # "duplicate column name" = migration no-op attendue sur les installations
+            # neuves (colonne déjà dans le CREATE TABLE) — tout autre échec est anormal
+            if 'duplicate column name' in str(e).lower():
+                current_app.logger.debug(f"migration [{label}] #{i:03d}: {e}")
+            else:
+                current_app.logger.warning(f"migration [{label}] #{i:03d} a échoué: {e}")
         conn.execute('UPDATE schema_version SET version=? WHERE id=1', (i,))
     total = len(migrations)
     if current < total:

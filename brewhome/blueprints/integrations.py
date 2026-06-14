@@ -1215,6 +1215,18 @@ def _github_data_backup():
         settings_out = {r['key']: r['value'] for r in settings_rows}
         for k in ('gh_data_pat', 'gh_vitrine_pat', 'ai_api_key', 'telegram_token'):
             settings_out.pop(k, None)
+        # Les cibles git (nouveau format) embarquent les PAT en clair dans leur JSON
+        for k in ('gh_data_targets', 'gh_vitrine_targets'):
+            raw = settings_out.get(k)
+            if not raw:
+                continue
+            try:
+                targets_clean = json.loads(raw)
+                for t in targets_clean:
+                    t.pop('pat', None)
+                settings_out[k] = json.dumps(targets_clean, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                settings_out.pop(k, None)
 
         files = [
             ('inventaire.json',  inventory),

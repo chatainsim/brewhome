@@ -796,10 +796,13 @@ async function importSpindles(input) {
 
 function exportSettings() {
   const out = JSON.parse(JSON.stringify(appSettings));
-  // Exclure les tokens GitHub et la clé IA (données sensibles)
+  // Exclure les tokens GitHub, le token Telegram et les clés IA (données sensibles)
   if (out.github?.vitrine) delete out.github.vitrine.pat;
   if (out.github?.data)    delete out.github.data.pat;
-  if (out.ai)              delete out.ai.apiKey;
+  (out.github?.vitrine?.targets || []).forEach(t => delete t.pat);
+  (out.github?.data?.targets    || []).forEach(t => delete t.pat);
+  if (out.ai)       { delete out.ai.apiKey; delete out.ai.geminiApiKey; }
+  if (out.telegram) delete out.telegram.token;
   downloadJson(out, `parametres_${new Date().toISOString().slice(0,10)}.json`);
   toast(t('settings.import.exported_settings'), 'success');
 }
@@ -810,11 +813,15 @@ async function importSettings(input) {
   try {
     const data = JSON.parse(await file.text());
     // Fusionner sans écraser les tokens/clés existants (non inclus dans l'export)
-    const githubBackup = appSettings.github;
-    const aiKeyBackup  = appSettings.ai?.apiKey;
+    const githubBackup  = appSettings.github;
+    const aiKeyBackup   = appSettings.ai?.apiKey;
+    const geminiBackup  = appSettings.ai?.geminiApiKey;
+    const tgTokenBackup = appSettings.telegram?.token;
     Object.assign(appSettings, data);
     if (githubBackup) appSettings.github = githubBackup;
-    if (aiKeyBackup && appSettings.ai) appSettings.ai.apiKey = aiKeyBackup;
+    if (aiKeyBackup  && appSettings.ai) appSettings.ai.apiKey       = aiKeyBackup;
+    if (geminiBackup && appSettings.ai) appSettings.ai.geminiApiKey = geminiBackup;
+    if (tgTokenBackup && appSettings.telegram) appSettings.telegram.token = tgTokenBackup;
     saveSettings();
     // Mettre à jour la DB pour les paramètres d'apparence
     if (data.appName != null || data.accentColor != null || data.appIcon != null) {

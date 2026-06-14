@@ -161,3 +161,75 @@ def test_delete_manual_fermentation_reading(client, brew):
 def test_delete_fermentation_reading_not_found(client, brew):
     r = client.delete(f'/api/brews/{brew["id"]}/fermentation/9999')
     assert r.status_code == 404
+
+
+# ── Déduction de stock du dry hop ─────────────────────────────────────────────
+
+def _inv_qty(client, item_id):
+    for it in client.get('/api/inventory').get_json():
+        if it['id'] == item_id:
+            return it['quantity']
+    return None
+
+
+@pytest.fixture()
+def dryhop_recipe(client):
+    """Houblon en stock (100 g) + recette avec un dry hop lié (50 g, J-3, ferm 14 j)."""
+    hop = client.post('/api/inventory', json={
+        'name': 'Citra', 'category': 'houblon', 'quantity': 100.0, 'unit': 'g',
+    }).get_json()
+    recipe = client.post('/api/recipes', json={
+        'name': 'NEIPA Test', 'volume': 20, 'ferm_time': 14,
+        'ingredients': [{
+            'inventory_item_id': hop['id'], 'name': 'Citra', 'category': 'houblon',
+            'quantity': 50, 'unit': 'g', 'hop_type': 'dryhop', 'hop_days': 3,
+        }],
+    }).get_json()
+    return {'hop_id': hop['id'], 'recipe': recipe}
+
+
+def test_dryhop_not_deducted_at_brew_creation(client, dryhop_recipe):
+    """Le dry hop ne doit PAS être déduit le jour du brassage."""
+    r = client.post('/api/brews', json={
+        'recipe_id': dryhop_recipe['recipe']['id'],
+        'name': 'Brassin DH', 'brew_date': '2025-01-01',
+        'deduct_stock': True,
+    })
+    assert r.status_code == 201
+    assert _inv_qty(client, dryhop_recipe['hop_id']) == 100.0
+
+
+def test_dryhop_deducted_when_marked_done(client, dryhop_recipe):
+    """Marquer le dry hop fait déduit la quantité du stock, une seule fois."""
+    brew = client.post('/api/brews', json={
+        'recipe_id': dryhop_recipe['recipe']['id'],
+        'name': 'Brassin DH', 'brew_date': '2025-01-01',
+        'deduct_stock': True,
+    }).get_json()
+    # date du dry hop = brew_date + (ferm_time - hop_days) = 2025-01-01 + 11 j
+    r = client.post(f'/api/brews/{brew["id"]}/dryhop_done', json={'date': '2025-01-12'})
+    assert r.status_code == 200
+    assert len(r.get_json()['deducted']) == 1
+    assert _inv_qty(client, dryhop_recipe['hop_id']) == 50.0
+    # Re-cliquer sur la même date ne re-déduit pas
+    r2 = client.post(f'/api/brews/{brew["id"]}/dryhop_done', json={'date': '2025-01-12'})
+    assert r2.get_json()['deducted'] == []
+    assert _inv_qty(client, dryhop_recipe['hop_id']) == 50.0
+
+
+def test_dryhop_wrong_date_no_deduction(client, dryhop_recipe):
+    """Valider une date qui ne correspond à aucun dry hop ne déduit rien."""
+    brew = client.post('/api/brews', json={
+        'recipe_id': dryhop_recipe['recipe']['id'],
+        'name': 'Brassin DH', 'brew_date': '2025-01-01',
+        'deduct_stock': True,
+    }).get_json()
+    r = client.post(f'/api/brews/{brew["id"]}/dryhop_done', json={'date': '2025-06-30'})
+    assert r.status_code == 200
+    assert r.get_json()['deducted'] == []
+    assert _inv_qty(client, dryhop_recipe['hop_id']) == 100.0
+
+
+def test_dryhop_done_invalid_date(client, brew):
+    r = client.post(f'/api/brews/{brew["id"]}/dryhop_done', json={'date': 'pas-une-date'})
+    assert r.status_code == 400

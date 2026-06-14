@@ -3,7 +3,7 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime
-from flask import Blueprint, jsonify, make_response, request, send_from_directory
+from flask import Blueprint, current_app, jsonify, make_response, request, send_from_directory
 from db import get_db, _log, _log_inv, PHOTOS_DIR
 from helpers import _to_base, _from_base, _to_kg, _make_thumb, _image_too_large, _shrink_image_b64, _b64_to_jpeg_file, _make_thumb_file, validate, api_error
 from constants import BrewStatus
@@ -149,11 +149,15 @@ def _do_create_brew():
         # ── Pre-flight stock check (read-only, no lock needed) ────────────────
         ings = []
         if deduct:
+            # Les houblons de dry hop sont exclus : ils sont déduits plus tard,
+            # au moment où l'utilisateur valide le dry hop pendant la fermentation
+            # (voir mark_dryhop_done), pas le jour du brassage.
             ings = conn.execute(
                 '''SELECT ri.*, ii.quantity as stock_qty, ii.unit as inv_unit
                    FROM recipe_ingredients ri
                    LEFT JOIN inventory_items ii ON ri.inventory_item_id=ii.id
-                   WHERE ri.recipe_id=?''',
+                   WHERE ri.recipe_id=?
+                     AND NOT (ri.category='houblon' AND ri.hop_type='dryhop')''',
                 (recipe_id,)
             ).fetchall()
 
@@ -401,6 +405,59 @@ def purge_brew(brew_id):
         return jsonify({'success': True})
 
 
+def _deduct_dryhops_for_date(conn, brew, date_str):
+    """Déduit du stock les houblons de dry hop programmés pour `date_str`.
+
+    La date de chaque dry hop est calculée comme dans les rappels :
+    début de fermentation (fermenting_since, sinon brew_date) + (ferm_time - hop_days).
+    Suppose une transaction d'écriture déjà ouverte sur `conn`.
+    Retourne la liste des houblons effectivement déduits.
+    """
+    from datetime import date as _date, timedelta as _td
+    if not brew['recipe_id'] or not brew['ferm_time']:
+        return []
+    ferm_start = (brew['fermenting_since'] or '')[:10] or brew['brew_date']
+    if not ferm_start:
+        return []
+    try:
+        start_d = _date.fromisoformat(ferm_start)
+    except (ValueError, TypeError):
+        return []
+    dry_hops = conn.execute(
+        '''SELECT inventory_item_id, name, quantity, unit, hop_days
+           FROM recipe_ingredients
+           WHERE recipe_id=? AND category='houblon' AND hop_type='dryhop'
+             AND hop_days IS NOT NULL AND inventory_item_id IS NOT NULL''',
+        (brew['recipe_id'],)
+    ).fetchall()
+    deducted = []
+    for dh in dry_hops:
+        offset = int(brew['ferm_time']) - int(dh['hop_days'])
+        if offset < 0:
+            continue
+        if (start_d + _td(days=offset)).isoformat() != date_str:
+            continue
+        inv = conn.execute(
+            'SELECT quantity, unit FROM inventory_items WHERE id=?',
+            (dh['inventory_item_id'],)
+        ).fetchone()
+        if not inv:
+            continue
+        inv_unit    = inv['unit'] or dh['unit']
+        needed_base = _to_base(dh['quantity'], dh['unit'])
+        stock_base  = _to_base(inv['quantity'] or 0, inv_unit)
+        new_qty = round(_from_base(max(0.0, stock_base - needed_base), inv_unit), 6)
+        old_qty = round(_from_base(stock_base, inv_unit), 6)
+        conn.execute(
+            'UPDATE inventory_items SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+            (new_qty, dh['inventory_item_id'])
+        )
+        _log_inv(dh['inventory_item_id'], new_qty - old_qty, old_qty, new_qty,
+                 'dryhop_deduction', 'brew', brew['id'], brew['name'], conn)
+        deducted.append({'name': dh['name'], 'quantity': dh['quantity'], 'unit': dh['unit']})
+    return deducted
+
+
 @bp.route('/api/brews/<int:brew_id>/dryhop_done', methods=['POST'])
 def mark_dryhop_done(brew_id):
     d = request.json or {}
@@ -411,19 +468,38 @@ def mark_dryhop_done(brew_id):
     except (ValueError, TypeError):
         return api_error('validation', 400, detail='date must be a valid ISO date (YYYY-MM-DD)')
     with get_db() as conn:
-        row = conn.execute('SELECT dryhop_done_dates FROM brews WHERE id=? AND deleted_at IS NULL', (brew_id,)).fetchone()
-        if not row:
+        brew = conn.execute(
+            '''SELECT b.id, b.name, b.brew_date, b.fermenting_since, b.recipe_id,
+                      b.dryhop_done_dates,
+                      COALESCE(b.ferm_time, r.ferm_time) AS ferm_time
+               FROM brews b LEFT JOIN recipes r ON r.id = b.recipe_id
+               WHERE b.id=? AND b.deleted_at IS NULL''',
+            (brew_id,)
+        ).fetchone()
+        if not brew:
             return api_error('not_found', 404)
         try:
-            done = json.loads(row['dryhop_done_dates'] or '[]')
+            done = json.loads(brew['dryhop_done_dates'] or '[]')
             if not isinstance(done, list):
                 done = []
         except (json.JSONDecodeError, TypeError):
             done = []
-        if date_str not in done:
+        # Première validation de cette date uniquement : on déduit le stock une seule
+        # fois (re-cliquer sur une date déjà faite ne re-déduit pas).
+        if date_str in done:
+            return jsonify({'success': True, 'done_dates': done, 'deducted': []})
+        # BEGIN IMMEDIATE : verrou d'écriture avant lecture des stocks (anti-TOCTOU),
+        # déduction + marquage de la date atomiques.
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            deducted = _deduct_dryhops_for_date(conn, brew, date_str)
             done.append(date_str)
-        conn.execute('UPDATE brews SET dryhop_done_dates=? WHERE id=?', (json.dumps(done), brew_id))
-        return jsonify({'success': True, 'done_dates': done})
+            conn.execute('UPDATE brews SET dryhop_done_dates=? WHERE id=?', (json.dumps(done), brew_id))
+            conn.execute('COMMIT')
+        except Exception:
+            conn.execute('ROLLBACK')
+            raise
+        return jsonify({'success': True, 'done_dates': done, 'deducted': deducted})
 
 
 @bp.route('/api/brews/<int:brew_id>', methods=['PATCH'])
