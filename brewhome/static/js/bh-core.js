@@ -1639,4 +1639,8 @@ if (window.Chart) {
   // clearRecipeForm() appelé à la demande lors de la navigation vers recettes
   const brewDateEl = document.getElementById('brew-f-date');
   if (brewDateEl) brewDateEl.value = new Date().toISOString().split('T')[0];
+
+  // Deep-link : /#cave, /#brassins… ouvre directement la page (utilisé par l'app Android)
+  const hashPage = location.hash.replace(/^#\/?/, '');
+  if (hashPage && document.getElementById('page-' + hashPage)) navigate(hashPage);
 })();
