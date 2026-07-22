@@ -137,6 +137,11 @@ def get_stats():
 
 _version_cache = {'github': None, 'ts': 0}
 
+# Un échec ne doit pas aveugler la détection aussi longtemps qu'un succès :
+# une coupure réseau passagère bloquerait sinon toute vérification pendant 6 h.
+_VERSION_TTL_OK  = 6 * 3600
+_VERSION_TTL_ERR = 300
+
 
 def _parse_semver(v):
     v = v.strip().lstrip('v')
@@ -149,8 +154,12 @@ def _parse_semver(v):
 @bp.route('/api/version/check')
 def check_app_version():
     now = time.time()
-    # Rafraîchir le cache GitHub seulement si expiré (6 h)
-    if not _version_cache['github'] or now - _version_cache['ts'] >= 6 * 3600:
+    # ?force=1 court-circuite le cache (bouton « Vérifier à nouveau ») : sans ça,
+    # une release publiée juste après une vérification reste invisible jusqu'à 6 h.
+    force = request.args.get('force') == '1'
+    cached = _version_cache['github']
+    ttl = _VERSION_TTL_ERR if (cached and cached.get('error')) else _VERSION_TTL_OK
+    if force or not cached or now - _version_cache['ts'] >= ttl:
         try:
             req = urllib.request.Request(
                 'https://api.github.com/repos/chatainsim/brewhome/releases/latest',

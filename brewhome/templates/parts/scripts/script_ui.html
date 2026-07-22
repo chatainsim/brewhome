@@ -1480,10 +1480,13 @@ async function checkStaticUpdates(force = false) {
   // Version application en parallèle
   const appRow = document.getElementById('app-version-row');
   if (appRow) appRow.innerHTML = `<div style="color:var(--muted);font-size:.85rem"><i class="fas fa-spinner fa-spin"></i> ${t('settings.updates.checking')}</div>`;
+  // force : court-circuite le cache serveur (6 h) ET le cache localStorage qui
+  // pilote la pastille de notification, sinon le bouton ne peut rien changer.
+  if (force) { try { localStorage.removeItem('_bh_version_check'); } catch {} }
   try {
     const [data, appVer] = await Promise.all([
       api('GET', '/api/static/check-updates'),
-      api('GET', '/api/version/check').catch(() => null),
+      api('GET', '/api/version/check' + (force ? '?force=1' : '')).catch(() => null),
     ]);
     // ── Carte version application ──────────────────────────────────────────
     if (appRow) {
