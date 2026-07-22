@@ -2020,6 +2020,10 @@ async function markDryhopDone(brewId, dateStr) {
     const res = await api('POST', `/api/brews/${brewId}/dryhop_done`, { date: dateStr });
     const b = S.brews.find(b => b.id === brewId);
     if (b) b.dryhop_done_dates = JSON.stringify(res.done_dates);
+    // Le stock des houblons de dry hop est déduit côté serveur : rafraîchir l'inventaire local
+    if (res.deducted?.length) {
+      try { S.inventory = await api('GET', '/api/inventory'); } catch(e) {}
+    }
     renderBrassins();
     toast(t('brew.dryhop_done_toast'), 'success');
   } catch(e) { toast(t('common.error'), 'error'); }
