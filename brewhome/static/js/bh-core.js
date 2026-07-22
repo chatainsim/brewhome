@@ -183,6 +183,11 @@ async function navigate(page) {
   document.getElementById('nav-' + page).classList.add('active');
   const parent = _navSubParent[page];
   if (parent) document.getElementById('nav-' + parent)?.classList.add('active');
+  // Refléter la page courante dans l'URL pour survivre à un rechargement.
+  // replaceState plutôt que pushState : on ne veut pas empiler une entrée
+  // d'historique par clic de menu (le bouton retour continue de quitter l'app).
+  // Aucun événement hashchange n'est émis, donc pas de navigation en boucle.
+  try { history.replaceState(null, '', '#' + page); } catch {}
   window.scrollTo(0, 0);
   const lazy = _PAGE_LAZY_SCRIPTS[page];
   if (lazy) await Promise.all(lazy.map(_ensureScript));
@@ -1641,6 +1646,16 @@ if (window.Chart) {
   if (brewDateEl) brewDateEl.value = new Date().toISOString().split('T')[0];
 
   // Deep-link : /#cave, /#brassins… ouvre directement la page (utilisé par l'app Android)
+  // et restaure la page courante après un rechargement, puisque navigate() écrit le hash.
   const hashPage = location.hash.replace(/^#\/?/, '');
   if (hashPage && document.getElementById('page-' + hashPage)) navigate(hashPage);
+
+  // Hash modifié de l'extérieur (URL éditée à la main, deep-link reçu pendant
+  // que l'app tourne). navigate() utilise replaceState, qui n'émet pas
+  // d'événement : seuls les changements réellement externes arrivent ici.
+  window.addEventListener('hashchange', () => {
+    const p = location.hash.replace(/^#\/?/, '');
+    const cur = document.querySelector('.page.active')?.id.replace('page-', '');
+    if (p && p !== cur && document.getElementById('page-' + p)) navigate(p);
+  });
 })();
