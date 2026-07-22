@@ -695,6 +695,8 @@ _MIGRATIONS = [
     # 138 — volumes d'eau en empâtage/rinçage saisissables manuellement
     "ALTER TABLE recipes ADD COLUMN water_mash_override REAL",
     "ALTER TABLE recipes ADD COLUMN water_sparge_override REAL",
+    # 139 — % max d'un malt dans la facture de malts (override du catalogue)
+    "ALTER TABLE inventory_items ADD COLUMN max_usage_pct REAL",
     # ── Ajouter les nouvelles migrations ci-dessous ───────────────────────────
 ]
 

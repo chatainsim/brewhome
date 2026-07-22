@@ -345,7 +345,13 @@ td{padding:10px 12px;vertical-align:middle}
 .ing-row.ing-dragging{opacity:.35}
 .ing-row.ing-drop-target{box-shadow:0 -3px 0 var(--accent);border-color:var(--accent)}
 /* ── MALT PCT BADGE ── */
-.malt-pct{flex-shrink:0;font-size:.75rem;font-weight:700;color:var(--malt);min-width:44px;text-align:center}
+.malt-pct{flex-shrink:0;font-size:.75rem;font-weight:700;color:var(--malt);min-width:52px;text-align:center;border-radius:5px;padding:1px 3px;line-height:1.15}
+.malt-pct .malt-pct-max{display:block;font-size:.6rem;font-weight:500;opacity:.6}
+/* Dépassement du % max autorisé pour ce malt dans la facture de malts */
+.malt-pct.malt-pct-over{color:var(--danger);background:rgba(239,68,68,.14)}
+.malt-pct.malt-pct-over .malt-pct-max{opacity:.85}
+.malt-pct-warn{margin-left:10px;font-size:.72rem;font-weight:600;color:var(--danger);cursor:help;white-space:nowrap}
+.malt-pct-warn i{margin-right:3px}
 
 /* ── ADVANCED PARAMS TOGGLE ── */
 .adv-toggle{background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;display:flex;align-items:center;gap:5px;padding:2px 0;transition:color .15s}

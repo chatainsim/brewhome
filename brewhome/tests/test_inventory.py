@@ -141,6 +141,60 @@ def test_purge_not_deleted_item_fails(client, malt_item):
     assert r.status_code == 404
 
 
+# ── % max dans la facture de malts ────────────────────────────────────────────
+
+def test_create_malt_with_max_usage_pct(client):
+    r = client.post('/api/inventory', json={
+        'name': 'Malt Torréfié', 'category': 'malt',
+        'quantity': 1.0, 'unit': 'kg', 'max_usage_pct': 5,
+    })
+    assert r.status_code == 201
+    assert r.get_json()['max_usage_pct'] == 5
+
+
+def test_max_usage_pct_defaults_to_null(client, malt_item):
+    assert malt_item['max_usage_pct'] is None
+
+
+def test_update_malt_max_usage_pct(client, malt_item):
+    r = client.put(f'/api/inventory/{malt_item["id"]}', json={
+        'name': 'Pale Ale Malt', 'category': 'malt',
+        'quantity': 1.0, 'unit': 'kg', 'max_usage_pct': 10,
+    })
+    assert r.status_code == 200
+    assert r.get_json()['max_usage_pct'] == 10
+
+
+def test_max_usage_pct_above_100_rejected(client):
+    r = client.post('/api/inventory', json={
+        'name': 'Malt Impossible', 'category': 'malt',
+        'quantity': 1.0, 'max_usage_pct': 150,
+    })
+    assert r.status_code == 400
+
+
+def test_max_usage_pct_negative_rejected(client):
+    r = client.post('/api/inventory', json={
+        'name': 'Malt Négatif', 'category': 'malt',
+        'quantity': 1.0, 'max_usage_pct': -1,
+    })
+    assert r.status_code == 400
+
+
+def test_max_usage_pct_cleared_on_update(client):
+    """Vider le champ (None) doit effacer la contrainte, pas la conserver."""
+    item = client.post('/api/inventory', json={
+        'name': 'Malt Réglé', 'category': 'malt',
+        'quantity': 1.0, 'unit': 'kg', 'max_usage_pct': 5,
+    }).get_json()
+    r = client.put(f'/api/inventory/{item["id"]}', json={
+        'name': 'Malt Réglé', 'category': 'malt',
+        'quantity': 1.0, 'unit': 'kg', 'max_usage_pct': None,
+    })
+    assert r.status_code == 200
+    assert r.get_json()['max_usage_pct'] is None
+
+
 # ── Intégration : déduction de stock lors d'un brassin ───────────────────────
 
 def test_brew_deducts_inventory_stock(client):

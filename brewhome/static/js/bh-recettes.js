@@ -1076,6 +1076,33 @@ function addIngRow(cat, data = null) {
   renderIngredientRows();
 }
 
+// % max qu'un malt peut représenter dans la facture de malts.
+// Priorité : réglage propre à l'item de stock, sinon référence du catalogue (match par nom).
+function maltMaxPct(ing) {
+  if (!ing || ing.category !== 'malt') return null;
+  const inv = ing.inventory_item_id ? (S.inventory || []).find(i => i.id === ing.inventory_item_id) : null;
+  if (inv && inv.max_usage_pct != null) return inv.max_usage_pct;
+  const name = (ing.name || '').trim().toLowerCase();
+  if (!name) return null;
+  const cat = (S.catalog || []).find(c => c.category === 'malt' && (c.name || '').trim().toLowerCase() === name);
+  return cat && cat.max_usage_pct != null ? cat.max_usage_pct : null;
+}
+
+// Malts dépassant leur % max, pour un total de malts donné (kg).
+// Tolérance de 0.05 pt pour absorber le bruit d'arrondi (5.0001 % ne doit pas alerter).
+function maltOverages(ings, totalMaltKg) {
+  if (!(totalMaltKg > 0)) return [];
+  const out = [];
+  ings.filter(i => i.category === 'malt').forEach(i => {
+    const max = maltMaxPct(i);
+    if (max == null) return;
+    const kg  = i.unit === 'kg' ? i.quantity : i.quantity / 1000;
+    const pct = (parseFloat(kg) || 0) / totalMaltKg * 100;
+    if (pct > max + 0.05) out.push({ name: i.name, pct, max });
+  });
+  return out;
+}
+
 function renderIngredientRows() {
   const container = document.getElementById('rec-ingredients');
   if (!recIngredients.length) {
@@ -1098,8 +1125,13 @@ function renderIngredientRows() {
     if (!ings.length) return;
     const catColors = {malt:'var(--malt)',houblon:'var(--hop)',levure:'var(--yeast)',autre:'var(--other)'};
     let totalLabel = '';
-    if (cat === 'malt' && totalMaltKg > 0)
+    if (cat === 'malt' && totalMaltKg > 0) {
       totalLabel = `<span style="font-weight:400;opacity:.7;margin-left:8px">${totalMaltKg >= 1 ? totalMaltKg.toFixed(2)+' kg' : (totalMaltKg*1000).toFixed(0)+' g'}</span>`;
+      const over = maltOverages(recIngredients, totalMaltKg);
+      if (over.length)
+        totalLabel += `<span class="malt-pct-warn" title="${esc(over.map(o => `${o.name} : ${o.pct.toFixed(1)} % (max ${o.max} %)`).join('\n'))}">`
+                    + `<i class="fas fa-triangle-exclamation"></i> ${t('rec.malt_max_warn').replace('{n}', over.length)}</span>`;
+    }
     if (cat === 'houblon') {
       const hopTotalSpan = totalHopG > 0 ? `<span style="font-weight:400;opacity:.7;margin-left:8px">${totalHopG.toFixed(0)} g</span>` : '';
       totalLabel = hopTotalSpan + `<span id="rec-ibu-badge" style="font-weight:600;margin-left:10px;font-size:.78rem;color:var(--hop)"></span>`;
@@ -1171,6 +1203,8 @@ function renderIngredientRows() {
       // Malt % badge
       const maltKg  = cat === 'malt' ? (ing.unit === 'kg' ? ing.quantity : ing.quantity / 1000) : 0;
       const maltPct = cat === 'malt' && totalMaltKg > 0 ? (maltKg / totalMaltKg * 100).toFixed(1) : null;
+      const maltMax = cat === 'malt' ? maltMaxPct(ing) : null;
+      const maltOver = maltPct !== null && maltMax != null && parseFloat(maltPct) > maltMax + 0.05;
 
       html += `
         <div class="ing-row" draggable="true" data-ridx="${realIdx}">
@@ -1200,7 +1234,8 @@ function renderIngredientRows() {
               ${['kg','g','L','mL','sachet','pièce'].map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
             </select>
           </div>
-          ${maltPct !== null ? `<div class="malt-pct">${maltPct}%</div>` : ''}
+          ${maltPct !== null ? `<div class="malt-pct${maltOver ? ' malt-pct-over' : ''}"
+            title="${maltMax != null ? esc(t('rec.malt_max_tip').replace('{max}', maltMax)) : ''}">${maltPct}%${maltMax != null ? `<span class="malt-pct-max">max ${maltMax}%</span>` : ''}</div>` : ''}
           ${extraFields}
           ${(() => { const c = ingCost(ing); return c !== null ? `<div style="flex-shrink:0;text-align:center"><div class="ing-lbl"><i class="fas fa-euro-sign"></i> ${t('rec.ing_cost')}</div><div style="font-size:.85rem;color:var(--success);font-weight:600">≈ ${c.toFixed(2)} €</div></div>` : ''; })()}
           <button class="btn btn-icon btn-danger btn-sm ing-remove" onclick="removeIng(${realIdx})"><i class="fas fa-times"></i></button>
@@ -1694,7 +1729,12 @@ async function checkRecipeStock() {
     const invQtyMap  = invMap[nameKey] || {};
     const available  = invQtyMap[base] || 0;
     const inInv      = Object.keys(invQtyMap).length > 0;
-    const unitMismatch = inInv && available === 0;
+    // Unité incompatible ≠ stock à zéro : il faut que l'unité demandée soit absente
+    // de l'inventaire ET qu'il reste du stock réel dans une autre famille d'unités.
+    // (un houblon à 0 g pour 60 g requis doit ressortir « insuffisant », pas « unités diff. »)
+    const hasBase      = Object.prototype.hasOwnProperty.call(invQtyMap, base);
+    const altBase      = hasBase ? null : Object.keys(invQtyMap).find(b => invQtyMap[b] > 0);
+    const unitMismatch = inInv && !hasBase && altBase != null;
     const color      = CAT_COLOR[category] || 'var(--text)';
     const icon       = CAT_ICON[category]  || 'box';
     const countLabel = count > 1 ? ` <span style="font-size:.72rem;color:var(--muted);font-weight:400">(${count}×)</span>` : '';
@@ -1707,7 +1747,6 @@ async function checkRecipeStock() {
       allOk = false; nMissing++;
       shoppingItems.push({ name, cat: category, qty: formatBase(neededVal, base), unit: '', rawQty: neededVal, rawUnit: base });
     } else if (unitMismatch) {
-      const altBase = Object.keys(invQtyMap)[0];
       const altQty  = invQtyMap[altBase];
       status      = `<span style="background:rgba(139,92,246,.12);color:#a78bfa;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600">≈ unités diff.</span>`;
       statusColor = '#a78bfa';
@@ -1900,10 +1939,15 @@ function renderRecipeView() {
     const ebcVal = m.ebc != null ? m.ebc : (S.catalog.find(c => c.name.toLowerCase() === m.name.toLowerCase())?.ebc ?? null);
     const dot = ebcVal != null
       ? `<span class="malt-ebc-dot" style="background:${ebcToColor(ebcVal)}" title="EBC ${ebcVal}"></span>` : '';
+    const mMax  = maltMaxPct(m);
+    const mOver = mMax != null && totalMaltKg > 0 && pct > mMax + 0.05;
+    const overTag = mOver
+      ? `<span class="malt-pct-warn" title="${esc(t('rec.malt_max_tip').replace('{max}', mMax))}"><i class="fas fa-triangle-exclamation"></i> max ${mMax}%</span>`
+      : '';
     maltHtml += `<div class="malt-bar-row">
       <div class="malt-bar-label">
         <span class="malt-bar-name">${dot}<span>${esc(m.name)}</span></span>
-        <span style="color:var(--muted)">${m.quantity} ${m.unit}&ensp;<strong style="color:var(--malt)">${totalMaltKg > 0 ? pct.toFixed(1) : '–'}%</strong></span>
+        <span style="color:var(--muted)">${m.quantity} ${m.unit}&ensp;<strong style="color:${mOver ? 'var(--danger)' : 'var(--malt)'}">${totalMaltKg > 0 ? pct.toFixed(1) : '–'}%</strong>${overTag}</span>
       </div>
       <div class="malt-bar-track"><div class="malt-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
     </div>`;

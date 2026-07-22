@@ -2456,6 +2456,7 @@ const INV_PRICE_LABELS = () => ({ malt:'€/kg', houblon:'€/g', levure: t('inv
 function invCatChange() {
   const cat = document.getElementById('inv-f-cat').value;
   document.getElementById('inv-f-ebc-wrap').style.display    = cat === 'malt'    ? '' : 'none';
+  document.getElementById('inv-f-maxpct-wrap').style.display = cat === 'malt'    ? '' : 'none';
   document.getElementById('inv-f-alpha-wrap').style.display  = cat === 'houblon' ? '' : 'none';
   document.getElementById('inv-f-aroma-wrap').style.display  = cat === 'houblon' ? '' : 'none';
   document.getElementById('inv-yeast-section').style.display = cat === 'levure'  ? '' : 'none';
@@ -2543,6 +2544,7 @@ function openInvModal(item = null) {
   document.getElementById('inv-f-qty').value   = item ? item.quantity : 0;
   document.getElementById('inv-f-unit').value  = item ? item.unit : 'kg';
   document.getElementById('inv-f-ebc').value   = item ? (item.ebc||'') : '';
+  document.getElementById('inv-f-maxpct').value = item && item.max_usage_pct != null ? item.max_usage_pct : '';
   document.getElementById('inv-f-alpha').value = item ? (item.alpha||'') : '';
   document.getElementById('inv-f-origin').value= item ? (item.origin||'') : '';
   const _ci = item && item.category === 'houblon' ? (S.catalog||[]).find(c => c.category === 'houblon' && c.name === item.name) : null;
@@ -2605,6 +2607,7 @@ function applyInvCatalog(item) {
   document.getElementById('inv-f-name').value  = item.name;
   document.getElementById('inv-f-cat').value   = item.category;
   if (item.ebc   != null) document.getElementById('inv-f-ebc').value   = item.ebc;
+  if (item.max_usage_pct != null) document.getElementById('inv-f-maxpct').value = item.max_usage_pct;
   if (item.alpha != null) document.getElementById('inv-f-alpha').value = item.alpha;
   if (item.aroma_spec != null) document.getElementById('inv-f-aroma').value = item.aroma_spec;
   if (item.default_unit && !document.getElementById('inv-f-id').value)
@@ -2624,6 +2627,8 @@ async function saveInventoryItem() {
     unit:     document.getElementById('inv-f-unit').value,
     origin:   document.getElementById('inv-f-origin').value.trim() || null,
     ebc:           document.getElementById('inv-f-ebc').value   ? parseFloat(document.getElementById('inv-f-ebc').value)   : null,
+    max_usage_pct: cat === 'malt' && document.getElementById('inv-f-maxpct').value !== ''
+                     ? parseFloat(document.getElementById('inv-f-maxpct').value) : null,
     alpha:         document.getElementById('inv-f-alpha').value ? parseFloat(document.getElementById('inv-f-alpha').value) : null,
     notes:         document.getElementById('inv-f-notes').value.trim() || null,
     price_per_unit:document.getElementById('inv-f-price').value ? parseFloat(document.getElementById('inv-f-price').value) : null,
