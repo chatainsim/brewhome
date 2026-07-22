@@ -4,6 +4,25 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-07-22] — 7 · version 0.1.4
+
+### Ajouté
+- **Recettes — % max par malt** : chaque malt peut porter une limite de pourcentage dans la facture de malts (5 %, 10 %, 100 %…). Réglable par malt en stock (*Inventaire*), avec repli sur la valeur de référence du *Catalogue* résolue par nom. L'éditeur de recette signale les dépassements (badge rouge + compteur d'alertes sur la section Malt) et la fiche recette les met en évidence. Alerte indicative, jamais bloquante.
+- **Navigation par ancre** : `/#cave`, `/#brassins`… ouvrent directement la page correspondante (utilisé par l'app Android).
+
+### Corrigé
+- **Recettes — disponibilité du stock à zéro** : un ingrédient présent en stock mais à 0 (ex. houblon à 0 g pour 60 g requis) était signalé « unités diff. » au lieu d'« insuffisant », et n'était pas ajouté à la liste de courses. L'incompatibilité d'unités se teste désormais sur l'absence réelle de l'unité demandée, et non sur une quantité nulle.
+- **Icônes manquantes** : quatre icônes Font Awesome *Pro* (absentes de la version Free) s'affichaient en carré vide. Remplacées par leurs équivalents Free — fûts en cave, brouillons, purge de la base et export iCal.
+- **Cache des assets** : `chart.umd.min.js` et les CSS tiers étaient servis sans `?v=` alors que les statiques portent un `max-age` d'un an — une mise à jour de ces fichiers n'atteignait jamais le navigateur. Cache-busting ajouté et cache du service worker incrémenté.
+- **Chaîne de build JS** : trois correctifs appliqués directement aux `bh-*.js` compilés étaient absents de leurs sources `script_*.html` — dont la purge des tokens à l'export. Une recompilation les aurait silencieusement écrasés. Sources réalignées.
+
+### Modifié
+- **Chart.js** 4.5.0 → 4.5.1.
+- **Font Awesome** 6.5.0 → 7.3.1 (les 177 icônes utilisées sont conservées).
+- Ajout d'un `CLAUDE.md` documentant la chaîne de build et les pièges du projet.
+
+---
+
 ## [2026-05-27] — 6
 
 ### Corrigé
