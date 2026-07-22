@@ -109,14 +109,24 @@ app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB max request body
 _STATIC_V = '0.1.0'  # fallback si _compute_static_v échoue
 
 def _compute_static_v():
-    """Version basée sur le mtime max des JS compilés — se met à jour automatiquement."""
-    STATIC_JS = os.path.join(os.path.dirname(__file__), 'static', 'js')
+    """Version basée sur le mtime max des JS servis — se met à jour automatiquement.
+
+    Couvre aussi les libs tierces (chart.umd.min.js) : servies avec un max-age
+    d'un an, elles ont besoin du même cache-busting que les bh-*.js.
+    """
+    STATIC    = os.path.join(os.path.dirname(__file__), 'static')
+    STATIC_JS = os.path.join(STATIC, 'js')
     try:
         mtimes = [
             os.path.getmtime(os.path.join(STATIC_JS, f))
             for f in os.listdir(STATIC_JS)
-            if f.startswith('bh-') and f.endswith('.js')
+            if f.endswith('.js')
         ]
+        # CSS tiers versionnés dans index.html (Font Awesome, Google Fonts)
+        for rel in ('fonts/fa/all.min.css', 'fonts/google/fonts.css'):
+            p = os.path.join(STATIC, rel)
+            if os.path.exists(p):
+                mtimes.append(os.path.getmtime(p))
         return format(int(max(mtimes)), 'x') if mtimes else _STATIC_V
     except Exception:
         return _STATIC_V

@@ -12,9 +12,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BrewHome">
 <link rel="apple-touch-icon" href="/static/favicon.png">
-<link rel="stylesheet" href="/static/fonts/google/fonts.css">
-<link rel="stylesheet" href="/static/fonts/fa/all.min.css">
-<script src="/static/js/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/fonts/google/fonts.css?v={{ static_v }}">
+<link rel="stylesheet" href="/static/fonts/fa/all.min.css?v={{ static_v }}">
+<script src="/static/js/chart.umd.min.js?v={{ static_v }}"></script>
 <!-- Anti-flash : applique le thème avant le rendu -->
 <script>(function(){var t=localStorage.getItem('brewhome-theme');document.documentElement.setAttribute('data-theme',t||'dark');})();</script>
 {% include 'parts/styles.html' %}

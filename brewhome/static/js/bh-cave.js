@@ -201,7 +201,7 @@ function renderCave() {
       kegHtml = `
         <div style="margin:6px 0 8px;padding:7px 10px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.22);border-radius:8px">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:${kegBar?'4px':'0'}">
-            <i class="fas fa-wine-barrel" style="color:var(--amber);font-size:.85rem"></i>
+            <i class="fas fa-beer-mug-empty" style="color:var(--amber);font-size:.85rem"></i>
             <span style="font-weight:700;font-size:.9rem">${kegL} L</span>${kegInitLabel}
             <span style="color:var(--muted);font-size:.78rem;margin-left:auto">${t('cave.in_keg')}</span>
           </div>
@@ -258,7 +258,7 @@ function renderCave() {
           ${_deplBadge(b.id)}
           ${priceHtml}
           ${b.description ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:8px;line-height:1.4">${esc(b.description).substring(0,100)}${b.description.length>100?'…':''}</div>` : ''}
-          ${hasKeg ? `<div style="margin-bottom:5px"><button class="btn btn-sm btn-ghost" onclick="openKegTransferModal(${b.id})" style="width:100%;border-color:rgba(251,191,36,.4);color:var(--amber)"><i class="fas fa-wine-barrel"></i> ${t('cave.keg_transfer')}</button></div>` : ''}
+          ${hasKeg ? `<div style="margin-bottom:5px"><button class="btn btn-sm btn-ghost" onclick="openKegTransferModal(${b.id})" style="width:100%;border-color:rgba(251,191,36,.4);color:var(--amber)"><i class="fas fa-beer-mug-empty"></i> ${t('cave.keg_transfer')}</button></div>` : ''}
           <div style="display:flex;gap:5px;margin-bottom:5px">
             <button class="btn btn-sm btn-ghost" onclick="withBtn(this,()=>adjustStock(${b.id},-1,0))" title="−1 bouteille 33cl" style="flex:1"><i class="fas fa-minus"></i> 33cl</button>
             <button class="btn btn-sm btn-ghost" onclick="withBtn(this,()=>adjustStock(${b.id},0,-1))" title="−1 bouteille 75cl" style="flex:1"><i class="fas fa-minus"></i> 75cl</button>
@@ -440,7 +440,7 @@ function openBeerDetail(id) {
       const kegBlock = (b.keg_liters || b.keg_initial_liters)
         ? `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.22);border-radius:12px;padding:14px;text-align:center;grid-column:1/-1">
              <div style="font-size:2rem;font-weight:800;color:var(--amber)">${b.keg_liters || 0}</div>
-             <div style="font-size:.8rem;color:var(--muted);margin-top:2px"><i class="fas fa-wine-barrel"></i> ${t('cave.vol_keg_label')}</div>
+             <div style="font-size:.8rem;color:var(--muted);margin-top:2px"><i class="fas fa-beer-mug-empty"></i> ${t('cave.vol_keg_label')}</div>
              ${b.keg_initial_liters ? `<div style="font-size:.72rem;color:var(--muted);margin-top:4px">/ ${b.keg_initial_liters} L initial</div>` : ''}
            </div>`
         : '';

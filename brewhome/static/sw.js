@@ -1,4 +1,4 @@
-const CACHE = 'brewhome-v4';
+const CACHE = 'brewhome-v5';
 
 // Assets précachés à l'installation — garantis offline dès le premier chargement
 const PRECACHE = [
@@ -8,11 +8,14 @@ const PRECACHE = [
   '/static/favicon-32.png',
   '/static/icon-192.png',
   '/static/icon-512.png',
-  '/static/js/chart.umd.min.js',
-  // CSS
-  '/static/fonts/fa/all.min.css',
-  '/static/fonts/google/fonts.css',
-  // FontAwesome webfonts
+  // chart.umd.min.js n'est plus précaché : il est servi avec ?v=<static_v>,
+  // donc une entrée sans query-string ne pourrait jamais matcher (cf. fetch
+  // cache-first ci-dessous). Il est mis en cache dynamiquement au 1er chargement,
+  // comme les bh-*.js.
+  // Les CSS tiers sont servis avec ?v=<static_v> : comme chart.umd.min.js,
+  // une entrée précachée sans query-string ne pourrait jamais matcher.
+  // Ils sont mis en cache dynamiquement au 1er chargement.
+  // FontAwesome webfonts (référencées sans query depuis le CSS → précache utile)
   '/static/fonts/fa/webfonts/fa-solid-900.woff2',
   '/static/fonts/fa/webfonts/fa-regular-400.woff2',
   '/static/fonts/fa/webfonts/fa-brands-400.woff2',

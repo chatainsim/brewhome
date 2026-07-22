@@ -92,7 +92,7 @@ function renderDashWidgets() {
   let wEvent;
   if (!upcoming.length) {
     wEvent = `<div class="card" style="height:100%">
-      <div class="section-label" style="margin-bottom:10px"><i class="fas fa-calendar-star" style="color:var(--info)"></i> ${t('dash.wgt_event')}</div>
+      <div class="section-label" style="margin-bottom:10px"><i class="fas fa-calendar-day" style="color:var(--info)"></i> ${t('dash.wgt_event')}</div>
       <div style="color:var(--muted);font-size:.83rem;padding:6px 0">${t('dash.wgt_event_empty')}</div>
     </div>`;
   } else {
@@ -115,7 +115,7 @@ function renderDashWidgets() {
       </div>`;
     }).join('');
     wEvent = `<div class="card" style="height:100%">
-      <div class="section-label" style="margin-bottom:8px"><i class="fas fa-calendar-star" style="color:var(--info)"></i> ${t('dash.wgt_event')}</div>
+      <div class="section-label" style="margin-bottom:8px"><i class="fas fa-calendar-day" style="color:var(--info)"></i> ${t('dash.wgt_event')}</div>
       ${rows}
     </div>`;
   }

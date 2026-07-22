@@ -589,7 +589,7 @@ function _recipeItemHtml(r) {
   if (totalKeg > 0) {
     statusHtml += `<button class="rec-status-btn" style="color:var(--amber);background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.3)"
           onclick="event.stopPropagation();goToCaveFromRecipe(${r.id})" title="${t('rec.view_in_cave')}">
-          <i class="fas fa-wine-barrel"></i> ${totalKeg} L</button>`;
+          <i class="fas fa-beer-mug-empty"></i> ${totalKeg} L</button>`;
   }
   if (!activeBrews.length && !hasStock) {
     statusHtml = r.version_notes

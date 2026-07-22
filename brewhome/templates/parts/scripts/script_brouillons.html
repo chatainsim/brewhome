@@ -95,7 +95,7 @@ function renderDraftView() {
         <span style="font-size:.75rem;font-weight:700;color:${cdBrew};margin-left:auto">(${cntBrew})</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
-        <i class="fas fa-calendar-star" style="color:#8b5cf6;width:14px;text-align:center"></i>
+        <i class="fas fa-calendar-day" style="color:#8b5cf6;width:14px;text-align:center"></i>
         <span style="font-weight:600;color:#8b5cf6;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.event_label || '')}</span>
         <span style="color:var(--muted);flex-shrink:0">${fmtEv}</span>
         <span style="font-size:.75rem;font-weight:700;color:${cdEvent};flex-shrink:0">(${diffEv >= 0 ? t('cal.countdown_in').replace('${diff}', diffEv) : t('cal.countdown_past')})</span>
@@ -280,7 +280,7 @@ function renderBrouillons() {
             <span style="font-size:.68rem;font-weight:700;color:${cdBrew}">(${cntBrew})</span>
           </div>
           <div style="display:flex;align-items:center;gap:5px">
-            <i class="fas fa-calendar-star" style="color:#8b5cf6;font-size:.62rem;flex-shrink:0;width:10px;text-align:center"></i>
+            <i class="fas fa-calendar-day" style="color:#8b5cf6;font-size:.62rem;flex-shrink:0;width:10px;text-align:center"></i>
             <span style="font-size:.71rem;color:var(--muted);flex-shrink:0">${esc(d.event_label || t('cal.add_event'))}</span>
             <span style="font-size:.71rem;color:#8b5cf6">${fmtEv}</span>
             <span style="font-size:.68rem;font-weight:700;color:${cdEvent}">(${diffEv >= 0 ? t('cal.countdown_in').replace('${diff}', diffEv) : t('cal.countdown_past')})</span>
