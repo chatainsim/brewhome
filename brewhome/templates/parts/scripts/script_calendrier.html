@@ -197,7 +197,7 @@ function renderAgendaView() {
       add(ds, 'custom', ev.title, ev.color || 'var(--amber)', ev.emoji || '📅', ev.id);
       if (ev.brew_reminder) {
         const rd = new Date(ds + 'T00:00:00');
-        rd.setDate(rd.getDate() - (ev.brew_reminder_days || appSettings.defaultBrewReminderDays || 45));
+        rd.setDate(rd.getDate() - (ev.brew_reminder_days ?? appSettings.defaultBrewReminderDays ?? 45));
         add(_ymd(rd), 'remind', ev.title, '#a855f7', '🔔', ev.id);
       }
     });
