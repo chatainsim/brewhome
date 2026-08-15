@@ -193,13 +193,14 @@ def create_recipe():
         )
         recipe_id = cur.lastrowid
         for ing in d.get('ingredients', []):
+            unit = ing.get('unit', 'g') if ing.get('unit') in VALID_UNITS else 'g'
             conn.execute(
                 '''INSERT INTO recipe_ingredients
                    (recipe_id,inventory_item_id,name,category,quantity,unit,
                     hop_time,hop_type,hop_days,other_type,other_time,ebc,alpha,notes)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (recipe_id, ing.get('inventory_item_id'), ing.get('name'), ing.get('category'),
-                 ing.get('quantity'), ing.get('unit', 'g'), ing.get('hop_time'),
+                 ing.get('quantity'), unit, ing.get('hop_time'),
                  ing.get('hop_type'), ing.get('hop_days'),
                  ing.get('other_type'), ing.get('other_time'),
                  ing.get('ebc'), ing.get('alpha'), ing.get('notes'))

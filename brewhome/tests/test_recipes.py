@@ -101,6 +101,20 @@ def test_create_recipe_with_ingredients(client):
     assert names == {'Pale Ale Malt', 'Cascade'}
 
 
+def test_create_recipe_rejects_invalid_ingredient_unit(client):
+    # Une unité hors VALID_UNITS doit être neutralisée en 'g' à la création,
+    # comme le fait déjà la mise à jour (PUT) via _apply_recipe_data.
+    payload = {
+        'name': 'Unité invalide',
+        'ingredients': [
+            {'name': 'Pilsner', 'category': 'malt', 'quantity': 1, 'unit': "n'importe quoi"},
+        ],
+    }
+    r = client.post('/api/recipes', json=payload)
+    assert r.status_code == 201
+    assert r.get_json()['ingredients'][0]['unit'] == 'g'
+
+
 def test_recipe_history_saved_on_update(client):
     created = client.post('/api/recipes', json={'name': 'Historic'}).get_json()
     client.put(f'/api/recipes/{created["id"]}', json={'name': 'Historic V2', 'volume': 20})
