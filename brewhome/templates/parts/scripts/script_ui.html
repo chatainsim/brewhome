@@ -1328,7 +1328,7 @@ function printBrewChecklist() {
             <div style="width:14px;height:14px;border:1.5px solid #888;border-radius:2px;flex-shrink:0;margin-top:1px;background:${checked ? '#16a34a' : 'white'};display:flex;align-items:center;justify-content:center">
               ${checked ? '<span style="color:white;font-size:9pt;line-height:1">✓</span>' : ''}
             </div>
-            <span style="font-size:10pt;${checked ? 'text-decoration:line-through;color:#888' : ''}">${item.text}</span>
+            <span style="font-size:10pt;${checked ? 'text-decoration:line-through;color:#888' : ''}">${esc(item.text)}</span>
           </div>`;
         }).join('')}
       </div>`).join('');
