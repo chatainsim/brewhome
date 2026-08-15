@@ -47,10 +47,11 @@ def create_inventory_item():
                 return api_error('duplicate', 409, name=dup['name'], id=dup['id'])
         initial_qty = d.get('quantity', 0) or 0
         cur = conn.execute(
-            'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes,price_per_unit,max_usage_pct,yeast_type,yeast_mfg_date,yeast_open_date,yeast_generation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO inventory_items (name,category,quantity,unit,origin,ebc,alpha,notes,price_per_unit,min_stock,expiry_date,max_usage_pct,yeast_type,yeast_mfg_date,yeast_open_date,yeast_generation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (d.get('name'), d.get('category'), initial_qty, d.get('unit', 'kg'),
              d.get('origin'), d.get('ebc'), d.get('alpha'), d.get('notes'),
-             d.get('price_per_unit'), d.get('max_usage_pct'),
+             d.get('price_per_unit'), d.get('min_stock'), d.get('expiry_date') or None,
+             d.get('max_usage_pct'),
              d.get('yeast_type'), d.get('yeast_mfg_date') or None, d.get('yeast_open_date') or None,
              d.get('yeast_generation') if d.get('yeast_generation') is not None else 1)
         )

@@ -49,6 +49,17 @@ def test_create_inventory_item(client):
     assert data['unit'] == 'kg'
 
 
+def test_create_inventory_item_keeps_min_stock_and_expiry(client):
+    r = client.post('/api/inventory', json={
+        'name': 'Citra', 'category': 'houblon',
+        'quantity': 100, 'unit': 'g', 'min_stock': 20, 'expiry_date': '2027-01-01',
+    })
+    assert r.status_code == 201
+    data = r.get_json()
+    assert data['min_stock'] == 20
+    assert data['expiry_date'] == '2027-01-01'
+
+
 def test_create_inventory_item_missing_name(client):
     r = client.post('/api/inventory', json={'category': 'malt', 'quantity': 1.0})
     assert r.status_code == 400
