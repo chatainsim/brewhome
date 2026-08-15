@@ -222,13 +222,18 @@ function _loadSettingsFromServer(srv) {
   if (srv.telegram_token != null || srv.telegram_chat_id != null ||
       srv.telegram_tz    != null || srv.telegram_notifs  != null) {
     appSettings.telegram = appSettings.telegram || {};
-    if (srv.telegram_token   != null) appSettings.telegram.token  = srv.telegram_token  || '';
+    // '***' = token présent en DB mais masqué : ne jamais écraser la valeur locale avec ce placeholder
+    if (srv.telegram_token != null && srv.telegram_token !== '***') {
+      appSettings.telegram.token = srv.telegram_token || '';
+    }
     if (srv.telegram_chat_id != null) appSettings.telegram.chatId = srv.telegram_chat_id || '';
     if (srv.telegram_tz      != null) appSettings.telegram.tz     = srv.telegram_tz     || 'Europe/Paris';
     if (srv.telegram_notifs  != null) {
       try { appSettings.telegram.notifs = JSON.parse(srv.telegram_notifs); } catch(e) {}
     }
   }
+  // Sanitize : si le placeholder '***' a déjà été stocké en localStorage par erreur, l'effacer
+  if (appSettings.telegram?.token === '***') appSettings.telegram.token = '';
   if (srv.tg_brewing_events != null) {
     try { appSettings.brewEvents = JSON.parse(srv.tg_brewing_events); } catch(e) {}
   }
