@@ -194,7 +194,7 @@ def check_app_version():
 # App settings
 # ---------------------------------------------------------------------------
 
-_SECRET_KEYS = frozenset()
+_SECRET_KEYS = frozenset(('gh_data_pat', 'gh_vitrine_pat', 'ai_api_key', 'telegram_token'))
 
 
 @bp.route('/api/app-settings', methods=['GET'])
