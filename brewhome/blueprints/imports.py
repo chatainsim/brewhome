@@ -6,7 +6,7 @@ from datetime import datetime
 
 from flask import Blueprint, Response, jsonify, request, current_app
 from db import get_db, get_readings_db, PHOTOS_DIR
-from helpers import _to_kg, api_error
+from helpers import _to_kg, api_error, VALID_UNITS
 from constants import BrewStatus
 
 bp = Blueprint('imports', __name__)
@@ -203,13 +203,14 @@ def import_recipes():
                     )
                     rid = cur.lastrowid
                 for ing in recipe.get('ingredients', []):
+                    unit = ing.get('unit', 'g') if ing.get('unit') in VALID_UNITS else 'g'
                     conn.execute(
                         '''INSERT INTO recipe_ingredients
                            (recipe_id,name,category,quantity,unit,hop_time,hop_type,
                             hop_days,other_type,other_time,ebc,alpha,notes)
                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                         (rid, ing.get('name', '?'), ing.get('category', 'autre'),
-                         ing.get('quantity', 0), ing.get('unit', 'g'),
+                         ing.get('quantity', 0), unit,
                          ing.get('hop_time'), ing.get('hop_type'), ing.get('hop_days'),
                          ing.get('other_type'), ing.get('other_time'),
                          ing.get('ebc'), ing.get('alpha'), ing.get('notes'))
