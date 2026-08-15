@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-08-15] — 8 · version 0.1.5
+
+### Corrigé
+- **Sécurité — secrets exposés sans authentification** : `GET /api/app-settings` renvoyait en clair le PAT GitHub, le token Telegram et la clé API IA (le masquage `_SECRET_KEYS` était vide depuis toujours). Le JS client écrivait donc systématiquement la vraie clé dans le `localStorage` du navigateur à chaque visite au lieu du placeholder attendu.
+- **Recettes — validation d'unité manquante à la création** : `POST /api/recipes` acceptait une unité d'ingrédient arbitraire, contrairement à `PUT` ; elle était ensuite silencieusement neutralisée en `g` à la première modification.
+- **Inventaire — seuil de stock bas et péremption perdus à la création** : `min_stock` et `expiry_date` renseignés dès la création d'un article n'étaient pas enregistrés (colonnes absentes de l'`INSERT`), sans effet tant que l'article n'était pas rouvert en édition.
+- **Calendrier — rappel de brassage à 0 jour ignoré** : la vue Agenda retombait sur le délai par défaut au lieu du rappel « jour même » explicitement réglé à 0.
+
+---
+
 ## [2026-07-22] — 7 · version 0.1.4
 
 ### Ajouté
