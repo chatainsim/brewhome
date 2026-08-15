@@ -372,6 +372,14 @@ function _showEditor(show) {
 }
 
 async function openDraft(id) {
+  // Ne pas laisser un debounce de sauvegarde du brouillon précédent s'exécuter
+  // après le changement de contexte : il écrirait le contenu du nouveau
+  // formulaire sur l'ancien _currentDraftId (déjà réassigné) une fois le
+  // timer déclenché — flush immédiat à la place (même logique que draftToRecipe()).
+  if (_currentDraftId && _currentDraftId !== id) {
+    clearTimeout(_draftSaveTimer);
+    await saveDraft();
+  }
   _currentDraftId = id;
   const d = S.drafts.find(x => x.id === id);
   if (!d) return;
@@ -403,6 +411,12 @@ async function openDraft(id) {
 }
 
 async function newDraft() {
+  // Même flush que openDraft() : ne pas laisser le debounce du brouillon
+  // précédent écrire sur le nouveau une fois qu'il se déclenchera.
+  if (_currentDraftId) {
+    clearTimeout(_draftSaveTimer);
+    await saveDraft();
+  }
   try {
     const d = await api('POST', '/api/drafts', { title: t('draft.new') });
     S.drafts.unshift(d);
