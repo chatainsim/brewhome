@@ -958,6 +958,12 @@ function addDraftImage(dataUrl) {
 
 function removeDraftImageAt(idx) {
   _draftImages.splice(idx, 1);
+  // Une image supprimée avant la sélection décale tout ce qui suit : sans ce
+  // recalage, _draftSelectedIdx continue de pointer sur l'index numérique
+  // d'origine, qui correspond maintenant à une autre photo.
+  if (idx < _draftSelectedIdx) {
+    _draftSelectedIdx--;
+  }
   if (_draftSelectedIdx >= _draftImages.length) {
     _draftSelectedIdx = Math.max(0, _draftImages.length - 1);
   }
