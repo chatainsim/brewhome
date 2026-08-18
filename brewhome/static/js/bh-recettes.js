@@ -520,16 +520,16 @@ function brewCost(b) {
   const perLiter = vol > 0 ? total / vol : null;
 
   // Cost per bottle from linked cave entries
-  let per33 = null, per75 = null;
+  const perSize = {};
   if (total > 0) {
     const linkedBeers = (S.beers || []).filter(bx => bx.brew_id === b.id && !bx.archived);
-    const tot33 = linkedBeers.reduce((s, bx) => s + (bx.stock_33cl || 0), 0);
-    const tot75 = linkedBeers.reduce((s, bx) => s + (bx.stock_75cl || 0), 0);
-    if (tot33 > 0) per33 = total / tot33;
-    if (tot75 > 0) per75 = total / tot75;
+    BOTTLE_SIZES.forEach(size => {
+      const tot = linkedBeers.reduce((s, bx) => s + (bx[`stock_${size}`] || 0), 0);
+      if (tot > 0) perSize[size] = total / tot;
+    });
   }
 
-  return { total, ingTotal, waterCost, perLiter, per33, per75, scaleFactor, cats, ingDetails, gas, elec };
+  return { total, ingTotal, waterCost, perLiter, perSize, scaleFactor, cats, ingDetails, gas, elec };
 }
 
 // Status badges used in the recipe list sidebar
@@ -564,10 +564,10 @@ function _recipeItemHtml(r) {
   })();
   const activeBrews = S.brews.filter(b => b.recipe_id === r.id && !b.archived && b.status !== 'completed');
   const linkedBeers = S.beers.filter(b => b.recipe_id === r.id && !b.archived);
-  const total33  = linkedBeers.reduce((s, b) => s + (b.stock_33cl   || 0), 0);
-  const total75  = linkedBeers.reduce((s, b) => s + (b.stock_75cl   || 0), 0);
+  const totalBySize = {}; BOTTLE_SIZES.forEach(size => { totalBySize[size] = linkedBeers.reduce((s, b) => s + (b[`stock_${size}`] || 0), 0); });
+  const totalBottles = BOTTLE_SIZES.reduce((s, size) => s + totalBySize[size], 0);
   const totalKeg = linkedBeers.reduce((s, b) => s + (b.keg_liters   || 0), 0);
-  const hasStock = (total33 + total75 + totalKeg) > 0;
+  const hasStock = (totalBottles + totalKeg) > 0;
 
   let statusHtml = '';
   if (activeBrews.length > 0) {
@@ -580,8 +580,8 @@ function _recipeItemHtml(r) {
           onclick="event.stopPropagation();navigate('brassins')" title="${esc(brew.name)} — ${bs.label}">
           <i class="fas fa-${bs.icon}"></i> ${brewLabel}</button>`;
   }
-  if (total33 + total75 > 0) {
-    const parts = [total33 ? total33 + '\u00d7 33cl' : '', total75 ? total75 + '\u00d7 75cl' : ''].filter(Boolean).join(' · ');
+  if (totalBottles > 0) {
+    const parts = BOTTLE_SIZES.filter(size => totalBySize[size]).map(size => `${totalBySize[size]}\u00d7 ${size}`).join(' · ');
     statusHtml += `<button class="rec-status-btn" style="color:var(--success);background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.3)"
           onclick="event.stopPropagation();goToCaveFromRecipe(${r.id})" title="${t('rec.view_in_cave')}">
           <i class="fas fa-wine-bottle"></i> ${parts}</button>`;

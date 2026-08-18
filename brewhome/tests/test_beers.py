@@ -149,3 +149,70 @@ def test_patch_beer_archived(client, beer):
     r = client.patch(f'/api/beers/{beer["id"]}', json={'archived': True})
     assert r.status_code == 200
     assert r.get_json()['archived'] == 1
+
+
+# ── Tailles 25cl / 50cl ──────────────────────────────────────────────────────
+
+def test_create_beer_with_25_50cl(client):
+    r = client.post('/api/beers', json={
+        'name': 'Session IPA', 'abv': 4.2,
+        'stock_25cl': 8, 'stock_50cl': 4,
+    })
+    assert r.status_code == 201
+    data = r.get_json()
+    assert data['stock_25cl'] == 8
+    assert data['stock_50cl'] == 4
+    # initial_* doit suivre stock_* si non fourni, comme pour 33cl/75cl
+    assert data['initial_25cl'] == 8
+    assert data['initial_50cl'] == 4
+
+
+def test_update_beer_25_50cl(client, beer):
+    r = client.put(f'/api/beers/{beer["id"]}', json={
+        'name': 'IPA Maison V2', 'stock_25cl': 5, 'stock_50cl': 2,
+    })
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data['stock_25cl'] == 5
+    assert data['stock_50cl'] == 2
+
+
+def test_patch_stock_25_50cl(client, beer):
+    r = client.patch(f'/api/beers/{beer["id"]}/stock', json={'stock_25cl': 3, 'stock_50cl': 1})
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data['stock_25cl'] == 3
+    assert data['stock_50cl'] == 1
+
+
+def test_patch_stock_25cl_decrease_creates_consumption_log(client, beer):
+    client.patch(f'/api/beers/{beer["id"]}/stock', json={'stock_25cl': 10})
+    r = client.patch(f'/api/beers/{beer["id"]}/stock', json={'stock_25cl': 7})
+    assert r.status_code == 200
+    assert r.get_json()['stock_25cl'] == 7
+    stats = client.get('/api/consumption').get_json()
+    total_25cl = sum(b.get('total_25cl') or 0 for b in stats['by_beer'])
+    assert total_25cl >= 3
+
+
+def test_bottle_sizes_enabled_setting_roundtrip(client):
+    import json as _json
+    r = client.put('/api/app-settings', json={
+        'bottle_sizes_enabled': _json.dumps({'25cl': True, '33cl': True, '50cl': False, '75cl': True})
+    })
+    assert r.status_code == 200
+    r = client.get('/api/app-settings')
+    saved = _json.loads(r.get_json()['bottle_sizes_enabled'])
+    assert saved == {'25cl': True, '33cl': True, '50cl': False, '75cl': True}
+
+
+def test_disabled_size_stock_stays_readable(client, beer):
+    """Desactiver une taille dans les reglages ne doit jamais masquer du stock existant via l'API."""
+    import json as _json
+    client.patch(f'/api/beers/{beer["id"]}/stock', json={'stock_50cl': 6})
+    client.put('/api/app-settings', json={
+        'bottle_sizes_enabled': _json.dumps({'25cl': False, '33cl': True, '50cl': False, '75cl': True})
+    })
+    r = client.get('/api/beers')
+    updated = next(b for b in r.get_json() if b['id'] == beer['id'])
+    assert updated['stock_50cl'] == 6

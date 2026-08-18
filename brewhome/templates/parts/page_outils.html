@@ -161,18 +161,30 @@
         <label data-i18n="ot.bottles_vol">Volume (L)</label>
         <input type="number" id="ot-bottles-vol" step="0.5" min="0.5" max="5000" placeholder="20" oninput="calcBottles(null)">
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
-        <div style="background:var(--card2);border-radius:10px;padding:12px 14px">
+      <div id="ot-bottles-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+        <div id="ot-bottles-25-wrap" style="background:var(--card2);border-radius:10px;padding:12px 14px">
+          <div style="font-size:.75rem;color:#c084fc;font-weight:600;margin-bottom:8px;text-align:center" data-i18n="ot.bottles_25">25 cl</div>
+          <input type="number" id="ot-bottles-n25" min="0" step="1" placeholder="—"
+                 style="width:100%;text-align:center;font-size:1.5rem;font-weight:700;color:#c084fc;background:transparent;border:none;border-bottom:1px solid color-mix(in srgb,#c084fc 30%,transparent);outline:none;padding:4px 0"
+                 oninput="calcBottles('25cl')">
+        </div>
+        <div id="ot-bottles-33-wrap" style="background:var(--card2);border-radius:10px;padding:12px 14px">
           <div style="font-size:.75rem;color:var(--hop);font-weight:600;margin-bottom:8px;text-align:center" data-i18n="ot.bottles_33">33 cl</div>
           <input type="number" id="ot-bottles-n33" min="0" step="1" placeholder="—"
                  style="width:100%;text-align:center;font-size:1.5rem;font-weight:700;color:var(--hop);background:transparent;border:none;border-bottom:1px solid color-mix(in srgb,var(--hop) 30%,transparent);outline:none;padding:4px 0"
-                 oninput="calcBottles('33')">
+                 oninput="calcBottles('33cl')">
         </div>
-        <div style="background:var(--card2);border-radius:10px;padding:12px 14px">
+        <div id="ot-bottles-50-wrap" style="background:var(--card2);border-radius:10px;padding:12px 14px">
+          <div style="font-size:.75rem;color:#f472b6;font-weight:600;margin-bottom:8px;text-align:center" data-i18n="ot.bottles_50">50 cl</div>
+          <input type="number" id="ot-bottles-n50" min="0" step="1" placeholder="—"
+                 style="width:100%;text-align:center;font-size:1.5rem;font-weight:700;color:#f472b6;background:transparent;border:none;border-bottom:1px solid color-mix(in srgb,#f472b6 30%,transparent);outline:none;padding:4px 0"
+                 oninput="calcBottles('50cl')">
+        </div>
+        <div id="ot-bottles-75-wrap" style="background:var(--card2);border-radius:10px;padding:12px 14px">
           <div style="font-size:.75rem;color:var(--amber);font-weight:600;margin-bottom:8px;text-align:center" data-i18n="ot.bottles_75">75 cl</div>
           <input type="number" id="ot-bottles-n75" min="0" step="1" placeholder="—"
                  style="width:100%;text-align:center;font-size:1.5rem;font-weight:700;color:var(--amber);background:transparent;border:none;border-bottom:1px solid color-mix(in srgb,var(--amber) 30%,transparent);outline:none;padding:4px 0"
-                 oninput="calcBottles('75')">
+                 oninput="calcBottles('75cl')">
         </div>
       </div>
       <div id="ot-bottles-summary" style="font-size:.82rem;text-align:center;min-height:1.2em;color:var(--muted)"></div>

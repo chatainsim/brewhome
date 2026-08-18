@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Blueprint, current_app, jsonify, make_response, request, send_from_directory
 from db import get_db, _log, _log_inv, PHOTOS_DIR
 from helpers import _to_base, _from_base, _to_kg, _make_thumb, _image_too_large, _shrink_image_b64, _b64_to_jpeg_file, _make_thumb_file, validate, api_error
-from constants import BrewStatus
+from constants import BrewStatus, BottleSize
 
 bp = Blueprint('brews', __name__)
 
@@ -59,8 +59,9 @@ def get_brews():
         total = conn.execute(
             'SELECT COUNT(*) FROM brews WHERE deleted_at IS NULL'
         ).fetchone()[0]
+        cave_liters_sql = ' + '.join(f'stock_{size}*{liters}' for size, liters in BottleSize.SIZES_CL.items())
         rows = conn.execute(
-            '''WITH
+            f'''WITH
                  ferm_cnt AS MATERIALIZED (
                    SELECT brew_id, COUNT(*) AS fermentation_count
                    FROM brew_fermentation_readings GROUP BY brew_id
@@ -77,7 +78,7 @@ def get_brews():
                    SELECT brew_id,
                           MIN(CASE WHEN bottling_date IS NOT NULL THEN bottling_date END) AS bottling_date,
                           SUM(CASE WHEN archived=0
-                                   THEN stock_33cl*0.33 + stock_75cl*0.75 + COALESCE(keg_liters,0)
+                                   THEN {cave_liters_sql} + COALESCE(keg_liters,0)
                                    ELSE 0 END) AS cave_liters
                    FROM beers WHERE brew_id IS NOT NULL GROUP BY brew_id
                  ),

@@ -4,7 +4,8 @@ import uuid
 from datetime import date
 from flask import Blueprint, jsonify, request, current_app, send_from_directory
 from db import get_db, _log, PHOTOS_DIR
-from helpers import validate, api_error, _image_too_large, _shrink_image_b64, _b64_to_jpeg_file
+from helpers import validate, api_error, _image_too_large, _shrink_image_b64, _b64_to_jpeg_file, beer_liters
+from constants import BottleSize
 
 bp = Blueprint('beers', __name__)
 
@@ -71,10 +72,9 @@ _BEER_SCHEMA = {
     'description': {'type': str,          'max_len': 5000},
     'origin':      {'type': str,          'max_len': 200},
     'abv':         {'type': (int, float), 'min_val': 0,  'max_val': 30},
-    'stock_33cl':  {'type': int,          'min_val': 0,  'max_val': 10000},
-    'stock_75cl':  {'type': int,          'min_val': 0,  'max_val': 10000},
     'keg_liters':           {'type': (int, float), 'min_val': 0,   'max_val': 10000},
     'refermentation_days':  {'type': int,          'min_val': 1,   'max_val': 365},
+    **{f'stock_{size}': {'type': int, 'min_val': 0, 'max_val': 10000} for size in BottleSize.SIZES_CL},
 }
 
 
@@ -127,14 +127,17 @@ def create_beer():
         return err
     photo_db, photo_file = _process_beer_photo(d.get('photo'))
     with get_db() as conn:
-        s33 = d.get('stock_33cl', 0)
-        s75 = d.get('stock_75cl', 0)
+        stocks = {size: d.get(f'stock_{size}', 0) for size in BottleSize.SIZES_CL}
         keg = d.get('keg_liters')
+        stock_cols   = ','.join(f'stock_{size}' for size in BottleSize.SIZES_CL)
+        initial_cols = ','.join(f'initial_{size}' for size in BottleSize.SIZES_CL)
+        placeholders = ','.join('?' * (len(BottleSize.SIZES_CL) * 2))
         cur = conn.execute(
-            '''INSERT INTO beers (name,type,abv,stock_33cl,stock_75cl,initial_33cl,initial_75cl,keg_liters,keg_initial_liters,origin,description,photo,photo_file,brew_id,recipe_id,brew_date,bottling_date,refermentation,refermentation_days)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (d.get('name'), d.get('type'), d.get('abv'), s33, s75,
-             d.get('initial_33cl', s33), d.get('initial_75cl', s75),
+            f'''INSERT INTO beers (name,type,abv,{stock_cols},{initial_cols},keg_liters,keg_initial_liters,origin,description,photo,photo_file,brew_id,recipe_id,brew_date,bottling_date,refermentation,refermentation_days)
+               VALUES (?,?,?,{placeholders},?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (d.get('name'), d.get('type'), d.get('abv'),
+             *stocks.values(),
+             *[d.get(f'initial_{size}', stocks[size]) for size in BottleSize.SIZES_CL],
              keg, d.get('keg_initial_liters', keg),
              d.get('origin'), d.get('description'),
              photo_db, photo_file,
@@ -147,10 +150,10 @@ def create_beer():
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
         _log('beer', 'created', json.dumps({'_i18n':'act.beer_created','name':d.get('name','')}), beer_id, conn)
     # Telegram bottling notification (outside DB context to avoid locking)
-    if d.get('brew_id') and (s33 or s75 or keg):
+    if d.get('brew_id') and (any(stocks.values()) or keg):
         try:
             from blueprints.integrations import _tg_fire_bottling
-            _tg_fire_bottling(d.get('name'), s33, s75, keg, d.get('bottling_date'))
+            _tg_fire_bottling(d.get('name'), stocks, keg, d.get('bottling_date'))
         except Exception as e:
             current_app.logger.warning('tg bottling notification failed: %s', e)
     return jsonify(_beer_row_to_dict(row)), 201
@@ -166,23 +169,29 @@ def update_beer(beer_id):
     if err:
         return err
     with get_db() as conn:
+        initial_cols_sql = ','.join(f'initial_{size}' for size in BottleSize.SIZES_CL)
         existing = conn.execute(
-            'SELECT initial_33cl, initial_75cl, keg_initial_liters, photo_file FROM beers WHERE id=?',
+            f'SELECT {initial_cols_sql}, keg_initial_liters, photo_file FROM beers WHERE id=?',
             (beer_id,)
         ).fetchone()
         if not existing:
             return api_error('not_found', 404)
-        init33 = d['initial_33cl'] if 'initial_33cl' in d else existing['initial_33cl']
-        init75 = d['initial_75cl'] if 'initial_75cl' in d else existing['initial_75cl']
+        inits = {
+            size: (d[f'initial_{size}'] if f'initial_{size}' in d else existing[f'initial_{size}'])
+            for size in BottleSize.SIZES_CL
+        }
         keg_init = d['keg_initial_liters'] if 'keg_initial_liters' in d else existing['keg_initial_liters']
         photo_db, photo_file = _process_beer_photo(d.get('photo'), existing['photo_file'])
+        set_stock_sql   = ','.join(f'stock_{size}=?' for size in BottleSize.SIZES_CL)
+        set_initial_sql = ','.join(f'initial_{size}=?' for size in BottleSize.SIZES_CL)
         conn.execute(
-            '''UPDATE beers SET name=?,type=?,abv=?,stock_33cl=?,stock_75cl=?,
-               initial_33cl=?,initial_75cl=?,keg_liters=?,keg_initial_liters=?,origin=?,description=?,
+            f'''UPDATE beers SET name=?,type=?,abv=?,{set_stock_sql},
+               {set_initial_sql},keg_liters=?,keg_initial_liters=?,origin=?,description=?,
                photo=?,photo_file=?,
                brew_date=?,bottling_date=?,refermentation=?,refermentation_days=? WHERE id=?''',
-            (d.get('name'), d.get('type'), d.get('abv'), d.get('stock_33cl', 0),
-             d.get('stock_75cl', 0), init33, init75,
+            (d.get('name'), d.get('type'), d.get('abv'),
+             *[d.get(f'stock_{size}', 0) for size in BottleSize.SIZES_CL],
+             *inits.values(),
              d.get('keg_liters'), keg_init,
              d.get('origin'), d.get('description'),
              photo_db, photo_file,
@@ -289,32 +298,37 @@ def purge_beer(beer_id):
 @bp.route('/api/beers/<int:beer_id>/stock', methods=['PATCH'])
 def patch_beer_stock(beer_id):
     d = request.json or {}
-    for field in ('stock_33cl', 'stock_75cl', 'keg_liters'):
+    stock_fields = [f'stock_{size}' for size in BottleSize.SIZES_CL]
+    for field in (*stock_fields, 'keg_liters'):
         if field in d:
             if not isinstance(d[field], (int, float)) or d[field] < 0:
                 return api_error('validation', 400, fields={field: 'must be a non-negative number'})
     with get_db() as conn:
-        cur = conn.execute('SELECT stock_33cl, stock_75cl, keg_liters, name FROM beers WHERE id=?', (beer_id,)).fetchone()
+        stock_cols_sql = ', '.join(stock_fields)
+        cur = conn.execute(
+            f'SELECT {stock_cols_sql}, keg_liters, name FROM beers WHERE id=?', (beer_id,)
+        ).fetchone()
         if not cur:
             return api_error('not_found', 404)
-        old_33  = cur['stock_33cl']  or 0
-        old_75  = cur['stock_75cl']  or 0
-        old_keg = cur['keg_liters']  or 0.0
-        new_33  = d.get('stock_33cl',  old_33)
-        new_75  = d.get('stock_75cl',  old_75)
-        new_keg = d.get('keg_liters',  old_keg)
+        old = {size: cur[f'stock_{size}'] or 0 for size in BottleSize.SIZES_CL}
+        old_keg = cur['keg_liters'] or 0.0
+        new = {size: d.get(f'stock_{size}', old[size]) for size in BottleSize.SIZES_CL}
+        new_keg = d.get('keg_liters', old_keg)
+        set_sql = ', '.join(f'stock_{size}=?' for size in BottleSize.SIZES_CL)
         conn.execute(
-            'UPDATE beers SET stock_33cl=?, stock_75cl=?, keg_liters=? WHERE id=?',
-            (new_33, new_75, new_keg, beer_id)
+            f'UPDATE beers SET {set_sql}, keg_liters=? WHERE id=?',
+            (*new.values(), new_keg, beer_id)
         )
-        d33  = max(0, old_33  - new_33)
-        d75  = max(0, old_75  - new_75)
+        delta = {size: max(0, old[size] - new[size]) for size in BottleSize.SIZES_CL}
         dkeg = max(0.0, round(old_keg - new_keg, 3))
-        if d33 > 0 or d75 > 0 or dkeg > 0:
+        if any(delta.values()) or dkeg > 0:
             today_local = date.today().isoformat()
+            qty_cols_sql = ', '.join(f'qty_{size}' for size in BottleSize.SIZES_CL)
+            qty_placeholders = ', '.join('?' * len(BottleSize.SIZES_CL))
             conn.execute(
-                'INSERT INTO consumption_log (beer_id, beer_name, qty_33cl, qty_75cl, keg_liters, ts) VALUES (?,?,?,?,?,?)',
-                (beer_id, cur['name'], d33, d75, dkeg, today_local)
+                f'INSERT INTO consumption_log (beer_id, beer_name, {qty_cols_sql}, keg_liters, ts) '
+                f'VALUES (?, ?, {qty_placeholders}, ?, ?)',
+                (beer_id, cur['name'], *delta.values(), dkeg, today_local)
             )
         row = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
         return jsonify(_beer_row_to_dict(row))
@@ -324,15 +338,17 @@ def patch_beer_stock(beer_id):
 def get_consumption_depletion():
     from datetime import date as _date, timedelta as _td
     today = _date.today()
+    consumed_liters_sql = ' + '.join(f'SUM(c.qty_{size})*{liters}' for size, liters in BottleSize.SIZES_CL.items())
+    stock_cols_sql = ', '.join(f'b.stock_{size}' for size in BottleSize.SIZES_CL)
     with get_db() as conn:
-        rows = conn.execute('''
+        rows = conn.execute(f'''
             SELECT
                 c.beer_id,
                 b.name  AS beer_name,
-                ROUND(SUM(c.qty_33cl)*0.33 + SUM(c.qty_75cl)*0.75 + SUM(c.keg_liters), 3) AS consumed_liters,
+                ROUND({consumed_liters_sql} + SUM(c.keg_liters), 3) AS consumed_liters,
                 MIN(c.ts) AS first_log,
                 CAST(julianday(MAX(c.ts)) - julianday(MIN(c.ts)) + 1 AS INTEGER) AS span_days,
-                b.stock_33cl, b.stock_75cl, b.keg_liters AS keg_stock
+                {stock_cols_sql}, b.keg_liters AS keg_stock
             FROM consumption_log c
             JOIN beers b ON c.beer_id = b.id
             WHERE c.beer_id IS NOT NULL AND b.archived = 0
@@ -341,7 +357,8 @@ def get_consumption_depletion():
         ''').fetchall()
     results = []
     for row in rows:
-        current = (row['stock_33cl'] or 0)*0.33 + (row['stock_75cl'] or 0)*0.75 + (row['keg_stock'] or 0)
+        current = beer_liters({**{f'stock_{size}': row[f'stock_{size}'] for size in BottleSize.SIZES_CL},
+                                'keg_liters': row['keg_stock']})
         if current <= 0:
             continue
         span = max(row['span_days'] or 1, 1)
@@ -364,21 +381,21 @@ def get_consumption_depletion():
 
 @bp.route('/api/consumption')
 def get_consumption():
+    total_cols_sql = ',\n                   '.join(f'SUM(qty_{size}) as total_{size}' for size in BottleSize.SIZES_CL)
+    total_liters_sql = ' + '.join(f'SUM(qty_{size})*{liters}' for size, liters in BottleSize.SIZES_CL.items())
     with get_db() as conn:
-        by_month = conn.execute('''
+        by_month = conn.execute(f'''
             SELECT strftime('%Y-%m', ts) as period,
-                   SUM(qty_33cl)              as total_33cl,
-                   SUM(qty_75cl)              as total_75cl,
+                   {total_cols_sql},
                    ROUND(SUM(keg_liters), 2)  as total_keg
             FROM consumption_log
             GROUP BY period ORDER BY period
         ''').fetchall()
-        by_beer = conn.execute('''
+        by_beer = conn.execute(f'''
             SELECT beer_id, beer_name,
-                   SUM(qty_33cl)                                                   as total_33cl,
-                   SUM(qty_75cl)                                                   as total_75cl,
-                   ROUND(SUM(keg_liters), 2)                                       as total_keg,
-                   ROUND(SUM(qty_33cl)*0.33 + SUM(qty_75cl)*0.75 + SUM(keg_liters), 2) as total_liters
+                   {total_cols_sql},
+                   ROUND(SUM(keg_liters), 2)                                as total_keg,
+                   ROUND({total_liters_sql} + SUM(keg_liters), 2)           as total_liters
             FROM consumption_log
             GROUP BY beer_id
             ORDER BY total_liters DESC

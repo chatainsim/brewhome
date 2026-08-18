@@ -56,7 +56,7 @@ function renderDashWidgets() {
 
   // ── Widget 2: Cave ─────────────────────────────────────────────────────────
   const caveBeers = beers
-    .map(b => ({ ...b, liters: (b.stock_33cl||0)*0.33 + (b.stock_75cl||0)*0.75 + (b.keg_liters||0) }))
+    .map(b => ({ ...b, liters: beerLiters(b) }))
     .filter(b => b.liters > 0)
     .sort((a,b) => b.liters - a.liters);
   const totalCaveL = caveBeers.reduce((s,b) => s + b.liters, 0);
@@ -328,37 +328,53 @@ function calcStrikeWater() {
 
 function calcBottles(changed) {
   const volEl = document.getElementById('ot-bottles-vol');
-  const n33El = document.getElementById('ot-bottles-n33');
-  const n75El = document.getElementById('ot-bottles-n75');
   const sumEl = document.getElementById('ot-bottles-summary');
-  if (!volEl || !n33El || !n75El) return;
+  const nEl = {};
+  BOTTLE_SIZES.forEach(size => { nEl[size] = document.getElementById(`ot-bottles-n${size.replace('cl','')}`); });
+  if (!volEl || BOTTLE_SIZES.some(size => !nEl[size])) return;
+
+  const enabled = BOTTLE_SIZES.filter(isSizeEnabled);
+  BOTTLE_SIZES.forEach(size => {
+    const wrap = document.getElementById(`ot-bottles-${size.replace('cl','')}-wrap`);
+    if (wrap) wrap.style.display = enabled.includes(size) ? '' : 'none';
+  });
+  const gridEl = document.getElementById('ot-bottles-grid');
+  if (gridEl) gridEl.style.gridTemplateColumns = `repeat(${Math.max(1, enabled.length)}, 1fr)`;
+  if (!enabled.length) { if (sumEl) sumEl.textContent = ''; return; }
 
   const vol = parseFloat(volEl.value);
   if (isNaN(vol) || vol <= 0) {
-    n33El.value = ''; n75El.value = '';
+    enabled.forEach(size => { nEl[size].value = ''; });
     if (sumEl) sumEl.textContent = '';
     return;
   }
 
   const ml = Math.round(vol * 1000);
+  const mlOf = size => Math.round(BOTTLE_SIZE_LITERS[size] * 1000);
 
-  if (changed === '33') {
-    const n33 = Math.max(0, parseInt(n33El.value) || 0);
-    const rem = ml - n33 * 330;
-    n75El.value = rem >= 750 ? Math.floor(rem / 750) : 0;
-  } else if (changed === '75') {
-    const n75 = Math.max(0, parseInt(n75El.value) || 0);
-    const rem = ml - n75 * 750;
-    n33El.value = rem >= 330 ? Math.floor(rem / 330) : 0;
+  if (changed && enabled.includes(changed)) {
+    // La taille modifiée reste fixe ; le reste se répartit dans les autres tailles
+    // activées, de la plus grande à la plus petite (comme l'ancien 33->75/75->33).
+    const fixedQty = Math.max(0, parseInt(nEl[changed].value) || 0);
+    let rem = ml - fixedQty * mlOf(changed);
+    const others = enabled.filter(size => size !== changed).sort((a, b) => mlOf(b) - mlOf(a));
+    others.forEach((size, i) => {
+      const per = mlOf(size);
+      if (i === others.length - 1) {
+        nEl[size].value = rem >= per ? Math.floor(rem / per) : 0;
+      } else {
+        const n = Math.max(0, Math.floor(rem / per));
+        nEl[size].value = n;
+        rem -= n * per;
+      }
+    });
   } else {
-    // volume changé : tout en 33cl par défaut
-    n33El.value = Math.floor(ml / 330);
-    n75El.value = 0;
+    // volume changé : tout dans la plus petite taille activée par défaut
+    const smallest = [...enabled].sort((a, b) => mlOf(a) - mlOf(b))[0];
+    enabled.forEach(size => { nEl[size].value = size === smallest ? Math.floor(ml / mlOf(size)) : 0; });
   }
 
-  const n33 = parseInt(n33El.value) || 0;
-  const n75 = parseInt(n75El.value) || 0;
-  const used = n33 * 330 + n75 * 750;
+  const used = enabled.reduce((s, size) => s + (parseInt(nEl[size].value) || 0) * mlOf(size), 0);
   const diff = ml - used;
 
   if (sumEl) {
@@ -899,7 +915,7 @@ function renderDashboard() {
   const totalVol    = brews.reduce((s,b) => s + (b.volume_brewed||0), 0);
   const abvBrews    = completed.filter(b => b.abv);
   const avgAbv      = abvBrews.length ? (abvBrews.reduce((s,b)=>s+b.abv,0)/abvBrews.length) : null;
-  const caveL       = beers.reduce((s,b)=>s+(b.stock_33cl||0)*0.33+(b.stock_75cl||0)*0.75+(b.keg_liters||0),0);
+  const caveL       = beers.reduce((s,b)=>s+beerLiters(b),0);
 
   document.getElementById('dash-big-stats').innerHTML = `
     <div class="stat"><div class="stat-val" style="color:var(--info)">${totalVol.toFixed(0)} L</div><div class="stat-lbl">${t('dash.stat_vol')}</div></div>
@@ -1260,10 +1276,13 @@ function renderStatsPage() {
       }
       const map = Object.fromEntries(byMonth.map(r => [r.period, r]));
       const labels   = periods.map(p => { const [yr,mo] = p.split('-'); return `${t('stat.months')[parseInt(mo)-1]} ${yr}`; });
-      const data33   = periods.map(p => ((map[p]?.total_33cl  || 0) * 0.33));
-      const data75   = periods.map(p => ((map[p]?.total_75cl  || 0) * 0.75));
+      const dataBySize = {};
+      BOTTLE_SIZES.forEach(size => {
+        dataBySize[size] = periods.map(p => (map[p]?.[`total_${size}`] || 0) * BOTTLE_SIZE_LITERS[size]);
+      });
       const dataKeg  = periods.map(p =>  (map[p]?.total_keg   || 0));
-      const totalL   = periods.map((_,i) => +(data33[i] + data75[i] + dataKeg[i]).toFixed(2));
+      const sizesWithData = BOTTLE_SIZES.filter(size => isSizeEnabled(size) || dataBySize[size].some(v => v > 0));
+      const totalL   = periods.map((_,i) => +(sizesWithData.reduce((s,size) => s + dataBySize[size][i], 0) + dataKeg[i]).toFixed(2));
       const grandTotal = totalL.reduce((s,v) => s+v, 0).toFixed(1);
 
       consoEl.innerHTML = `
@@ -1296,8 +1315,13 @@ function renderStatsPage() {
         data: {
           labels,
           datasets: [
-            { label: t('stat.conso_33cl'), data: data33.map(v => +v.toFixed(2)), backgroundColor: 'rgba(99,102,241,.7)',  borderColor: '#6366f1', borderWidth: 1, stack: 's' },
-            { label: t('stat.conso_75cl'), data: data75.map(v => +v.toFixed(2)), backgroundColor: 'rgba(245,158,11,.7)', borderColor: '#f59e0b', borderWidth: 1, stack: 's' },
+            ...sizesWithData.map(size => ({
+              label: t(`stat.conso_${size}`),
+              data: dataBySize[size].map(v => +v.toFixed(2)),
+              backgroundColor: CONSO_CHART_COLORS[size].bg,
+              borderColor: CONSO_CHART_COLORS[size].border,
+              borderWidth: 1, stack: 's',
+            })),
             { label: t('stat.conso_keg'),  data: dataKeg,                         backgroundColor: 'rgba(34,197,94,.65)', borderColor: '#22c55e', borderWidth: 1, stack: 's' },
           ],
         },
@@ -1369,7 +1393,7 @@ function renderStatsPage() {
   const allAbvs   = filtered.filter(b => b.abv).map(b => b.abv);
   const maxAbv    = allAbvs.length ? Math.max(...allAbvs) : null;
   const maxAbvBrewName = maxAbv != null ? (filtered.find(b => b.abv === maxAbv)?.name || '') : '';
-  const caveL     = allBeersForStats.reduce((s,b) => s + (b.stock_33cl||0)*0.33 + (b.stock_75cl||0)*0.75 + (b.keg_liters||0), 0);
+  const caveL     = allBeersForStats.reduce((s,b) => s + beerLiters(b), 0);
   const invValue  = (S.inventory||[]).filter(i => !i.archived && i.price_per_unit).reduce((s,i) => s + i.price_per_unit * i.quantity, 0);
   const _stars    = n => Array.from({length:5},(_,j) => '<span style="color:'+(j<n?'var(--amber)':'rgba(255,255,255,.12)')+'">★</span>').join('');
 
@@ -1661,10 +1685,10 @@ function renderStatsPage() {
   const batchEl = document.getElementById('stats-batch-conso');
   if (batchEl) {
     const batchBeers = allBeersForStats
-      .filter(b => (b.initial_33cl > 0 || b.initial_75cl > 0 || b.keg_initial_liters > 0))
+      .filter(b => (BOTTLE_SIZES.some(size => (b[`initial_${size}`]||0) > 0) || b.keg_initial_liters > 0))
       .map(b => {
-        const initL = (b.initial_33cl||0)*0.33 + (b.initial_75cl||0)*0.75 + (b.keg_initial_liters||0);
-        const currL = (b.stock_33cl||0)*0.33  + (b.stock_75cl||0)*0.75  + (b.keg_liters||0);
+        const initL = beerInitialLiters(b);
+        const currL = beerLiters(b);
         const pct   = initL > 0 ? Math.min(100, Math.round((1 - currL/initL) * 100)) : 0;
         return { ...b, initL, currL, pct };
       })

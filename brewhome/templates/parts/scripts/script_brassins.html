@@ -1144,13 +1144,11 @@ function _renderLifecycle(b) {
   }).join('');
 
   // Beer stock info (utilise linkedBeers calculé plus haut)
-  const totalStock = linkedBeers.reduce((s, bx) => s + (bx.stock_33cl||0)*0.33 + (bx.stock_75cl||0)*0.75 + (bx.keg_liters||0), 0);
+  const totalStock = linkedBeers.reduce((s, bx) => s + beerLiters(bx), 0);
   const stockHtml = linkedBeers.length ? `<div style="margin-top:16px;padding:10px 14px;border-radius:8px;background:var(--card2);border:1px solid var(--border);font-size:.82rem;color:var(--muted)">
     <i class="fas fa-beer-mug-empty" style="color:var(--hop)"></i>
     ${linkedBeers.map(bx => {
-      const parts = [];
-      if (bx.stock_33cl) parts.push(`${bx.stock_33cl}×33cl`);
-      if (bx.stock_75cl) parts.push(`${bx.stock_75cl}×75cl`);
+      const parts = BOTTLE_SIZES.filter(size => bx[`stock_${size}`]).map(size => `${bx[`stock_${size}`]}×${size}`);
       if (bx.keg_liters) parts.push(`${bx.keg_liters}L fût`);
       return `<strong style="color:var(--text)">${esc(bx.name)}</strong>: ${parts.length ? parts.join(' + ') : t('cave.empty_cave')}`;
     }).join(' · ')}
@@ -2183,39 +2181,56 @@ async function saveBrewEdit() {
   }
 }
 
-// ── Calcul optimal bouteilles 75cl / 33cl ────────────────────────────────────
-// Retourne {n75, n33, wasteCl} pour minimiser le volume non embouteillé.
-// Contrainte : au moins MIN75 bouteilles de 75cl (si le volume le permet).
-function calcOptimalBottles(volL, min75 = 7) {
+// ── Calcul optimal bouteilles (tailles activées) ─────────────────────────────
+// Retourne {<size>: n, ..., wasteCl} pour minimiser le volume non embouteillé.
+// Contrainte : au moins MIN_LARGEST bouteilles de la plus grande taille activée
+// (si le volume le permet) — reproduit exactement l'ancien comportement 75cl/33cl
+// quand seules ces deux tailles sont activées.
+function calcOptimalBottles(volL, minLargest = 7) {
+  const enabled = BOTTLE_SIZES.filter(isSizeEnabled);
+  const zero = { wasteCl: 0 }; enabled.forEach(s => zero[s] = 0);
   const V = Math.round(volL * 100); // centilitres entiers
-  if (V <= 0) return { n75: 0, n33: 0, wasteCl: 0 };
-  const n75max = Math.floor(V / 75);
-  const start  = Math.min(min75, n75max); // si V < 6×75cl on part du max possible
+  if (!enabled.length || V <= 0) { zero.wasteCl = Math.max(0, V); return zero; }
+
+  const sizesDesc = [...enabled].sort((a, b) => BOTTLE_SIZE_LITERS[b] - BOTTLE_SIZE_LITERS[a]);
+  const largest    = sizesDesc[0];
+  const largestCl  = Math.round(BOTTLE_SIZE_LITERS[largest] * 100);
+  const nLargestMax = Math.floor(V / largestCl);
+  const start = Math.min(minLargest, nLargestMax);
   let best = null;
-  for (let n75 = start; n75 <= n75max; n75++) {
-    const rem   = V - n75 * 75;
-    const n33   = Math.floor(rem / 33);
-    const waste = rem - n33 * 33;
-    if (best === null || waste < best.wasteCl) best = { n75, n33, wasteCl: waste };
+  for (let n = start; n <= nLargestMax; n++) {
+    let rem = V - n * largestCl;
+    const counts = { [largest]: n };
+    sizesDesc.slice(1).forEach(size => {
+      const cl = Math.round(BOTTLE_SIZE_LITERS[size] * 100);
+      counts[size] = Math.floor(rem / cl);
+      rem -= counts[size] * cl;
+    });
+    if (best === null || rem < best.wasteCl) best = { ...counts, wasteCl: rem };
   }
-  // Fallback si même start=0 n'a pas tourné (V < 75cl)
+  // Fallback si même start=0 n'a pas tourné (V < largestCl)
   if (!best) {
-    const n33 = Math.floor(V / 33);
-    best = { n75: 0, n33, wasteCl: V - n33 * 33 };
+    const smallest = sizesDesc[sizesDesc.length - 1];
+    const cl = Math.round(BOTTLE_SIZE_LITERS[smallest] * 100);
+    const n  = Math.floor(V / cl);
+    best = { [smallest]: n, wasteCl: V - n * cl };
   }
+  enabled.forEach(size => { if (!(size in best)) best[size] = 0; });
   return best;
+}
+
+function _abTotalCl() {
+  return BOTTLE_SIZES.reduce((s, size) => s + (parseInt(document.getElementById(`ab-${size.replace('cl','')}`)?.value) || 0) * Math.round(BOTTLE_SIZE_LITERS[size] * 100), 0);
 }
 
 function updateAbBottleHint() {
   const volBrewed = parseFloat(document.getElementById('ab-brew-vol')?.value) || 0;
   const keg       = parseFloat(document.getElementById('ab-keg').value) || 0;
-  const n33       = parseInt(document.getElementById('ab-33').value) || 0;
-  const n75       = parseInt(document.getElementById('ab-75').value) || 0;
   const hintEl    = document.getElementById('ab-bottle-hint');
   if (!hintEl || volBrewed <= 0) { if (hintEl) hintEl.innerHTML = ''; return; }
 
   const volBottled = Math.max(0, volBrewed - keg);
-  const accounted  = (n75 * 75 + n33 * 33) / 100; // litres
+  const accounted  = _abTotalCl() / 100; // litres
   const remainCl   = Math.round((volBottled - accounted) * 100);
 
   let remHtml;
@@ -2230,13 +2245,25 @@ function updateAbBottleHint() {
   hintEl.innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.77rem;margin-top:6px;padding:6px 10px;background:var(--card2);border-radius:6px">${totalHtml}${remHtml}</div>`;
 }
 
+function _abApplyOptimal(volBottled) {
+  const opt = calcOptimalBottles(volBottled, 7);
+  BOTTLE_SIZES.forEach(size => {
+    const el = document.getElementById(`ab-${size.replace('cl','')}`);
+    if (el) el.value = opt[size] || 0;
+  });
+}
+
+function _abUpdateWraps() {
+  BOTTLE_SIZES.forEach(size => {
+    const wrap = document.getElementById(`ab-${size.replace('cl','')}-wrap`);
+    if (wrap) wrap.style.display = isSizeEnabled(size) ? '' : 'none';
+  });
+}
+
 function abKegChanged() {
   const volBrewed = parseFloat(document.getElementById('ab-brew-vol')?.value) || 0;
   const keg       = parseFloat(document.getElementById('ab-keg').value) || 0;
-  const volBottled = Math.max(0, volBrewed - keg);
-  const opt = calcOptimalBottles(volBottled, 7);
-  document.getElementById('ab-75').value = opt.n75;
-  document.getElementById('ab-33').value = opt.n33;
+  _abApplyOptimal(Math.max(0, volBrewed - keg));
   updateAbBottleHint();
 }
 
@@ -2258,26 +2285,28 @@ function toggleAbManual() {
   }
 }
 
-function ab75Changed() {
+// Édition manuelle d'une taille : en mode auto, redistribue le reste dans la
+// dernière taille activée (même logique que le calculateur de l'onglet Outils).
+function abSizeChanged(changedSize) {
   const volBrewed  = parseFloat(document.getElementById('ab-brew-vol')?.value) || 0;
   const keg        = parseFloat(document.getElementById('ab-keg').value) || 0;
-  const n75        = parseInt(document.getElementById('ab-75').value) || 0;
   if (!_abManualMode) {
     const volBottled = Math.max(0, volBrewed - keg);
-    const remCl      = Math.round(volBottled * 100) - n75 * 75;
-    document.getElementById('ab-33').value = remCl > 0 ? Math.floor(remCl / 33) : 0;
-  }
-  updateAbBottleHint();
-}
-
-function ab33Changed() {
-  const volBrewed  = parseFloat(document.getElementById('ab-brew-vol')?.value) || 0;
-  const keg        = parseFloat(document.getElementById('ab-keg').value) || 0;
-  const n33        = parseInt(document.getElementById('ab-33').value) || 0;
-  if (!_abManualMode) {
-    const volBottled = Math.max(0, volBrewed - keg);
-    const remCl      = Math.round(volBottled * 100) - n33 * 33;
-    document.getElementById('ab-75').value = remCl > 0 ? Math.floor(remCl / 75) : 0;
+    const enabled = BOTTLE_SIZES.filter(isSizeEnabled);
+    const changedQty = Math.max(0, parseInt(document.getElementById(`ab-${changedSize.replace('cl','')}`).value) || 0);
+    let rem = Math.round(volBottled * 100) - changedQty * Math.round(BOTTLE_SIZE_LITERS[changedSize] * 100);
+    const others = enabled.filter(s => s !== changedSize).sort((a, b) => BOTTLE_SIZE_LITERS[b] - BOTTLE_SIZE_LITERS[a]);
+    others.forEach((size, i) => {
+      const cl = Math.round(BOTTLE_SIZE_LITERS[size] * 100);
+      const el = document.getElementById(`ab-${size.replace('cl','')}`);
+      if (i === others.length - 1) {
+        el.value = rem >= cl ? Math.floor(rem / cl) : 0;
+      } else {
+        const n = Math.max(0, Math.floor(rem / cl));
+        el.value = n;
+        rem -= n * cl;
+      }
+    });
   }
   updateAbBottleHint();
 }
@@ -2308,10 +2337,9 @@ function openAfterBrewModal(id) {
   document.getElementById('ab-abv-display').value = b.abv || '';
   document.getElementById('ab-keg').value      = '';
   document.getElementById('ab-brew-vol').value = b.volume_brewed || 0;
+  _abUpdateWraps();
   // Calcul optimal bouteilles depuis le volume total
-  const opt = calcOptimalBottles(b.volume_brewed || 0, 7);
-  document.getElementById('ab-75').value = opt.n75;
-  document.getElementById('ab-33').value = opt.n33;
+  _abApplyOptimal(b.volume_brewed || 0);
   // Pre-fill description from brew notes (event info flows here)
   const _abNotes = b.notes || (recipe ? recipe.notes : '') || '';
   document.getElementById('ab-desc').value     = _abNotes;
@@ -2343,8 +2371,7 @@ async function createBeerFromBrew() {
     name:       document.getElementById('ab-name').value,
     type:       document.getElementById('ab-type').value || null,
     abv:        parseFloat(document.getElementById('ab-abv').value) || null,
-    stock_33cl: parseInt(document.getElementById('ab-33').value) || 0,
-    stock_75cl: parseInt(document.getElementById('ab-75').value) || 0,
+    ...Object.fromEntries(BOTTLE_SIZES.map(size => [`stock_${size}`, parseInt(document.getElementById(`ab-${size.replace('cl','')}`).value) || 0])),
     keg_liters: kegLiters,
     description:  document.getElementById('ab-desc').value.trim() || null,
     brew_id:      parseInt(document.getElementById('ab-brew-id').value) || null,

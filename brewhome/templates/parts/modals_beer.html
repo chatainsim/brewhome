@@ -18,14 +18,20 @@
           <div id="beer-type-sug" class="ing-suggest" style="max-height:280px"></div>
         </div>
       </div>
-      <div class="form-row cols-3">
+      <div class="form-row cols-2">
         <div class="field"><label data-i18n="brew.abv_label">ABV (%)</label><input type="number" id="beer-f-abv" step="0.1" placeholder="Ex : 6.5"></div>
-        <div class="field"><label data-i18n="cave.stock_33">Stock actuel 33cl</label><input type="number" id="beer-f-33" value="0" min="0"></div>
-        <div class="field"><label data-i18n="cave.stock_75">Stock actuel 75cl</label><input type="number" id="beer-f-75" value="0" min="0"></div>
       </div>
-      <div class="form-row cols-2" id="beer-f-init-wrap" style="display:none">
-        <div class="field"><label><span data-i18n="cave.init_33">Remplissage initial 33cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-33-init" value="0" min="0"></div>
-        <div class="field"><label><span data-i18n="cave.init_75">Remplissage initial 75cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-75-init" value="0" min="0"></div>
+      <div class="form-row cols-4">
+        <div class="field" id="beer-f-25-wrap"><label data-i18n="cave.stock_25">Stock actuel 25cl</label><input type="number" id="beer-f-25" value="0" min="0"></div>
+        <div class="field" id="beer-f-33-wrap"><label data-i18n="cave.stock_33">Stock actuel 33cl</label><input type="number" id="beer-f-33" value="0" min="0"></div>
+        <div class="field" id="beer-f-50-wrap"><label data-i18n="cave.stock_50">Stock actuel 50cl</label><input type="number" id="beer-f-50" value="0" min="0"></div>
+        <div class="field" id="beer-f-75-wrap"><label data-i18n="cave.stock_75">Stock actuel 75cl</label><input type="number" id="beer-f-75" value="0" min="0"></div>
+      </div>
+      <div class="form-row cols-4" id="beer-f-init-wrap" style="display:none">
+        <div class="field" id="beer-f-25-init-wrap"><label><span data-i18n="cave.init_25">Remplissage initial 25cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-25-init" value="0" min="0"></div>
+        <div class="field" id="beer-f-33-init-wrap"><label><span data-i18n="cave.init_33">Remplissage initial 33cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-33-init" value="0" min="0"></div>
+        <div class="field" id="beer-f-50-init-wrap"><label><span data-i18n="cave.init_50">Remplissage initial 50cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-50-init" value="0" min="0"></div>
+        <div class="field" id="beer-f-75-init-wrap"><label><span data-i18n="cave.init_75">Remplissage initial 75cl</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="cave.historical">(historique)</span></label><input type="number" id="beer-f-75-init" value="0" min="0"></div>
       </div>
       <div class="field" style="margin-bottom:14px"><label data-i18n="cave.field_origin">Origine / Brasserie</label><input type="text" id="beer-f-origin" placeholder="Ex : Maison, Belgique..."></div>
       <div class="field" style="margin-bottom:14px"><label data-i18n="common.description">Description</label><textarea id="beer-f-desc" placeholder="Notes de dégustation, arômes..."></textarea></div>
@@ -334,9 +340,11 @@
         <label data-i18n="cave.keg_consumed">Bière consommée directement du fût (L)</label>
         <input type="number" id="keg-tr-consumed" step="0.1" min="0" value="0" placeholder="0" oninput="updateKegCalc()">
       </div>
-      <div style="display:flex;gap:12px;margin-bottom:14px">
-        <div class="field" style="flex:1"><label data-i18n="cave.bottles_33">Bouteilles 33cl</label><input type="number" id="keg-tr-33" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
-        <div class="field" style="flex:1"><label data-i18n="cave.bottles_75">Bouteilles 75cl</label><input type="number" id="keg-tr-75" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
+      <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+        <div class="field" style="flex:1;min-width:100px" id="keg-tr-25-wrap"><label data-i18n="cave.bottles_25">Bouteilles 25cl</label><input type="number" id="keg-tr-25" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
+        <div class="field" style="flex:1;min-width:100px" id="keg-tr-33-wrap"><label data-i18n="cave.bottles_33">Bouteilles 33cl</label><input type="number" id="keg-tr-33" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
+        <div class="field" style="flex:1;min-width:100px" id="keg-tr-50-wrap"><label data-i18n="cave.bottles_50">Bouteilles 50cl</label><input type="number" id="keg-tr-50" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
+        <div class="field" style="flex:1;min-width:100px" id="keg-tr-75-wrap"><label data-i18n="cave.bottles_75">Bouteilles 75cl</label><input type="number" id="keg-tr-75" step="1" min="0" value="0" oninput="updateKegCalc()"></div>
       </div>
       <div id="keg-tr-calc" style="padding:12px;border-radius:9px;background:var(--card2);font-size:.88rem;line-height:2"></div>
     </div>

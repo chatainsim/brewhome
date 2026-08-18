@@ -1,8 +1,10 @@
 import base64
+import json
 import time
 import threading
 from flask import current_app, jsonify
 from db import get_db
+from constants import BottleSize
 
 
 def api_error(code: str, status: int, **extra):
@@ -127,6 +129,38 @@ def _to_kg(qty, unit):
     if u == 'kg': return q
     if u == 'mg': return q / 1_000_000
     return q / 1000  # g or fallback
+
+
+# ── Tailles de bouteille ──────────────────────────────────────────────────────
+
+def enabled_bottle_sizes(conn) -> dict:
+    """Retourne {'25cl': bool, '33cl': bool, '50cl': bool, '75cl': bool}.
+
+    Lit la clé app_settings 'bottle_sizes_enabled' (JSON). Retourne
+    BottleSize.DEFAULT_ENABLED si la clé est absente ou invalide — ne jamais
+    lever d'exception ici, cette fonction est appelée sur des chemins de
+    lecture fréquents (cave, stats).
+    """
+    row = conn.execute("SELECT value FROM app_settings WHERE key='bottle_sizes_enabled'").fetchone()
+    if not row or not row['value']:
+        return dict(BottleSize.DEFAULT_ENABLED)
+    try:
+        stored = json.loads(row['value'])
+        return {size: bool(stored.get(size, default)) for size, default in BottleSize.DEFAULT_ENABLED.items()}
+    except (ValueError, TypeError):
+        return dict(BottleSize.DEFAULT_ENABLED)
+
+
+def beer_liters(beer) -> float:
+    """Volume total en litres d'une bière (toutes tailles de bouteille + fût).
+
+    *beer* peut être un sqlite3.Row ou un dict — doit exposer les clés
+    stock_<taille> pour chaque taille de BottleSize.SIZES_CL, et keg_liters.
+    Les tailles absentes du dict (ex. avant migration) comptent pour 0.
+    """
+    d = dict(beer)
+    total = sum((d.get(f'stock_{size}') or 0) * liters for size, liters in BottleSize.SIZES_CL.items())
+    return total + (d.get('keg_liters') or 0)
 
 
 # ── Validation d'entrée ───────────────────────────────────────────────────────

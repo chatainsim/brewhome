@@ -1075,6 +1075,11 @@ function renderSettingsThresholds() {
         <input type="number" id="tau-${u}" min="0" step="${_step(u)}" placeholder="—" style="width:80px" value="${au[u] != null ? au[u] : ''}">
       </div>`).join('');
   }
+  const bsz = bottleSizesEnabled();
+  BOTTLE_SIZES.forEach(size => {
+    const el = document.getElementById(`bsz-${size}`);
+    if (el) el.checked = !!bsz[size];
+  });
 }
 
 function saveThresholds() {
@@ -1089,8 +1094,13 @@ function saveThresholds() {
     levure:      parseFloat(document.getElementById('thresh-levure').value)  || 2,
     autre_units,
   };
+  appSettings.bottleSizes = {};
+  BOTTLE_SIZES.forEach(size => {
+    appSettings.bottleSizes[size] = !!document.getElementById(`bsz-${size}`)?.checked;
+  });
   saveSettings();
   renderInventaire();
+  renderCave();
   toast(t('settings.toast.thresholds_saved'), 'success');
 }
 

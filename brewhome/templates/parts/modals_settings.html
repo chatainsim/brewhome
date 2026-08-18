@@ -212,6 +212,18 @@
               <div id="thresh-autre-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"></div>
             </div>
           </div>
+          <div class="thresh-row" style="align-items:flex-start;margin-top:18px;border-top:1px solid var(--border);padding-top:18px">
+            <span class="thresh-lbl" style="color:var(--accent);padding-top:6px"><i class="fas fa-wine-bottle"></i> <span data-i18n="settings.bottlesizes.title">Tailles de bouteille</span></span>
+            <div style="flex:1">
+              <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px" data-i18n="settings.bottlesizes.hint">Tailles proposées dans les formulaires cave/embouteillage. Une taille désactivée reste affichée tant qu'une bière y a du stock.</p>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+                <label style="display:flex;align-items:center;gap:6px;font-size:.9rem"><input type="checkbox" id="bsz-25cl"> 25cl</label>
+                <label style="display:flex;align-items:center;gap:6px;font-size:.9rem"><input type="checkbox" id="bsz-33cl"> 33cl</label>
+                <label style="display:flex;align-items:center;gap:6px;font-size:.9rem"><input type="checkbox" id="bsz-50cl"> 50cl</label>
+                <label style="display:flex;align-items:center;gap:6px;font-size:.9rem"><input type="checkbox" id="bsz-75cl"> 75cl</label>
+              </div>
+            </div>
+          </div>
         </template>
         <div id="stab-thresholds" style="display:none"></div>
 

@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import Blueprint, Response, jsonify, request, current_app
 from db import get_db, get_readings_db, PHOTOS_DIR
 from helpers import _to_kg, api_error, VALID_UNITS
-from constants import BrewStatus
+from constants import BrewStatus, BottleSize
 
 bp = Blueprint('imports', __name__)
 
@@ -763,31 +763,36 @@ def import_beers():
             if not beer.get('name'):
                 continue
             try:
+                stocks = {size: beer.get(f'stock_{size}', 0) for size in BottleSize.SIZES_CL}
+                inits  = {size: beer.get(f'initial_{size}') or stocks[size] for size in BottleSize.SIZES_CL}
+                stock_cols   = ','.join(f'stock_{size}' for size in BottleSize.SIZES_CL)
+                initial_cols = ','.join(f'initial_{size}' for size in BottleSize.SIZES_CL)
                 existing = conn.execute('SELECT id FROM beers WHERE name=?', (beer['name'],)).fetchone()
                 if existing:
+                    set_stock   = ','.join(f'stock_{size}=?' for size in BottleSize.SIZES_CL)
+                    set_initial = ','.join(f'initial_{size}=?' for size in BottleSize.SIZES_CL)
                     conn.execute(
-                        '''UPDATE beers SET type=?,abv=?,stock_33cl=?,stock_75cl=?,origin=?,description=?,
-                           archived=?,initial_33cl=?,initial_75cl=?,brew_date=?,bottling_date=? WHERE id=?''',
+                        f'''UPDATE beers SET type=?,abv=?,{set_stock},origin=?,description=?,
+                           archived=?,{set_initial},brew_date=?,bottling_date=? WHERE id=?''',
                         (beer.get('type'), beer.get('abv'),
-                         beer.get('stock_33cl', 0), beer.get('stock_75cl', 0),
+                         *stocks.values(),
                          beer.get('origin'), beer.get('description'),
                          beer.get('archived', 0),
-                         beer.get('initial_33cl') or beer.get('stock_33cl', 0),
-                         beer.get('initial_75cl') or beer.get('stock_75cl', 0),
+                         *inits.values(),
                          beer.get('brew_date'), beer.get('bottling_date'), existing['id'])
                     )
                 else:
+                    placeholders = ','.join('?' * (4 + len(BottleSize.SIZES_CL) * 2 + 5))
                     conn.execute(
-                        '''INSERT INTO beers
-                           (name, type, abv, stock_33cl, stock_75cl, origin, description, photo,
-                            archived, initial_33cl, initial_75cl, brew_date, bottling_date)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                        f'''INSERT INTO beers
+                           (name, type, abv, {stock_cols}, origin, description, photo,
+                            archived, {initial_cols}, brew_date, bottling_date)
+                           VALUES ({placeholders})''',
                         (beer['name'], beer.get('type'), beer.get('abv'),
-                         beer.get('stock_33cl', 0), beer.get('stock_75cl', 0),
+                         *stocks.values(),
                          beer.get('origin'), beer.get('description'), beer.get('photo'),
                          beer.get('archived', 0),
-                         beer.get('initial_33cl') or beer.get('stock_33cl', 0),
-                         beer.get('initial_75cl') or beer.get('stock_75cl', 0),
+                         *inits.values(),
                          beer.get('brew_date'), beer.get('bottling_date'))
                     )
                 imported += 1

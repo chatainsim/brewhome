@@ -14,8 +14,8 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.base import JobLookupError
 
 from db import get_db, get_readings_db, _log, PHOTOS_DIR
-from constants import BrewStatus
-from helpers import api_error
+from constants import BrewStatus, BottleSize
+from helpers import api_error, beer_liters, enabled_bottle_sizes
 from scheduler import _scheduler
 
 bp = Blueprint('integrations', __name__)
@@ -155,30 +155,29 @@ def _tg_build_brews():
 
 
 def _tg_build_cave():
+    stock_cols_sql = ', '.join(f'stock_{size}' for size in BottleSize.SIZES_CL)
     with get_db() as conn:
         beers = conn.execute(
-            "SELECT name, stock_33cl, stock_75cl, keg_liters "
+            f"SELECT name, {stock_cols_sql}, keg_liters "
             "FROM beers WHERE archived=0 ORDER BY name"
         ).fetchall()
 
     def _has_stock(b):
-        return (b['stock_33cl'] or 0) + (b['stock_75cl'] or 0) > 0 or (b['keg_liters'] or 0) > 0
+        return sum(b[f'stock_{size}'] or 0 for size in BottleSize.SIZES_CL) > 0 or (b['keg_liters'] or 0) > 0
 
     in_stock  = [b for b in beers if     _has_stock(b)]
     out_stock = [b for b in beers if not _has_stock(b)]
-    t33  = sum(b['stock_33cl'] or 0 for b in in_stock)
-    t75  = sum(b['stock_75cl'] or 0 for b in in_stock)
+    totals = {size: sum(b[f'stock_{size}'] or 0 for b in in_stock) for size in BottleSize.SIZES_CL}
     tkeg = sum(b['keg_liters'] or 0 for b in in_stock)
+    totals_line = '  '.join(f'{qty}×{size}' for size, qty in totals.items() if qty)
     lines = ["🍾 <b>État de la cave</b>",
-             f"\n{len(beers)} bière(s)  —  {t33}×33cl  {t75}×75cl"]
+             f"\n{len(beers)} bière(s)  —  {totals_line}"]
     if tkeg:
         lines.append(f"  {tkeg:.1f} L en fût")
     if in_stock:
         lines.append("\n<b>En stock :</b>")
         for b in in_stock:
-            parts = []
-            if b['stock_33cl']:  parts.append(f"{b['stock_33cl']}×33cl")
-            if b['stock_75cl']:  parts.append(f"{b['stock_75cl']}×75cl")
+            parts = [f"{b[f'stock_{size}']}×{size}" for size in BottleSize.SIZES_CL if b[f'stock_{size}']]
             if b['keg_liters']:  parts.append(f"{float(b['keg_liters']):.1f} L fût")
             lines.append(f"• {b['name']} : {', '.join(parts)}")
     if out_stock:
@@ -269,6 +268,7 @@ def _tg_build_ferm_reminders():
                  AND COALESCE(b.ferm_time, r.ferm_time) IS NOT NULL''',
             (BrewStatus.FERMENTING,)
         ).fetchall()
+        sizes = [s for s, on in enabled_bottle_sizes(conn).items() if on] or ['33cl']
     messages = []
     for b in brews:
         try:
@@ -285,9 +285,9 @@ def _tg_build_ferm_reminders():
                 bottle_hint = ""
                 if vol and float(vol) > 0:
                     net = float(vol) * 0.9
-                    s33 = int(net * 1000 / 330)
-                    s75 = int(net * 1000 / 750)
-                    bottle_hint = f"\n🍾 Volume : <b>{vol} L</b> → ~<b>{s33} bouteilles 33cl</b> ou ~<b>{s75} × 75cl</b>"
+                    estimates = [f"~<b>{int(net * 1000 / (BottleSize.SIZES_CL[size] * 1000))} × {size}</b>"
+                                 for size in sizes]
+                    bottle_hint = f"\n🍾 Volume : <b>{vol} L</b> → {' ou '.join(estimates)}"
                 messages.append(f"🍺 <b>{name}</b>\n🫙 Fermentation terminée aujourd'hui — <b>C'est le moment d'embouteiller !</b>{bottle_hint}")
             elif delta < 0 and delta >= -2:
                 messages.append(f"🍺 <b>{name}</b>\n⚠️ Fermentation dépassée de <b>{abs(delta)} jour(s)</b> — pensez à embouteiller !")
@@ -361,8 +361,11 @@ def _tg_build_ferm_reminders():
     return messages
 
 
-def _tg_fire_bottling(beer_name, s33, s75, keg_liters, bottling_date):
-    """Notification immédiate lors de l'ajout d'une bière en cave depuis un brassin."""
+def _tg_fire_bottling(beer_name, stocks_by_size, keg_liters, bottling_date):
+    """Notification immédiate lors de l'ajout d'une bière en cave depuis un brassin.
+
+    stocks_by_size : dict {'25cl': qty, '33cl': qty, ...} (cf. BottleSize.SIZES_CL).
+    """
     token, chat_id, notifs, _ = _tg_get_settings()
     if not token or not chat_id:
         return
@@ -375,11 +378,7 @@ def _tg_fire_bottling(beer_name, s33, s75, keg_liters, bottling_date):
             lines.append(f"📅 Date d'embouteillage : <b>{d.strftime('%d/%m/%Y')}</b>")
         except ValueError:
             pass
-    stocks = []
-    if s33 and int(s33) > 0:
-        stocks.append(f"<b>{s33}</b> × 33cl")
-    if s75 and int(s75) > 0:
-        stocks.append(f"<b>{s75}</b> × 75cl")
+    stocks = [f"<b>{qty}</b> × {size}" for size, qty in stocks_by_size.items() if qty and int(qty) > 0]
     if keg_liters:
         try:
             stocks.append(f"<b>{float(keg_liters):.1f} L</b> en fût")

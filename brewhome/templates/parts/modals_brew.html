@@ -82,9 +82,11 @@
         <label><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> <span data-i18n="brew.keg_vol">Volume en fût (L)</span> <span style="font-size:.73rem;color:var(--muted);font-weight:400;text-transform:none" data-i18n="brew.keg_opt">— optionnel, si la bière reste en fût</span></label>
         <input type="number" id="ab-keg" step="0.1" min="0" value="" placeholder="Ex : 19" oninput="abKegChanged()">
       </div>
-      <div class="form-row cols-2">
-        <div class="field"><label data-i18n="brew.stock_75">Stock 75cl</label><input type="number" id="ab-75" value="0" min="0" oninput="ab75Changed()"></div>
-        <div class="field"><label data-i18n="brew.stock_33">Stock 33cl</label><input type="number" id="ab-33" value="0" min="0" oninput="ab33Changed()"></div>
+      <div class="form-row cols-4">
+        <div class="field" id="ab-25-wrap"><label data-i18n="brew.stock_25">Stock 25cl</label><input type="number" id="ab-25" value="0" min="0" oninput="abSizeChanged('25cl')"></div>
+        <div class="field" id="ab-33-wrap"><label data-i18n="brew.stock_33">Stock 33cl</label><input type="number" id="ab-33" value="0" min="0" oninput="abSizeChanged('33cl')"></div>
+        <div class="field" id="ab-50-wrap"><label data-i18n="brew.stock_50">Stock 50cl</label><input type="number" id="ab-50" value="0" min="0" oninput="abSizeChanged('50cl')"></div>
+        <div class="field" id="ab-75-wrap"><label data-i18n="brew.stock_75">Stock 75cl</label><input type="number" id="ab-75" value="0" min="0" oninput="abSizeChanged('75cl')"></div>
       </div>
       <div style="display:flex;justify-content:flex-end;margin-top:-6px;margin-bottom:4px">
         <button type="button" id="ab-manual-btn" onclick="toggleAbManual()" class="btn btn-sm btn-ghost" style="font-size:.78rem;padding:3px 10px;height:auto;color:var(--muted)">

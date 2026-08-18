@@ -697,6 +697,18 @@ _MIGRATIONS = [
     "ALTER TABLE recipes ADD COLUMN water_sparge_override REAL",
     # 139 — % max d'un malt dans la facture de malts (override du catalogue)
     "ALTER TABLE inventory_items ADD COLUMN max_usage_pct REAL",
+    # 140 — tailles de bouteille 25cl/50cl (en plus de 33cl/75cl), activables
+    #        individuellement via app_settings 'bottle_sizes_enabled'
+    "ALTER TABLE beers ADD COLUMN stock_25cl INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE beers ADD COLUMN stock_50cl INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE beers ADD COLUMN initial_25cl INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE beers ADD COLUMN initial_50cl INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE consumption_log ADD COLUMN qty_25cl INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE consumption_log ADD COLUMN qty_50cl INTEGER NOT NULL DEFAULT 0",
+    # 141 — l'index couvrant #134 doit inclure les nouvelles colonnes de stock
+    #        pour rester un index-only scan sur le CTE beer_agg dans get_brews
+    "DROP INDEX IF EXISTS idx_beers_brew_cov",
+    "CREATE INDEX IF NOT EXISTS idx_beers_brew_cov ON beers(brew_id, archived, stock_25cl, stock_33cl, stock_50cl, stock_75cl, keg_liters, bottling_date) WHERE brew_id IS NOT NULL",
     # ── Ajouter les nouvelles migrations ci-dessous ───────────────────────────
 ]
 

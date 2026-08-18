@@ -1619,18 +1619,12 @@ function openBrewCostModal(brewId) {
         <span style="flex:1;font-size:.8rem;color:var(--muted)">${t('brew.cost_per_liter')}${vol > 0 ? ` (${vol} L)` : ''}</span>
         <strong style="font-size:.95rem;color:var(--success)">${cd.perLiter.toFixed(2)} €</strong>
       </div>` : '';
-  const per33Row = cd.per33 != null
+  const perSizeRows = BOTTLE_SIZES.map(size => cd.perSize?.[size] != null
     ? `<div style="display:flex;align-items:center;gap:6px;padding:4px 0">
         <i class="fas fa-wine-bottle" style="color:var(--muted);font-size:.75rem;width:14px"></i>
-        <span style="flex:1;font-size:.8rem;color:var(--muted)">${t('brew.cost_per_bottle_33')}</span>
-        <strong style="font-size:.95rem;color:var(--success)">${cd.per33.toFixed(2)} €</strong>
-      </div>` : '';
-  const per75Row = cd.per75 != null
-    ? `<div style="display:flex;align-items:center;gap:6px;padding:4px 0">
-        <i class="fas fa-wine-bottle" style="color:var(--muted);font-size:.75rem;width:14px"></i>
-        <span style="flex:1;font-size:.8rem;color:var(--muted)">${t('brew.cost_per_bottle_75')}</span>
-        <strong style="font-size:.95rem;color:var(--success)">${cd.per75.toFixed(2)} €</strong>
-      </div>` : '';
+        <span style="flex:1;font-size:.8rem;color:var(--muted)">${t(`brew.cost_per_bottle_${size.replace('cl','')}`)}</span>
+        <strong style="font-size:.95rem;color:var(--success)">${cd.perSize[size].toFixed(2)} €</strong>
+      </div>` : '').join('');
 
   body.innerHTML = `
     ${scaleNote}
@@ -1640,8 +1634,8 @@ function openBrewCostModal(brewId) {
       <span style="color:var(--success)">${cd.total.toFixed(2)} €</span>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px;padding:6px 10px;background:var(--card2);border-radius:8px">
-      ${perLiterRow}${per33Row}${per75Row}
-      ${!perLiterRow && !per33Row && !per75Row ? `<div style="font-size:.78rem;color:var(--muted);text-align:center;padding:4px 0">${t('brew.cost_no_volume')}</div>` : ''}
+      ${perLiterRow}${perSizeRows}
+      ${!perLiterRow && !perSizeRows ? `<div style="font-size:.78rem;color:var(--muted);text-align:center;padding:4px 0">${t('brew.cost_no_volume')}</div>` : ''}
     </div>`;
 
   openModal('brew-cost-modal');

@@ -59,6 +59,32 @@ let showArchivedInv=false, showArchivedRec=false, showArchivedBrew=false, showAr
 let appSettings = JSON.parse(localStorage.getItem('brewSettings') || '{}');
 const DEFAULT_THRESH = {malt:1000, houblon:50, levure:2, autre:100};
 function getThresh(cat) { return ((appSettings.thresholds||{})[cat] ?? DEFAULT_THRESH[cat]); }
+
+// ── Tailles de bouteille (25cl/33cl/50cl/75cl) ─────────────────────────────────
+const BOTTLE_SIZES = ['25cl', '33cl', '50cl', '75cl'];
+const BOTTLE_SIZE_LITERS = { '25cl': 0.25, '33cl': 0.33, '50cl': 0.50, '75cl': 0.75 };
+const DEFAULT_BOTTLE_SIZES = { '25cl': false, '33cl': true, '50cl': false, '75cl': true };
+function bottleSizesEnabled() { return { ...DEFAULT_BOTTLE_SIZES, ...(appSettings.bottleSizes || {}) }; }
+function isSizeEnabled(size) { return !!bottleSizesEnabled()[size]; }
+// Une taille reste utilisable si activée, OU si une bière donnée y a encore du stock
+// (ne jamais masquer du stock existant quand une taille est désactivée après coup)
+function isSizeUsable(size, beer) { return isSizeEnabled(size) || (beer && (beer[`stock_${size}`] || 0) > 0); }
+const CONSO_CHART_COLORS = {
+  '25cl': { bg: 'rgba(192,132,252,.7)', border: '#c084fc' },
+  '33cl': { bg: 'rgba(99,102,241,.7)',  border: '#6366f1' },
+  '50cl': { bg: 'rgba(244,114,182,.7)', border: '#f472b6' },
+  '75cl': { bg: 'rgba(245,158,11,.7)',  border: '#f59e0b' },
+};
+function beerLiters(beer) {
+  if (!beer) return 0;
+  return BOTTLE_SIZES.reduce((sum, size) => sum + (beer[`stock_${size}`] || 0) * BOTTLE_SIZE_LITERS[size], 0)
+    + (beer.keg_liters || 0);
+}
+function beerInitialLiters(beer) {
+  if (!beer) return 0;
+  return BOTTLE_SIZES.reduce((sum, size) => sum + (beer[`initial_${size}`] || 0) * BOTTLE_SIZE_LITERS[size], 0)
+    + (beer.keg_initial_liters || 0);
+}
 function saveSettings() {
   appSettings._ts = Date.now();
   try {
@@ -82,6 +108,7 @@ function _doSyncSettingsToServer() {
     accent_color:      appSettings.accentColor      || null,
     app_icon:          appSettings.appIcon          || null,
     thresholds:        appSettings.thresholds       ? JSON.stringify(appSettings.thresholds) : null,
+    bottle_sizes_enabled: appSettings.bottleSizes    ? JSON.stringify(appSettings.bottleSizes) : null,
     water:             appSettings.water            ? JSON.stringify(appSettings.water)      : null,
     water_profiles:    appSettings.waterProfiles?.length ? JSON.stringify(appSettings.waterProfiles) : null,
     energy:            appSettings.energy           ? JSON.stringify(appSettings.energy)     : null,
@@ -142,6 +169,7 @@ function _loadSettingsFromServer(srv) {
   if (srv.app_icon     != null) appSettings.appIcon     = srv.app_icon     || null;
   // Objets complexes (sérialisés en JSON)
   if (srv.thresholds != null) { try { appSettings.thresholds = JSON.parse(srv.thresholds); } catch(e) {} }
+  if (srv.bottle_sizes_enabled != null) { try { appSettings.bottleSizes = JSON.parse(srv.bottle_sizes_enabled); } catch(e) {} }
   if (srv.water          != null) { try { appSettings.water         = JSON.parse(srv.water);          } catch(e) {} }
   if (srv.water_profiles != null) { try { appSettings.waterProfiles = JSON.parse(srv.water_profiles); } catch(e) {} }
   if (srv.energy     != null) { try { appSettings.energy     = JSON.parse(srv.energy);     } catch(e) {} }

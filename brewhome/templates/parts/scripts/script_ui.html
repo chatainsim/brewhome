@@ -241,27 +241,18 @@ function _vDate(iso) {
 
 function generateVitrineHtml(beers, photoMap, iconPath) {
   const date   = new Date().toLocaleDateString(_lang || 'fr', { day:'2-digit', month:'long', year:'numeric' });
-  const total33  = beers.reduce((s, b) => s + (b.stock_33cl  || 0), 0);
-  const total75  = beers.reduce((s, b) => s + (b.stock_75cl  || 0), 0);
+  const vitrineSizes = BOTTLE_SIZES.filter(size => isSizeEnabled(size) || beers.some(b => (b[`stock_${size}`]||0) > 0));
+  const totalByS  = {}; vitrineSizes.forEach(size => { totalByS[size] = beers.reduce((s, b) => s + (b[`stock_${size}`] || 0), 0); });
   const totalKeg = beers.reduce((s, b) => s + (b.keg_liters  || 0), 0);
 
   const makeCard = b => {
     const photo  = photoMap && photoMap[b.id];
     const imgSrc = photo ? `images/beer-${b.id}.${photo.ext}` : null;
     const abv    = b.abv != null ? `${parseFloat(b.abv).toFixed(1)} %` : null;
-    const s33    = b.stock_33cl  ?? 0;
-    const s75    = b.stock_75cl  ?? 0;
-    const i33    = b.initial_33cl > 0 ? b.initial_33cl : 0;
-    const i75    = b.initial_75cl > 0 ? b.initial_75cl : 0;
-    const pct33  = i33 > 0 ? Math.round(Math.min(100, s33 / i33 * 100)) : -1;
-    const pct75  = i75 > 0 ? Math.round(Math.min(100, s75 / i75 * 100)) : -1;
     const kegL   = b.keg_liters          ?? 0;
     const kegI   = b.keg_initial_liters  ?? 0;
     const hasKeg = kegL > 0 || kegI > 0;
     const pctKeg = kegI > 0 ? Math.round(Math.min(100, kegL / kegI * 100)) : -1;
-
-    const cls33  = s33 === 0 ? 'zero' : pct33 >= 0 && pct33 <= 40 ? 'low' : 'ok';
-    const cls75  = s75 === 0 ? 'zero' : pct75 >= 0 && pct75 <= 40 ? 'low' : 'ok';
 
     const stockItem = (count, label, cls, pct) => `
       <div class="si ${cls}">
@@ -311,9 +302,13 @@ function generateVitrineHtml(beers, photoMap, iconPath) {
         })()}</div>` : ''}
         ${kegBlock}
         <div class="stock-row">
-          ${stockItem(s33, '33 cl', cls33, pct33)}
-          <div class="stock-sep"></div>
-          ${stockItem(s75, '75 cl', cls75, pct75)}
+          ${vitrineSizes.map(size => {
+            const count = b[`stock_${size}`] ?? 0;
+            const init  = b[`initial_${size}`] > 0 ? b[`initial_${size}`] : 0;
+            const pct   = init > 0 ? Math.round(Math.min(100, count / init * 100)) : -1;
+            const cls   = count === 0 ? 'zero' : pct >= 0 && pct <= 40 ? 'low' : 'ok';
+            return stockItem(count, `${size.replace('cl','')} cl`, cls, pct);
+          }).join('<div class="stock-sep"></div>')}
         </div>
         ${b.origin      ? `<div class="card-origin">📍 ${_vEsc(b.origin)}</div>` : ''}
         ${b.description ? `<p class="card-desc">${_vEsc(b.description)}</p>` : ''}
@@ -322,8 +317,8 @@ function generateVitrineHtml(beers, photoMap, iconPath) {
       </div>
     </div>`;
   };
-  const inStock   = beers.filter(b => (b.stock_33cl||0) + (b.stock_75cl||0) + (b.keg_liters||0) > 0);
-  const exhausted = beers.filter(b => (b.stock_33cl||0) + (b.stock_75cl||0) + (b.keg_liters||0) === 0);
+  const inStock   = beers.filter(b => beerLiters(b) > 0);
+  const exhausted = beers.filter(b => beerLiters(b) === 0);
   const cardsActive    = inStock.map(makeCard).join('');
   const cardsExhausted = exhausted.map(makeCard).join('');
 
@@ -404,8 +399,7 @@ footer{text-align:center;padding:20px;font-size:.74rem;color:#444;border-top:1px
   <div class="subtitle">Mise à jour le ${date}</div>
   <div class="stats">
     <div><div class="stat-val">${beers.length}</div><div class="stat-lbl">Bières</div></div>
-    <div><div class="stat-val">${total33}</div><div class="stat-lbl">Bouteilles 33 cl</div></div>
-    <div><div class="stat-val">${total75}</div><div class="stat-lbl">Bouteilles 75 cl</div></div>
+    ${vitrineSizes.map(size => `<div><div class="stat-val">${totalByS[size]}</div><div class="stat-lbl">Bouteilles ${size.replace('cl','')} cl</div></div>`).join('')}
     ${totalKeg > 0 ? `<div><div class="stat-val">${totalKeg % 1 === 0 ? totalKeg : totalKeg.toFixed(1)}</div><div class="stat-lbl">Litres en fût</div></div>` : ''}
   </div>
 </header>

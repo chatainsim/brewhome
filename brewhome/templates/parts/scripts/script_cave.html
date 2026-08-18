@@ -41,9 +41,7 @@ function beerStockValue(b, _rMap, _bMap) {
   const volume = (brew?.volume_brewed) || recipe.volume;
   if (!volume || volume <= 0) return null;
   const costPerL = totalCost / volume;
-  return (b.stock_33cl || 0) * costPerL * 0.33
-       + (b.stock_75cl || 0) * costPerL * 0.75
-       + (b.keg_liters  || 0) * costPerL;
+  return beerLiters(b) * costPerL;
 }
 
 // ── Depletion helpers ─────────────────────────────────────────────────────────
@@ -87,20 +85,24 @@ function renderCave() {
   const brwById = _brwByIdCache;
 
   // Stats on active beers only
-  const total33 = active.reduce((s,b) => s + (b.stock_33cl||0), 0);
-  const total75 = active.reduce((s,b) => s + (b.stock_75cl||0), 0);
+  const bottleTotals = {};
+  BOTTLE_SIZES.forEach(size => { bottleTotals[size] = active.reduce((s,b) => s + (b[`stock_${size}`]||0), 0); });
   const totalKeg = active.reduce((s,b) => s + (b.keg_liters||0), 0);
-  const totalL  = (total33 * 0.33 + total75 * 0.75 + totalKeg).toFixed(1);
+  const totalL  = active.reduce((s,b) => s + beerLiters(b), 0).toFixed(1);
   let stockVal = 0, noPriceCnt = 0;
   active.forEach(b => {
     const v = beerStockValue(b, recById, brwById);
     if (v !== null) stockVal += v; else noPriceCnt++;
   });
   const partialNote = noPriceCnt > 0 ? ` <span style="font-size:.68rem;color:var(--muted)">${t('cave.stat_value_partial').replace('${n}', noPriceCnt)}</span>` : '';
+  const sizeStatColors = { '25cl': '#c084fc', '33cl': 'var(--info)', '50cl': '#f472b6', '75cl': 'var(--amber)' };
+  const sizeStatsHtml = BOTTLE_SIZES
+    .filter(size => isSizeEnabled(size) || bottleTotals[size] > 0)
+    .map(size => `<div class="stat"><div class="stat-val" style="color:${sizeStatColors[size]}">${bottleTotals[size]}</div><div class="stat-lbl">${t(`cave.stat_bottles_${size.replace('cl','')}`)}</div></div>`)
+    .join('');
   document.getElementById('cave-stats').innerHTML = `
     <div class="stat"><div class="stat-val">${active.length}</div><div class="stat-lbl">${t('cave.stat_beers')}</div></div>
-    <div class="stat"><div class="stat-val" style="color:var(--info)">${total33}</div><div class="stat-lbl">${t('cave.stat_bottles_33')}</div></div>
-    <div class="stat"><div class="stat-val" style="color:var(--amber)">${total75}</div><div class="stat-lbl">${t('cave.stat_bottles_75')}</div></div>
+    ${sizeStatsHtml}
     <div class="stat"><div class="stat-val" style="color:var(--success)">${totalL}</div><div class="stat-lbl">${t('cave.stat_liters')}</div></div>
     ${stockVal > 0 ? `<div class="stat"><div class="stat-val" style="color:#a78bfa">${stockVal.toFixed(2)} €${partialNote}</div><div class="stat-lbl">${t('cave.stat_value')}</div></div>` : ''}`;
 
@@ -165,20 +167,19 @@ function renderCave() {
             ? brew.cost_per_liter_snapshot
             : (volume > 0 ? totalCost / volume : null);
           if (costPerL !== null && volume > 0) {
-            const p33 = (costPerL * 0.33).toFixed(2);
-            const p75 = (costPerL * 0.75).toFixed(2);
             const volSrc = (brew?.volume_brewed) ? t('rec.vol_from_brew').replace('${vol}', volume) : t('rec.vol_from_recipe').replace('${vol}', volume);
             const stockV = beerStockValue(b, recById, brwById);
             const stockVHtml = stockV !== null && stockV > 0
               ? `<span style="color:var(--border)">·</span><span style="color:var(--muted)">${t('cave.card_stock_value')} <strong style="color:#a78bfa">${stockV.toFixed(2)}€</strong></span>`
               : '';
+            const pricePerSizeHtml = BOTTLE_SIZES
+              .filter(size => isSizeUsable(size, b))
+              .map(size => `<span style="color:var(--border)">·</span><span style="color:var(--muted)">${size} <strong style="color:var(--success)">${(costPerL * BOTTLE_SIZE_LITERS[size]).toFixed(2)}€</strong></span>`)
+              .join('');
             priceHtml = `
               <div style="display:flex;flex-wrap:wrap;gap:3px 10px;align-items:center;font-size:.77rem;margin-bottom:7px;padding:5px 8px;background:rgba(34,197,94,.07);border-radius:7px;border:1px solid rgba(34,197,94,.18)">
                 <span style="color:var(--success);font-weight:700"><i class="fas fa-euro-sign" style="font-size:.65rem"></i> ${totalCost.toFixed(2)}€</span>
-                <span style="color:var(--border)">·</span>
-                <span style="color:var(--muted)">33cl <strong style="color:var(--success)">${p33}€</strong></span>
-                <span style="color:var(--border)">·</span>
-                <span style="color:var(--muted)">75cl <strong style="color:var(--success)">${p75}€</strong></span>
+                ${pricePerSizeHtml}
                 ${stockVHtml}
                 <span style="color:var(--border);margin-left:auto;font-size:.7rem;font-style:italic">${volSrc}</span>
               </div>`;
@@ -211,7 +212,7 @@ function renderCave() {
     }
 
     return `
-      <div class="beer-card ${b.archived ? 'archived-item' : (((b.stock_33cl||0)+(b.stock_75cl||0)===0&&(b.keg_liters||0)===0)?'beer-card--empty':'')}" data-id="${b.id}" draggable="true" style="position:relative">
+      <div class="beer-card ${b.archived ? 'archived-item' : (beerLiters(b)===0?'beer-card--empty':'')}" data-id="${b.id}" draggable="true" style="position:relative">
         <span class="beer-drag-handle" title="${t('cave.drag_to_reorder')}"><i class="fas fa-grip-vertical"></i></span>
         ${photoHtml}
         <div class="beer-body">
@@ -253,16 +254,16 @@ function renderCave() {
           </div>` : ''}
           ${kegHtml}
           <div class="beer-stocks">
-            ${beerStockHtml(b.stock_33cl, b.initial_33cl, '33cl')}
-            ${beerStockHtml(b.stock_75cl, b.initial_75cl, '75cl')}
+            ${BOTTLE_SIZES.filter(size => isSizeUsable(size, b)).map(size => beerStockHtml(b[`stock_${size}`], b[`initial_${size}`], size)).join('')}
           </div>
           ${_deplBadge(b.id)}
           ${priceHtml}
           ${b.description ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:8px;line-height:1.4">${esc(b.description).substring(0,100)}${b.description.length>100?'…':''}</div>` : ''}
           ${hasKeg ? `<div style="margin-bottom:5px"><button class="btn btn-sm btn-ghost" onclick="openKegTransferModal(${b.id})" style="width:100%;border-color:rgba(251,191,36,.4);color:var(--amber)"><i class="fas fa-beer-mug-empty"></i> ${t('cave.keg_transfer')}</button></div>` : ''}
           <div style="display:flex;gap:5px;margin-bottom:5px">
-            <button class="btn btn-sm btn-ghost" onclick="withBtn(this,()=>adjustStock(${b.id},-1,0))" title="−1 bouteille 33cl" style="flex:1"><i class="fas fa-minus"></i> 33cl</button>
-            <button class="btn btn-sm btn-ghost" onclick="withBtn(this,()=>adjustStock(${b.id},0,-1))" title="−1 bouteille 75cl" style="flex:1"><i class="fas fa-minus"></i> 75cl</button>
+            ${BOTTLE_SIZES.filter(size => isSizeUsable(size, b)).map(size =>
+              `<button class="btn btn-sm btn-ghost" onclick="withBtn(this,()=>adjustStock(${b.id},'${size}',-1))" title="−1 bouteille ${size}" style="flex:1"><i class="fas fa-minus"></i> ${size}</button>`
+            ).join('')}
           </div>
           <div style="display:flex;gap:5px">
             <button class="btn btn-sm btn-ghost" onclick="editBeer(${b.id})" style="flex:1"><i class="fas fa-pen"></i> ${t('common.edit')}</button>
@@ -276,8 +277,8 @@ function renderCave() {
       </div>`;
   };
 
-  const hasStock  = shown.filter(b => (b.stock_33cl || 0) + (b.stock_75cl || 0) > 0 || (b.keg_liters || 0) > 0);
-  const noStock   = shown.filter(b => (b.stock_33cl || 0) + (b.stock_75cl || 0) === 0 && (b.keg_liters || 0) === 0);
+  const hasStock  = shown.filter(b => beerLiters(b) > 0);
+  const noStock   = shown.filter(b => beerLiters(b) === 0);
   const needSplit = hasStock.length > 0 && noStock.length > 0;
 
   // Groups as display:contents wrappers — invisible to CSS grid, diffable by _patchList
@@ -445,18 +446,14 @@ function openBeerDetail(id) {
              ${b.keg_initial_liters ? `<div style="font-size:.72rem;color:var(--muted);margin-top:4px">/ ${b.keg_initial_liters} L initial</div>` : ''}
            </div>`
         : '';
-      stocksEl.innerHTML = `
-        ${kegBlock}
+      const sizeDetailColors = { '25cl': '#c084fc', '33cl': 'var(--info)', '50cl': '#f472b6', '75cl': 'var(--amber)' };
+      const sizeBlocks = BOTTLE_SIZES.filter(size => isSizeUsable(size, b)).map(size => `
         <div style="background:var(--card2);border-radius:12px;padding:14px;text-align:center">
-          <div style="font-size:2rem;font-weight:800;color:var(--info)">${b.stock_33cl || 0}</div>
-          <div style="font-size:.8rem;color:var(--muted);margin-top:2px">${t('cave.bottles_label_33')}</div>
-          ${b.initial_33cl ? `<div style="font-size:.72rem;color:var(--muted);margin-top:4px">/ ${b.initial_33cl} initial</div>` : ''}
-        </div>
-        <div style="background:var(--card2);border-radius:12px;padding:14px;text-align:center">
-          <div style="font-size:2rem;font-weight:800;color:var(--amber)">${b.stock_75cl || 0}</div>
-          <div style="font-size:.8rem;color:var(--muted);margin-top:2px">${t('cave.bottles_label_75')}</div>
-          ${b.initial_75cl ? `<div style="font-size:.72rem;color:var(--muted);margin-top:4px">/ ${b.initial_75cl} initial</div>` : ''}
-        </div>`;
+          <div style="font-size:2rem;font-weight:800;color:${sizeDetailColors[size]}">${b[`stock_${size}`] || 0}</div>
+          <div style="font-size:.8rem;color:var(--muted);margin-top:2px">${t(`cave.bottles_label_${size.replace('cl','')}`)}</div>
+          ${b[`initial_${size}`] ? `<div style="font-size:.72rem;color:var(--muted);margin-top:4px">/ ${b[`initial_${size}`]} initial</div>` : ''}
+        </div>`).join('');
+      stocksEl.innerHTML = kegBlock + sizeBlocks;
     }
 
     // Dépletion
@@ -489,7 +486,7 @@ function openBeerDetail(id) {
     }
 
     // Meta
-    const totalL = ((b.stock_33cl||0)*0.33 + (b.stock_75cl||0)*0.75 + (b.keg_liters||0)).toFixed(2);
+    const totalL = beerLiters(b).toFixed(2);
     const metaParts = [`<i class="fas fa-wine-bottle"></i> ${totalL} L en cave`];
     const fmtDate = d => d ? d.split('-').reverse().join('/') : null;
     if (b.brew_date)        metaParts.push(`<i class="fas fa-fire-flame-curved"></i> Brassé le ${fmtDate(b.brew_date)}`);
@@ -705,8 +702,11 @@ function openBeerModal(beer = null) {
   document.getElementById('beer-f-name').value    = beer ? beer.name : '';
   document.getElementById('beer-f-type').value    = beer ? (beer.type||'') : '';
   document.getElementById('beer-f-abv').value     = beer ? (beer.abv||'') : '';
-  document.getElementById('beer-f-33').value      = beer ? (beer.stock_33cl||0) : 0;
-  document.getElementById('beer-f-75').value      = beer ? (beer.stock_75cl||0) : 0;
+  BOTTLE_SIZES.forEach(size => {
+    document.getElementById(`beer-f-${size}`).value = beer ? (beer[`stock_${size}`]||0) : 0;
+    const wrap = document.getElementById(`beer-f-${size}-wrap`);
+    if (wrap) wrap.style.display = isSizeUsable(size, beer) ? '' : 'none';
+  });
   document.getElementById('beer-f-origin').value  = beer ? (beer.origin||'') : '';
   document.getElementById('beer-f-desc').value    = beer ? (beer.description||'') : '';
   document.getElementById('beer-f-photo-b64').value= beer ? (beer.photo||'') : '';
@@ -722,8 +722,11 @@ function openBeerModal(beer = null) {
   // Initial counts — shown only when editing
   const initWrap = document.getElementById('beer-f-init-wrap');
   if (beer) {
-    document.getElementById('beer-f-33-init').value = beer.initial_33cl || 0;
-    document.getElementById('beer-f-75-init').value = beer.initial_75cl || 0;
+    BOTTLE_SIZES.forEach(size => {
+      document.getElementById(`beer-f-${size}-init`).value = beer[`initial_${size}`] || 0;
+      const iwrap = document.getElementById(`beer-f-${size}-init-wrap`);
+      if (iwrap) iwrap.style.display = isSizeUsable(size, beer) ? '' : 'none';
+    });
     initWrap.style.display = '';
   } else {
     initWrap.style.display = 'none';
@@ -773,7 +776,7 @@ let _labelBeerId = null;
 function printBeerLabel(id) {
   _labelBeerId = id;
   const b = S.beers.find(x => x.id === id);
-  const totalBottles = (b ? ((b.stock_33cl || 0) + (b.stock_75cl || 0)) : 0);
+  const totalBottles = b ? BOTTLE_SIZES.reduce((s, size) => s + (b[`stock_${size}`] || 0), 0) : 0;
   const copiesInput = document.getElementById('label-copies');
   if (copiesInput) {
     copiesInput.value = Math.max(1, totalBottles);
@@ -1029,8 +1032,7 @@ function showBeerAlert(msg, type = 'danger') {
 function _validateBeerFields() {
   const checks = [
     { id: 'beer-f-abv', label: 'ABV (%)', min: 0,   max: 30,   optional: true },
-    { id: 'beer-f-33',  label: '33cl',    min: 0,   max: 9999, optional: false },
-    { id: 'beer-f-75',  label: '75cl',    min: 0,   max: 9999, optional: false },
+    ...BOTTLE_SIZES.map(size => ({ id: `beer-f-${size}`, label: size, min: 0, max: 9999, optional: false })),
     { id: 'beer-f-keg', label: t('cave.field_keg'),  min: 0, max: 1000, optional: true },
   ];
   const errors = [];
@@ -1057,21 +1059,19 @@ async function saveBeer() {
     return;
   }
   const id = document.getElementById('beer-f-id').value;
-  const stock33 = parseInt(document.getElementById('beer-f-33').value) || 0;
-  const stock75 = parseInt(document.getElementById('beer-f-75').value) || 0;
+  const stocks = {};
+  BOTTLE_SIZES.forEach(size => { stocks[`stock_${size}`] = parseInt(document.getElementById(`beer-f-${size}`).value) || 0; });
   const kegVal = document.getElementById('beer-f-keg').value;
   const kegLiters = kegVal !== '' ? (parseFloat(kegVal) || 0) : null;
+  const inits = {};
+  if (id) BOTTLE_SIZES.forEach(size => { inits[`initial_${size}`] = parseInt(document.getElementById(`beer-f-${size}-init`).value) || 0; });
   const payload = {
     name,
     type:         document.getElementById('beer-f-type').value || null,
     abv:          parseFloat(document.getElementById('beer-f-abv').value) || null,
-    stock_33cl:   stock33,
-    stock_75cl:   stock75,
+    ...stocks,
     // On edit: send the (possibly corrected) initial values; on create: not sent for bottles, backend uses stock as initial
-    ...(id ? {
-      initial_33cl: parseInt(document.getElementById('beer-f-33-init').value) || 0,
-      initial_75cl: parseInt(document.getElementById('beer-f-75-init').value) || 0,
-    } : {}),
+    ...inits,
     keg_liters: kegLiters,
     // Always send keg initial when a keg value is present (user may declare a partial keg on creation)
     ...(kegLiters !== null ? {
@@ -1102,13 +1102,10 @@ async function saveBeer() {
   } catch(e) { toast(t('cave.err_save'), 'error'); }
 }
 
-async function adjustStock(id, d33, d75) {
+async function adjustStock(id, size, delta) {
   const beer = S.beers.find(b => b.id === id);
   if (!beer) return;
-  const payload = {
-    stock_33cl: Math.max(0, (beer.stock_33cl||0) + d33),
-    stock_75cl: Math.max(0, (beer.stock_75cl||0) + d75),
-  };
+  const payload = { [`stock_${size}`]: Math.max(0, (beer[`stock_${size}`]||0) + delta) };
   try {
     const updated = await api('PATCH', `/api/beers/${id}/stock`, payload);
     const idx = S.beers.findIndex(b => b.id === id);
@@ -1117,7 +1114,7 @@ async function adjustStock(id, d33, d75) {
     const depIdx = (S.depletion || []).findIndex(d => d.beer_id === id);
     if (depIdx !== -1) {
       const nb = S.beers[idx];
-      const newL = ((nb.stock_33cl||0)*0.33 + (nb.stock_75cl||0)*0.75 + (nb.keg_liters||0));
+      const newL = beerLiters(nb);
       if (newL > 0) {
         const rate = S.depletion[depIdx].daily_rate;
         const daysRem = Math.round(newL / rate);
@@ -1156,8 +1153,11 @@ function openKegTransferModal(id) {
   document.getElementById('keg-tr-name').textContent    = beer.name;
   document.getElementById('keg-tr-current').textContent = `${t('cave.keg_available')} ${beer.keg_liters || 0} L`;
   document.getElementById('keg-tr-consumed').value = 0;
-  document.getElementById('keg-tr-33').value = 0;
-  document.getElementById('keg-tr-75').value = 0;
+  BOTTLE_SIZES.forEach(size => {
+    document.getElementById(`keg-tr-${size}`).value = 0;
+    const wrap = document.getElementById(`keg-tr-${size}-wrap`);
+    if (wrap) wrap.style.display = isSizeUsable(size, beer) ? '' : 'none';
+  });
   document.getElementById('keg-tr-save-btn').disabled = true;
   updateKegCalc();
   openModal('keg-transfer-modal');
@@ -1168,19 +1168,20 @@ function updateKegCalc() {
   if (!beer) return;
   const available = beer.keg_liters || 0;
   const consumed  = parseFloat(document.getElementById('keg-tr-consumed').value) || 0;
-  const b33       = parseInt(document.getElementById('keg-tr-33').value)          || 0;
-  const b75       = parseInt(document.getElementById('keg-tr-75').value)          || 0;
-  const bottled   = b33 * 0.33 + b75 * 0.75;
+  const bottles   = {};
+  BOTTLE_SIZES.forEach(size => { bottles[size] = parseInt(document.getElementById(`keg-tr-${size}`).value) || 0; });
+  const bottled   = BOTTLE_SIZES.reduce((sum, size) => sum + bottles[size] * BOTTLE_SIZE_LITERS[size], 0);
   const total     = consumed + bottled;
   const remaining = Math.max(0, available - total);
   const over      = total > available;
   const ok        = total > 0 && !over;
   const warnStyle = over ? 'color:var(--danger);font-weight:700' : '';
+  const bottledDetail = BOTTLE_SIZES.filter(size => bottles[size]).map(size => `${bottles[size]}×${size}`).join(' + ') || '—';
   document.getElementById('keg-tr-calc').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr auto;gap:2px 12px">
       <span style="color:var(--muted)">Disponible en fût</span><span><strong>${available.toFixed(2)} L</strong></span>
       <span style="color:var(--muted)">Consommé directement</span><span><strong>${consumed.toFixed(2)} L</strong></span>
-      <span style="color:var(--muted)">Embouteillé (${b33}×33cl + ${b75}×75cl)</span><span><strong>${bottled.toFixed(2)} L</strong></span>
+      <span style="color:var(--muted)">Embouteillé (${bottledDetail})</span><span><strong>${bottled.toFixed(2)} L</strong></span>
       <span style="${warnStyle}">Total prélevé</span><span style="${warnStyle}"><strong>${total.toFixed(2)} L</strong>${over ? ' ⚠ dépassement' : ''}</span>
       <span style="color:var(--muted)">Restant en fût</span><span><strong>${remaining.toFixed(2)} L</strong></span>
     </div>`;
@@ -1192,15 +1193,13 @@ async function saveKegTransfer() {
   if (!beer) return;
   const available = beer.keg_liters || 0;
   const consumed  = parseFloat(document.getElementById('keg-tr-consumed').value) || 0;
-  const b33       = parseInt(document.getElementById('keg-tr-33').value) || 0;
-  const b75       = parseInt(document.getElementById('keg-tr-75').value) || 0;
-  const total     = consumed + b33 * 0.33 + b75 * 0.75;
+  const bottles   = {};
+  BOTTLE_SIZES.forEach(size => { bottles[size] = parseInt(document.getElementById(`keg-tr-${size}`).value) || 0; });
+  const bottled   = BOTTLE_SIZES.reduce((sum, size) => sum + bottles[size] * BOTTLE_SIZE_LITERS[size], 0);
+  const total     = consumed + bottled;
   if (total <= 0 || total > available) { toast(t('cave.err_keg_vol'), 'error'); return; }
-  const payload = {
-    keg_liters: Math.max(0, parseFloat((available - total).toFixed(3))),
-    stock_33cl: (beer.stock_33cl || 0) + b33,
-    stock_75cl: (beer.stock_75cl || 0) + b75,
-  };
+  const payload = { keg_liters: Math.max(0, parseFloat((available - total).toFixed(3))) };
+  BOTTLE_SIZES.forEach(size => { payload[`stock_${size}`] = (beer[`stock_${size}`] || 0) + bottles[size]; });
   try {
     const updated = await api('PATCH', `/api/beers/${beer.id}/stock`, payload);
     const idx = S.beers.findIndex(b => b.id === beer.id);

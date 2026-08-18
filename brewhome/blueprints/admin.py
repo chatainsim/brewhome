@@ -9,7 +9,7 @@ from datetime import datetime
 from flask import Blueprint, Response, jsonify, request, current_app
 
 from db import get_db, get_readings_db, _log, DB_PATH, READINGS_DB_PATH
-from constants import BrewStatus
+from constants import BrewStatus, BottleSize
 from helpers import api_error
 
 bp = Blueprint('admin', __name__)
@@ -123,10 +123,14 @@ def get_stats():
             'beers_count':     scalar('SELECT COUNT(*) FROM beers      WHERE archived=0'),
             'kegs_count':      scalar('SELECT COUNT(*) FROM soda_kegs    WHERE archived=0'),
             'shopping_count':  scalar('SELECT COUNT(*) FROM shopping_list WHERE checked=0'),
-            'total_33cl':      scalar('SELECT COALESCE(SUM(stock_33cl),0) FROM beers WHERE archived=0'),
-            'total_75cl':      scalar('SELECT COALESCE(SUM(stock_75cl),0) FROM beers WHERE archived=0'),
+            **{
+                f'total_{size}': scalar(f'SELECT COALESCE(SUM(stock_{size}),0) FROM beers WHERE archived=0')
+                for size in BottleSize.SIZES_CL
+            },
             'total_liters':    scalar(
-                'SELECT COALESCE(SUM(stock_33cl*0.33 + stock_75cl*0.75),0) FROM beers WHERE archived=0'
+                'SELECT COALESCE(SUM(' +
+                ' + '.join(f'stock_{size}*{liters}' for size, liters in BottleSize.SIZES_CL.items()) +
+                '),0) FROM beers WHERE archived=0'
             ),
         })
 
