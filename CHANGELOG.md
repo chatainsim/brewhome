@@ -4,7 +4,7 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
-## Non publié (depuis la version 0.1.5)
+## [2026-08-22] — 9 · version 0.1.6
 
 ### Ajouté
 - **Cave — formats de bouteille 25 cl et 50 cl** : s'ajoutent aux formats 33 cl / 75 cl existants, activables individuellement (réglage `bottle_sizes_enabled` dans *Paramètres avancés → Seuils de stock*, 25/50 cl désactivés par défaut). Un format désactivé reste affiché tant qu'une bière y a du stock (pas de perte de données silencieuse). Cave, embouteillage depuis un brassin, calculateur bouteilles, vitrine GitHub Pages et statistiques de consommation généralisés aux 4 formats.
