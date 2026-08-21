@@ -50,10 +50,10 @@ Hébergée localement (sur un Raspberry Pi, NAS, PC ou serveur Linux), accessibl
 - Archivage et réorganisation
 
 ### Cave à bières
-- Gestion de votre **stock de bières embouteillées** (formats 33 cl et 75 cl) et **en fût** (volume en litres)
+- Gestion de votre **stock de bières embouteillées** (formats 25 cl, 33 cl, 50 cl et 75 cl — 25 cl/50 cl activables individuellement dans les Paramètres avancés) et **en fût** (volume en litres)
 - Indicateur de niveau de remplissage avec barre de progression (bouteilles et fût)
 - **Gestion des fûts** : saisie du volume courant et du volume initial, barre de progression colorée (vert / orange / rouge selon le niveau restant)
-- **Modal de transfert fût → bouteilles** : saisie de la quantité consommée directement au fût + nombre de bouteilles 33 cl et 75 cl à remplir, récapitulatif en temps réel avec alerte de dépassement
+- **Modal de transfert fût → bouteilles** : saisie de la quantité consommée directement au fût + nombre de bouteilles à remplir (selon les formats activés), récapitulatif en temps réel avec alerte de dépassement
 - **Association à un soda keg** : liez une bière cave à un keg directement depuis sa carte (badge keg affiché avec le volume restant)
 - Photo de la bière (stockée en base) — importée depuis un fichier, **générée par IA** ou supprimable ; propagée automatiquement depuis l'image du brouillon lors du passage en cave
 - Type de bière avec autocomplétion (base de données de styles intégrée)
@@ -336,7 +336,9 @@ Champs disponibles dans `/api/stats` :
 | `brews_count` | Nombre total de brassins |
 | `brews_active` | Brassins en cours (planifiés + en cours + en fermentation) |
 | `beers_count` | Nombre de bières en cave |
+| `total_25cl` | Total bouteilles 25 cl |
 | `total_33cl` | Total bouteilles 33 cl |
+| `total_50cl` | Total bouteilles 50 cl |
 | `total_75cl` | Total bouteilles 75 cl |
 | `total_liters` | Volume total en cave (bouteilles + fûts, en litres) |
 | `inventory_count` | Nombre d'ingrédients en stock |

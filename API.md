@@ -10,6 +10,7 @@ Le corps des requêtes et des réponses est en **JSON** sauf mention contraire.
 - [Pages & PWA](#pages--pwa)
 - [Catalogue d'ingrédients](#catalogue-dingrédients)
 - [Inventaire](#inventaire)
+- [Liste de courses](#liste-de-courses)
 - [Recettes](#recettes)
 - [Brassins](#brassins)
 - [Photos de brassin](#photos-de-brassin)
@@ -34,7 +35,9 @@ Le corps des requêtes et des réponses est en **JSON** sauf mention contraire.
 - [Calendrier iCal](#calendrier-ical)
 - [Restauration depuis Git](#restauration-depuis-git)
 - [Checklists de brassage](#checklists-de-brassage)
+- [Guide de pesée](#guide-de-pesée)
 - [Administration DB](#administration-db)
+- [Administration — images](#administration--images)
 
 ---
 
@@ -55,6 +58,7 @@ Le corps des requêtes et des réponses est en **JSON** sauf mention contraire.
 | GET | `/api/catalog` | Liste tous les ingrédients du catalogue |
 | POST | `/api/catalog` | Crée un nouvel ingrédient |
 | PUT | `/api/catalog/<id>` | Met à jour un ingrédient |
+| GET | `/api/catalog/<id>/history` | Historique des modifications (50 dernières) |
 | DELETE | `/api/catalog/<id>` | Supprime un ingrédient |
 | POST | `/api/catalog/import-hopsteiner` | Importe les houblons depuis la base Hopsteiner (GitHub) |
 
@@ -94,6 +98,7 @@ Suppression définitive (pas de corbeille). Retourne `{ "success": true }` ou `4
 | DELETE | `/api/inventory/<id>/purge` | Suppression définitive |
 | PATCH | `/api/inventory/<id>/qty` | Met à jour uniquement la quantité |
 | PATCH | `/api/inventory/<id>` | Met à jour le flag `archived` |
+| GET | `/api/inventory/<id>/history` | Historique des mouvements de stock |
 
 ### POST `/api/inventory`
 
@@ -116,6 +121,48 @@ Déclenche une alerte Telegram si le stock passe sous le seuil `min_stock`.
 ### PATCH `/api/inventory/<id>`
 
 Corps : `{ "archived": true|false }`
+
+### GET `/api/inventory/<id>/history`
+
+Query param : `limit` (défaut 100, max 500)
+Retourne `{ "item_name": "...", "item_unit": "...", "entries": [...] }` — journal des mouvements de stock (déductions de brassin, ajustements manuels, etc.).
+
+---
+
+## Liste de courses
+
+| Méthode | Route | Description |
+|---------|-------|-------------|
+| GET | `/api/shopping-list` | Liste les articles actifs (non achetés) |
+| GET | `/api/shopping-list/history` | Historique des articles achetés (100 derniers) |
+| POST | `/api/shopping-list` | Ajoute un article |
+| PUT | `/api/shopping-list/<id>` | Met à jour un article |
+| PUT | `/api/shopping-list/bulk-check` | Coche/décoche plusieurs articles en une requête |
+| PUT | `/api/shopping-list/reorder` | Réordonne les articles |
+| POST | `/api/shopping-list/buy` | Marque les articles cochés comme achetés (soft-delete) et met à jour l'inventaire |
+| POST | `/api/shopping-list/undo-buy` | Annule un achat récent (voir token d'annulation) |
+| DELETE | `/api/shopping-list/<id>` | Supprime un article |
+
+### POST `/api/shopping-list`
+
+Corps requis : `name`, `category` (`malt`, `houblon`, `levure`, `autre`)
+Champs optionnels : `quantity` (défaut 1), `unit` (défaut `g`), `notes`, `inventory_item_id` (pour lier l'article à l'inventaire)
+
+### PUT `/api/shopping-list/bulk-check`
+
+Corps : `{ "ids": [1, 2, 3], "checked": true }`
+
+### PUT `/api/shopping-list/reorder`
+
+Corps : `[{ "id": 1, "sort_order": 0 }, ...]`
+
+### POST `/api/shopping-list/buy`
+
+Marque tous les articles actuellement cochés (`checked`) comme achetés et incrémente l'inventaire correspondant (par `inventory_item_id` ou par correspondance de nom). Retourne un token d'annulation utilisable via `/undo-buy` (fenêtre de 8 secondes côté interface).
+
+### POST `/api/shopping-list/undo-buy`
+
+Corps : le token retourné par `/api/shopping-list/buy`. Annule l'achat et restaure les articles ainsi que les quantités d'inventaire déduites.
 
 ---
 
@@ -185,7 +232,18 @@ Restaure la recette à l'état du snapshot désigné (sauvegarde l'état courant
 | DELETE | `/api/brews/<id>` | Soft-delete |
 | POST | `/api/brews/<id>/restore` | Restaure depuis la corbeille |
 | DELETE | `/api/brews/<id>/purge` | Suppression définitive |
+| POST | `/api/brews/<id>/dryhop_done` | Marque le dry hop comme terminé |
 | GET | `/api/brews/<id>/fermentation` | Lectures de fermentation d'un brassin |
+| POST | `/api/brews/<id>/fermentation` | Ajoute une lecture de fermentation manuelle |
+| DELETE | `/api/brews/<id>/fermentation/<reading_id>` | Supprime une lecture de fermentation |
+| GET | `/api/brews/<id>/log` | Liste le journal de brassage (notes horodatées) |
+| POST | `/api/brews/<id>/log` | Ajoute une entrée au journal |
+| DELETE | `/api/brews/<id>/log/<entry_id>` | Supprime une entrée du journal |
+| GET | `/api/brew-steps` | Liste toutes les étapes de brassage (tous brassins) |
+| GET | `/api/brews/<id>/steps` | Liste les étapes d'un brassin |
+| POST | `/api/brews/<id>/steps` | Ajoute une étape à un brassin |
+| PUT | `/api/brew-steps/<step_id>` | Met à jour une étape |
+| DELETE | `/api/brew-steps/<step_id>` | Supprime une étape |
 
 ### POST `/api/brews`
 
@@ -197,6 +255,28 @@ Retourne `409 { "error": "stock_insuffisant", "items": [...] }` si stock insuffi
 
 Champs modifiables : `status`, `ferm_time`, `og`, `fg`, `abv`, `notes`, `volume_brewed`
 
+### POST `/api/brews/<id>/dryhop_done`
+
+Corps requis : `{ "date": "YYYY-MM-DD" }`. Marque cette date de dry hop comme faite et déduit le stock correspondant une seule fois (idempotent si la date est déjà marquée).
+
+### POST `/api/brews/<id>/fermentation`
+
+Corps requis : `recorded_at`, `gravity`. Champs optionnels : `temperature`, `notes`. Ajoute une lecture manuelle (indépendante d'un densimètre connecté).
+
+### DELETE `/api/brews/<id>/fermentation/<reading_id>`
+
+Seules les lectures manuelles (`source: "manual"`) peuvent être supprimées — retourne `403` pour une lecture importée d'un densimètre.
+
+### GET / POST `/api/brews/<id>/log`
+
+Journal de bord libre du brassin (horodatage manuel). POST — corps requis : `ts`, `note` ; champ optionnel : `step`.
+
+### GET `/api/brew-steps` / `/api/brews/<id>/steps`
+
+Étapes planifiées post-brassage (ex. cold crash, changement de température) avec rappel Telegram optionnel — `GET /api/brew-steps` retourne celles de tous les brassins non archivés (utilisé par le calendrier). Distinct des modèles de [checklists de brassage](#checklists-de-brassage).
+
+POST/PUT — corps requis : `scheduled_date`, `title` ; champs optionnels : `notes`, `telegram_notify` (bool, défaut `true`), `done` (PUT uniquement).
+
 ---
 
 ## Photos de brassin
@@ -206,12 +286,17 @@ Champs modifiables : `status`, `ferm_time`, `og`, `fg`, `abv`, `notes`, `volume_
 | GET | `/api/brews/<id>/photos` | Liste les photos (sans les données base64 complètes, miniatures uniquement) |
 | POST | `/api/brews/<id>/photos` | Ajoute une photo |
 | GET | `/api/brews/<id>/photos/<photo_id>` | Récupère une photo complète (base64) |
+| PATCH | `/api/brews/<id>/photos/<photo_id>` | Met à jour la légende (`caption`) ou l'étape (`step`) d'une photo |
 | DELETE | `/api/brews/<id>/photos/<photo_id>` | Supprime une photo |
 
 ### POST `/api/brews/<id>/photos`
 
 Corps : `{ "photo": "<data_url_base64>", "step": "...", "caption": "..." }`
 Génère automatiquement une miniature (200 px max).
+
+### PATCH `/api/brews/<id>/photos/<photo_id>`
+
+Corps : `{ "step": "...", "caption": "..." }`
 
 ---
 
@@ -232,7 +317,9 @@ Génère automatiquement une miniature (200 px max).
 
 ### POST / PUT `/api/beers`
 
-Champs : `name`*, `type`, `abv`, `stock_33cl`, `stock_75cl`, `initial_33cl`, `initial_75cl`, `keg_liters`, `keg_initial_liters`, `origin`, `description`, `photo`, `brew_id`, `recipe_id`, `brew_date`, `bottling_date`, `refermentation` (0/1), `refermentation_days`
+Champs : `name`*, `type`, `abv`, `stock_25cl`, `stock_33cl`, `stock_50cl`, `stock_75cl`, `initial_25cl`, `initial_33cl`, `initial_50cl`, `initial_75cl`, `keg_liters`, `keg_initial_liters`, `origin`, `description`, `photo`, `brew_id`, `recipe_id`, `brew_date`, `bottling_date`, `refermentation` (0/1), `refermentation_days`
+
+Les formats 25cl et 50cl sont optionnels et activables individuellement via la clé `app_settings` `bottle_sizes_enabled` (JSON `{ "25cl": bool, "33cl": bool, "50cl": bool, "75cl": bool }`) — voir [Paramètres de l'application](#paramètres-de-lapplication).
 
 ### PUT `/api/beers/<id>/tasting`
 
@@ -240,7 +327,7 @@ Champs : `taste_appearance`, `taste_aroma`, `taste_flavor`, `taste_bitterness`, 
 
 ### PATCH `/api/beers/<id>/stock`
 
-Corps : `{ "stock_33cl": 10, "stock_75cl": 5, "keg_liters": 18.5 }`
+Corps : `{ "stock_25cl": 4, "stock_33cl": 10, "stock_50cl": 2, "stock_75cl": 5, "keg_liters": 18.5 }` (tous optionnels)
 Enregistre automatiquement une entrée de consommation pour chaque diminution de stock.
 
 ---
@@ -259,6 +346,7 @@ Enregistre automatiquement une entrée de consommation pour chaque diminution de
 | Méthode | Route | Description |
 |---------|-------|-------------|
 | GET | `/api/soda-kegs` | Liste tous les fûts |
+| GET | `/api/soda-kegs/revisions-due` | Fûts dont la révision est dépassée ou due bientôt |
 | POST | `/api/soda-kegs` | Crée un fût |
 | PUT | `/api/soda-kegs/<id>` | Met à jour un fût |
 | PUT | `/api/soda-kegs/reorder` | Réordonne les fûts |
@@ -267,6 +355,10 @@ Enregistre automatiquement une entrée de consommation pour chaque diminution de
 ### POST / PUT `/api/soda-kegs`
 
 Champs : `name`, `keg_type`, `manufacturer`, `volume_total`, `volume_ferment`, `weight_empty`, `status`, `current_liters`, `beer_id`, `brew_id`, `notes`, `color`, `photo`, `last_revision_date`, `revision_interval_months`, `next_revision_date`
+
+### GET `/api/soda-kegs/revisions-due`
+
+Query param : `days` (défaut 30, max 365) — fûts non archivés dont `next_revision_date` est dépassée ou tombe dans les `days` prochains jours.
 
 ---
 
@@ -404,7 +496,9 @@ Retourne :
   "brews_active": 2,
   "beers_count": 15,
   "kegs_count": 3,
+  "total_25cl": 6,
   "total_33cl": 120,
+  "total_50cl": 3,
   "total_75cl": 48,
   "total_liters": 75.6
 }
@@ -436,6 +530,7 @@ Retourne :
 |---------|-------|-------------|
 | POST | `/api/telegram/test` | Envoie un message de test avec le token/chat_id fournis |
 | POST | `/api/telegram/trigger/<type>` | Déclenche manuellement une notification |
+| POST | `/api/notify/timer` | Envoie une notification de minuteur de brassage (avertissement ou fin) |
 
 ### POST `/api/telegram/test`
 
@@ -448,6 +543,11 @@ Types disponibles : `brews` (état des brassins), `cave` (stock cave), `inventor
 > La notification **densité stable** (`spindle_stable`) est déclenchée automatiquement par le planificateur interne (toutes les 4 h) et n'est pas exposée via cet endpoint.
 
 Utilise la configuration Telegram enregistrée dans les paramètres de l'application.
+
+### POST `/api/notify/timer`
+
+Corps : `{ "name": "...", "type": "warning"|"done" }` (`type` par défaut `"done"`)
+Envoyé par les minuteurs de brassage de l'interface (empâtage, ébullition…). Retourne `400` si Telegram n'est pas configuré.
 
 ---
 
@@ -626,12 +726,39 @@ Corps : `{ "template_id": 1, "checked_items": ["Sanitiser", "Mash in"] }`
 
 ---
 
+## Guide de pesée
+
+| Méthode | Route | Description |
+|---------|-------|-------------|
+| GET | `/api/scale-guide` | État de la session de pesée en cours (le cas échéant) |
+| POST | `/api/scale-guide/start` | Démarre une session de pesée guidée pour une liste de malts |
+| POST | `/api/scale-guide/next` | Passe au malt suivant |
+| POST | `/api/scale-guide/stop` | Arrête la session en cours |
+
+Assiste la pesée des malts d'une recette un par un (utilisé depuis la fiche brassin) : la session (liste de malts + étape courante) est stockée côté serveur dans `app_settings`, ce qui permet de garder la progression même en changeant d'appareil.
+
+### POST `/api/scale-guide/start`
+
+Corps requis : `malts` (tableau de `{ "name", "quantity", "unit" }`). Champs optionnels : `recipe_id`, `brew_name`.
+Retourne `{ "ok": true, "total": N, "first_malt": "..." }`.
+
+### GET `/api/scale-guide`
+
+Retourne `{ "active": false }` si aucune session, sinon `{ "active": true, "brew_name", "step", "total", "malt_name", "target_kg" }` (`target_kg` convertit automatiquement depuis `g` si nécessaire).
+
+### POST `/api/scale-guide/next`
+
+Passe à l'étape suivante ; retourne `{ "finished": true, "active": false }` une fois le dernier malt pesé.
+
+---
+
 ## Administration DB
 
 | Méthode | Route | Description |
 |---------|-------|-------------|
 | GET | `/api/admin/db-stats` | Taille et nombre de lignes par table (DB principale + DB lectures) |
 | POST | `/api/admin/vacuum` | Lance `VACUUM` sur les deux bases SQLite |
+| POST | `/api/admin/purge-deleted` | Purge immédiatement les lignes soft-deleted au-delà de la rétention configurée |
 | GET | `/api/admin/export-sql` | Exporte la DB principale en SQL (dump complet) |
 
 ### GET `/api/admin/db-stats`
@@ -644,9 +771,30 @@ Retourne :
 }
 ```
 
+### POST `/api/admin/purge-deleted`
+
+Exécute immédiatement la même purge que la tâche planifiée quotidienne (`inventory_items`, `recipes`, `brews`, `beers` soft-deleted depuis plus longtemps que la rétention configurée). Retourne `{ "deleted": {"table": n, ...}, "total": N, "retention_days": D }`.
+
 ### GET `/api/admin/export-sql`
 
 Retourne un fichier texte `.sql` en téléchargement (`Content-Disposition: attachment`).
+
+---
+
+## Administration — images
+
+Outils de maintenance ponctuels liés à la migration des photos (base64 en base → fichiers sur disque). Idempotents, sans effet si déjà migré.
+
+| Méthode | Route | Description |
+|---------|-------|-------------|
+| GET | `/api/admin/draft-images-status` | Diagnostic : état des images de chaque brouillon + fichiers orphelins sur disque |
+| POST | `/api/admin/migrate-draft-images` | Migre les images base64 des brouillons vers des fichiers, purge les doublons base64 |
+| POST | `/api/admin/restore-draft-images` | Restaure les images de brouillons depuis une sauvegarde `brouillons.json` (GitHub) |
+| POST | `/api/admin/migrate-beer-images` | Migre les photos base64 des bières (cave) vers des fichiers |
+
+### POST `/api/admin/restore-draft-images`
+
+Corps : `{ "drafts": [...] }` (contenu du fichier `brouillons.json` d'une sauvegarde GitHub). Ne restaure que les brouillons dont la ligne DB actuelle n'a pas déjà de fichier image lié.
 
 ---
 

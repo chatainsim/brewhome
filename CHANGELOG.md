@@ -4,6 +4,21 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## Non publié (depuis la version 0.1.5)
+
+### Ajouté
+- **Cave — formats de bouteille 25 cl et 50 cl** : s'ajoutent aux formats 33 cl / 75 cl existants, activables individuellement (réglage `bottle_sizes_enabled` dans *Paramètres avancés → Seuils de stock*, 25/50 cl désactivés par défaut). Un format désactivé reste affiché tant qu'une bière y a du stock (pas de perte de données silencieuse). Cave, embouteillage depuis un brassin, calculateur bouteilles, vitrine GitHub Pages et statistiques de consommation généralisés aux 4 formats.
+
+### Corrigé
+- **Paramètres — token Telegram écrasé au chargement** : régression du masquage serveur des clés secrètes ; `telegram_token` n'avait pas le même garde que `ai_api_key` contre le placeholder `"***"`, ce qui cassait silencieusement les notifications Telegram à chaque rechargement de la page.
+- **Impression de checklist — injection HTML** : le texte des items de checklist de brassage n'était pas échappé lors de l'impression, contrairement à l'affichage écran et à l'éditeur.
+- **Brouillons — perte de la dernière frappe en changeant de brouillon** : le debounce de sauvegarde du brouillon précédent n'était pas vidé immédiatement avant de changer de contexte, ce qui pouvait écraser silencieusement la dernière modification du brouillon quitté.
+- **Import de recettes — unité d'ingrédient non validée** : `POST /api/import/recipes` acceptait une unité arbitraire (même bug que celui déjà corrigé côté création manuelle).
+- **Densimètres — "OG -Infinity" affiché sans mesure** : le graphique de fermentation affichait `-Infinity` quand la fenêtre sélectionnée ne contenait aucune lecture de densité.
+- **Brouillons — désélection d'image après suppression** : supprimer une image de la galerie ne recalait pas toujours l'image sélectionnée, qui pouvait silencieusement changer vers une autre photo que celle choisie par l'utilisateur.
+
+---
+
 ## [2026-08-15] — 8 · version 0.1.5
 
 ### Corrigé

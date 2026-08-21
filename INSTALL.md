@@ -540,6 +540,23 @@ Pour trouver votre fuseau : [en.wikipedia.org/wiki/List_of_tz_database_time_zone
 
 ---
 
+## Journalisation (logs fichier)
+
+En plus de la sortie standard (journalctl / console), BrewHome écrit ses logs dans un fichier avec rotation quotidienne et compression gzip automatique des anciens fichiers. Réglable via variables d'environnement :
+
+| Variable | Rôle | Défaut |
+|----------|------|--------|
+| `BREWHOME_LOG_LEVEL` | Niveau de log : `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` |
+| `BREWHOME_LOG_KEEP` | Nombre de fichiers rotatifs (jours) conservés | `14` |
+| `BREWHOME_LOG_FILE` | Chemin complet du fichier de log (prioritaire sur `BREWHOME_LOG_DIR`) | — |
+| `BREWHOME_LOG_DIR` | Répertoire du fichier de log (nommé `brewhome.log` à l'intérieur) | détection automatique |
+
+Si ni `BREWHOME_LOG_FILE` ni `BREWHOME_LOG_DIR` ne sont définis, BrewHome essaie dans l'ordre : `/opt/brewhome/logs`, `/var/log/brewhome`, puis `<répertoire de l'application>/logs` (le premier chemin accessible en écriture est retenu).
+
+Pour définir ces variables sous systemd, ajoutez-les dans le fichier de service (`Environment=BREWHOME_LOG_LEVEL=DEBUG`) puis `sudo systemctl daemon-reload && sudo systemctl restart brewhome`.
+
+---
+
 ## Vérification de mise à jour
 
 BrewHome vérifie automatiquement si une nouvelle version est disponible sur [GitHub Releases](https://github.com/chatainsim/brewhome/releases) :
