@@ -1,0 +1,40 @@
+# À chaque push sur main touchant blueprints/admin.py ou CHANGELOG.md :
+# publie la release Gitea taguée avec APP_VERSION, description = section
+# du changelog correspondante - jusqu'ici fait à la main (copier-coller
+# dans le formulaire de release). Idempotent (voir .ci/publish_release.py) :
+# ne fait rien si une release existe déjà pour cette version.
+#
+# Pas de build ici : brewhome est une app Flask, la release n'est qu'un tag +
+# des notes, pas d'artefact à compiler (contrairement à
+# brew_android/.forgejo/workflows/release.yml, qui produit un APK).
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'brewhome/blueprints/admin.py'
+      - 'CHANGELOG.md'
+
+jobs:
+  release:
+    runs-on: host
+    steps:
+      - name: Publier la release si elle n'existe pas déjà
+        env:
+          RELEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          HOST_PATH="${GITHUB_SERVER_URL#http://}"
+          rm -rf src
+          # credential.helper vide : ne pas laisser un helper « store » écrire
+          # le token éphémère dans ~/.git-credentials (cf. incident 2026-07-15,
+          # même précaution que brew_android/.forgejo/workflows/release.yml)
+          git -c credential.helper= clone --branch "${GITHUB_REF_NAME}" --depth 20 \
+            "http://oauth2:${RELEASE_TOKEN}@${HOST_PATH}/${GITHUB_REPOSITORY}.git" src
+          cd src
+          git checkout "${GITHUB_SHA}" || echo "SHA hors fenêtre de clone, tip de ${GITHUB_REF_NAME}"
+
+          RELEASE_API_BASE="${GITHUB_SERVER_URL}/api/v1" \
+          RELEASE_REPO="${GITHUB_REPOSITORY}" \
+          python3 .ci/publish_release.py

@@ -1,0 +1,28 @@
+# Équivalent GitHub-hébergé de .forgejo/workflows/release.yml - voir ce
+# fichier pour le contexte complet. Indépendant l'un de l'autre plutôt qu'un
+# miroir : une release publiée même si le runner Forgejo auto-hébergé est
+# hors ligne (documenté comme arrivant par moments, voir brew_android).
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'brewhome/blueprints/admin.py'
+      - 'CHANGELOG.md'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publier la release si elle n'existe pas déjà
+        env:
+          RELEASE_API_BASE: https://api.github.com
+          RELEASE_REPO: ${{ github.repository }}
+          RELEASE_TOKEN: ${{ github.token }}
+        run: python3 .ci/publish_release.py
