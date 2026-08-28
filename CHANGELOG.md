@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-08-28] — 11 · version 0.1.8
+
+### Ajouté
+- **Réglages — deep-link direct vers un onglet** : `/#settings-<onglet>` (ex. `/#settings-github`) ouvre désormais directement la modale Réglages sur l'onglet demandé, au lieu de rester sans effet (Réglages est une modale, pas une page `page-*`, donc jusqu'ici hors du deep-link `/#cave`, `/#brassins`… déjà utilisé par l'app Android). Pensé pour un bouton "Synchroniser la cave" côté app Android qui doit atterrir directement sur l'onglet GitHub plutôt que sur Catalogue.
+
+---
+
 ## [2026-08-28] — 10 · version 0.1.7
 
 ### Corrigé
