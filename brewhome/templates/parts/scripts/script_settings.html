@@ -802,7 +802,7 @@ function exportSettings() {
   if (out.github?.data)    delete out.github.data.pat;
   (out.github?.vitrine?.targets || []).forEach(t => delete t.pat);
   (out.github?.data?.targets    || []).forEach(t => delete t.pat);
-  if (out.ai)       { delete out.ai.apiKey; delete out.ai.geminiApiKey; }
+  if (out.ai)       { delete out.ai.apiKey; delete out.ai.geminiApiKey; delete out.ai.openaiApiKey; }
   if (out.telegram) delete out.telegram.token;
   downloadJson(out, `parametres_${new Date().toISOString().slice(0,10)}.json`);
   toast(t('settings.import.exported_settings'), 'success');
@@ -817,11 +817,13 @@ async function importSettings(input) {
     const githubBackup  = appSettings.github;
     const aiKeyBackup   = appSettings.ai?.apiKey;
     const geminiBackup  = appSettings.ai?.geminiApiKey;
+    const openaiBackup  = appSettings.ai?.openaiApiKey;
     const tgTokenBackup = appSettings.telegram?.token;
     Object.assign(appSettings, data);
     if (githubBackup) appSettings.github = githubBackup;
     if (aiKeyBackup  && appSettings.ai) appSettings.ai.apiKey       = aiKeyBackup;
     if (geminiBackup && appSettings.ai) appSettings.ai.geminiApiKey = geminiBackup;
+    if (openaiBackup && appSettings.ai) appSettings.ai.openaiApiKey = openaiBackup;
     if (tgTokenBackup && appSettings.telegram) appSettings.telegram.token = tgTokenBackup;
     saveSettings();
     // Mettre à jour la DB pour les paramètres d'apparence
