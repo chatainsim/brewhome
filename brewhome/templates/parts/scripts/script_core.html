@@ -1658,14 +1658,26 @@ if (window.Chart) {
 
   // Deep-link : /#cave, /#brassins… ouvre directement la page (utilisé par l'app Android)
   // et restaure la page courante après un rechargement, puisque navigate() écrit le hash.
+  // /#settings-<onglet> est un cas particulier : Réglages est une modale, pas une
+  // page-*, donc pas éligible à navigate() - ouvre la modale puis bascule sur l'onglet
+  // demandé (utilisé par le bouton "Synchroniser la cave" de l'app Android, qui a
+  // besoin d'atterrir directement sur l'onglet GitHub plutôt que sur Catalogue).
   const hashPage = location.hash.replace(/^#\/?/, '');
-  if (hashPage && document.getElementById('page-' + hashPage)) navigate(hashPage);
+  if (hashPage.startsWith('settings-')) {
+    openSettings().then(() => settingsTab(hashPage.slice('settings-'.length)));
+  } else if (hashPage && document.getElementById('page-' + hashPage)) {
+    navigate(hashPage);
+  }
 
   // Hash modifié de l'extérieur (URL éditée à la main, deep-link reçu pendant
   // que l'app tourne). navigate() utilise replaceState, qui n'émet pas
   // d'événement : seuls les changements réellement externes arrivent ici.
   window.addEventListener('hashchange', () => {
     const p = location.hash.replace(/^#\/?/, '');
+    if (p.startsWith('settings-')) {
+      openSettings().then(() => settingsTab(p.slice('settings-'.length)));
+      return;
+    }
     const cur = document.querySelector('.page.active')?.id.replace('page-', '');
     if (p && p !== cur && document.getElementById('page-' + p)) navigate(p);
   });
