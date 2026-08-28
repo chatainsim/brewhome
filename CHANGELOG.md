@@ -4,6 +4,14 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-08-28] — 10 · version 0.1.7
+
+### Corrigé
+- **Paramètres — clé API OpenAI non purgée à l'export** : `exportSettings()` purgeait bien les clés Gemini/legacy avant de générer le fichier de réglages téléchargeable, mais avait oublié `openaiApiKey` (champ distinct ajouté avec le provider OpenAI) - une clé configurée pour la génération d'images IA se retrouvait en clair dans l'export. Restauration symétrique ajoutée côté import.
+- **Import BeerXML — expansion d'entités XML** : le fichier BeerXML uploadé était parsé avec le parseur XML stdlib nu, sans protection contre l'expansion d'entités internes ("billion laughs") - un fichier corrompu ou malveillant pouvait faire exploser mémoire/CPU du process. Parsing de ce fichier utilisateur passé à `defusedxml`.
+
+---
+
 ## [2026-08-22] — 9 · version 0.1.6
 
 ### Ajouté
