@@ -4,6 +4,8 @@ import secrets
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+import defusedxml.ElementTree as DefusedET
+from defusedxml.common import DefusedXmlException
 from flask import Blueprint, Response, jsonify, request, current_app
 from db import get_db, get_readings_db, PHOTOS_DIR
 from helpers import _to_kg, api_error, VALID_UNITS
@@ -602,8 +604,13 @@ def import_beerxml():
     if not xml_bytes:
         return api_error('no_data', 400)
     try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError as e:
+        # defusedxml.fromstring, pas ET.fromstring : ce fichier BeerXML vient
+        # de l'utilisateur (upload), donc potentiellement malveillant - un
+        # DOCTYPE avec entités internes imbriquées ("billion laughs") ferait
+        # exploser mémoire/CPU avec le parseur stdlib nu. defusedxml bloque
+        # ça (et les entités externes) en levant DefusedXmlException.
+        root = DefusedET.fromstring(xml_bytes)
+    except (ET.ParseError, DefusedXmlException) as e:
         return api_error('xml_parse_error', 400, detail=str(e))
     recipe_els = [root] if root.tag == 'RECIPE' else root.findall('RECIPE')
     imported = 0
