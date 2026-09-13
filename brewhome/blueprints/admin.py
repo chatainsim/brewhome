@@ -425,10 +425,15 @@ def admin_db_stats():
 @bp.route('/api/admin/scheduler-jobs')
 def admin_scheduler_jobs():
     """Diagnostic : jobs APScheduler réellement enregistrés (id + prochaine
-    exécution). Sert à vérifier qu'une notification planifiée (ex.
+    exécution) + état de la config Telegram (présence, sans les valeurs -
+    voir _SECRET_KEYS). Sert à vérifier qu'une notification planifiée (ex.
     tg_brew_steps) a bien été (re)programmée après un redémarrage ou un
-    changement de réglages Telegram, plutôt que de deviner depuis les logs."""
+    changement de réglages, plutôt que de deviner depuis les logs. Si AUCUN
+    job 'tg_*' n'apparaît, c'est presque toujours parce que token/chat_id
+    ne sont pas les deux enregistrés (_reschedule_telegram_locked() ne
+    planifie rien du tout tant que les deux ne sont pas configurés)."""
     from scheduler import _scheduler
+    from blueprints.integrations import _tg_get_settings
     jobs = [
         {
             'id': job.id,
@@ -441,7 +446,16 @@ def admin_scheduler_jobs():
         }
         for job in _scheduler.get_jobs()
     ]
-    return jsonify(sorted(jobs, key=lambda j: j['id']))
+    token, chat_id, notifs, tz_str = _tg_get_settings()
+    return jsonify({
+        'jobs': sorted(jobs, key=lambda j: j['id']),
+        'telegram': {
+            'token_configured': bool(token),
+            'chat_id_configured': bool(chat_id),
+            'tz': tz_str,
+            'notifs_keys': sorted(notifs.keys()) if isinstance(notifs, dict) else [],
+        },
+    })
 
 
 @bp.route('/api/admin/vacuum', methods=['POST'])
