@@ -422,6 +422,28 @@ def admin_db_stats():
     })
 
 
+@bp.route('/api/admin/scheduler-jobs')
+def admin_scheduler_jobs():
+    """Diagnostic : jobs APScheduler réellement enregistrés (id + prochaine
+    exécution). Sert à vérifier qu'une notification planifiée (ex.
+    tg_brew_steps) a bien été (re)programmée après un redémarrage ou un
+    changement de réglages Telegram, plutôt que de deviner depuis les logs."""
+    from scheduler import _scheduler
+    jobs = [
+        {
+            'id': job.id,
+            # getattr, pas job.next_run_time direct : sur un scheduler pas
+            # encore démarré (ex. tests), APScheduler n'expose pas cet
+            # attribut du tout (AttributeError, pas juste None).
+            'next_run_time': (
+                nrt.isoformat() if (nrt := getattr(job, 'next_run_time', None)) else None
+            ),
+        }
+        for job in _scheduler.get_jobs()
+    ]
+    return jsonify(sorted(jobs, key=lambda j: j['id']))
+
+
 @bp.route('/api/admin/vacuum', methods=['POST'])
 def admin_vacuum():
     try:

@@ -45,7 +45,12 @@ def _tg_get_settings():
     raw_notifs = s.get('telegram_notifs')
     if raw_notifs:
         try:
-            notifs = json.loads(raw_notifs)
+            parsed = json.loads(raw_notifs)
+            # Un JSON valide mais pas objet (liste, nombre...) ferait planter
+            # tout appelant qui fait notifs.get(...) - _reschedule_telegram_locked
+            # par exemple, ce qui empêcherait alors TOUTE notification
+            # planifiée (dont tg_brew_steps) de se réenregistrer, en silence.
+            notifs = parsed if isinstance(parsed, dict) else {}
         except (json.JSONDecodeError, ValueError) as e:
             current_app.logger.warning(
                 "_tg_get_settings: telegram_notifs JSON corrompu (valeur ignorée): %s", e
@@ -771,31 +776,47 @@ def _reschedule_telegram_locked():
         current_app.logger.warning(f"reschedule_telegram: invalid timezone {tz_str!r}, falling back to UTC: {e}")
         tz = timezone.utc
 
+    # Chaque enregistrement est isolé dans son propre try/except : sans ça,
+    # une seule config malformee (ex. 'hour' non numerique dans les reglages
+    # d'un des types de notif) faisait planter _reschedule_telegram_locked()
+    # avant d'atteindre les lignes suivantes - tg_brew_steps etant enregistre
+    # en dernier, il n'etait alors JAMAIS planifie, silencieusement (aucune
+    # notification d'etape de brassin, meme correctement programmee a
+    # l'avance, sans que rien ne l'indique dans l'appli).
     def _add(jid, ntype, cfg, monthly):
-        if not cfg.get('enabled'):
-            return
-        h = int(cfg.get('hour', 8))
-        m = int(cfg.get('minute', 0))
-        if monthly:
-            d = max(1, min(28, int(cfg.get('day', 1))))
-            trigger = CronTrigger(day=d, hour=h, minute=m, timezone=tz)
-        else:
-            trigger = CronTrigger(hour=h, minute=m, timezone=tz)
-        _scheduler.add_job(_tg_fire, trigger, args=[ntype], id=jid, replace_existing=True)
+        try:
+            if not cfg.get('enabled'):
+                return
+            h = int(cfg.get('hour', 8))
+            m = int(cfg.get('minute', 0))
+            if monthly:
+                d = max(1, min(28, int(cfg.get('day', 1))))
+                trigger = CronTrigger(day=d, hour=h, minute=m, timezone=tz)
+            else:
+                trigger = CronTrigger(hour=h, minute=m, timezone=tz)
+            _scheduler.add_job(_tg_fire, trigger, args=[ntype], id=jid, replace_existing=True)
+        except Exception as e:
+            current_app.logger.warning(f"reschedule_telegram: échec de planification de {jid!r}: {e}")
 
     _add('tg_brews',     'brews',          notifs.get('brews', {}),          monthly=False)
     _add('tg_cave',      'cave',           notifs.get('cave', {}),           monthly=True)
     _add('tg_inventory', 'inventory',      notifs.get('inventory', {}),      monthly=True)
     _add('tg_ferm',      'ferm_reminders', notifs.get('ferm_reminders', {}), monthly=False)
 
-    if notifs.get('spindle_stable', {}).get('enabled') and token and chat_id:
-        _scheduler.add_job(_tg_check_spindle_stability, CronTrigger(hour='*/4', timezone=tz),
-                           id='tg_spindle_stable', replace_existing=True)
+    try:
+        if notifs.get('spindle_stable', {}).get('enabled') and token and chat_id:
+            _scheduler.add_job(_tg_check_spindle_stability, CronTrigger(hour='*/4', timezone=tz),
+                               id='tg_spindle_stable', replace_existing=True)
+    except Exception as e:
+        current_app.logger.warning(f"reschedule_telegram: échec de planification de 'tg_spindle_stable': {e}")
 
     # Étapes brassins : job quotidien à 8h (même heure que brew_events par défaut)
-    if token and chat_id:
-        _scheduler.add_job(_tg_check_brew_steps, CronTrigger(hour=8, minute=0, timezone=tz),
-                           id='tg_brew_steps', replace_existing=True)
+    try:
+        if token and chat_id:
+            _scheduler.add_job(_tg_check_brew_steps, CronTrigger(hour=8, minute=0, timezone=tz),
+                               id='tg_brew_steps', replace_existing=True)
+    except Exception as e:
+        current_app.logger.warning(f"reschedule_telegram: échec de planification de 'tg_brew_steps': {e}")
 
     try:
         with get_db() as conn:
