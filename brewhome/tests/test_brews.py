@@ -163,6 +163,86 @@ def test_delete_fermentation_reading_not_found(client, brew):
     assert r.status_code == 404
 
 
+# ── Étapes de brassin ───────────────────────────────────────────────────────────
+
+def test_add_brew_step(client, brew):
+    r = client.post(f'/api/brews/{brew["id"]}/steps', json={
+        'scheduled_date': '2025-01-20', 'title': 'Ajout houblon',
+    })
+    assert r.status_code == 201
+    data = r.get_json()
+    assert data['scheduled_date'] == '2025-01-20'
+    assert data['title'] == 'Ajout houblon'
+    assert data['telegram_notify'] == 1
+
+
+def test_add_brew_step_missing_field(client, brew):
+    r = client.post(f'/api/brews/{brew["id"]}/steps', json={'title': 'Ajout houblon'})
+    assert r.status_code == 400
+
+
+def test_add_brew_step_brew_not_found(client):
+    r = client.post('/api/brews/9999/steps', json={
+        'scheduled_date': '2025-01-20', 'title': 'Ajout houblon',
+    })
+    assert r.status_code == 404
+
+
+def test_notify_new_brew_step_skips_without_telegram_config(client, brew):
+    """Sans token/chat_id configurés (cas par défaut des tests), l'ajout
+    d'une étape ne doit pas planter même si sa date est aujourd'hui."""
+    from datetime import date
+    r = client.post(f'/api/brews/{brew["id"]}/steps', json={
+        'scheduled_date': date.today().isoformat(), 'title': 'Brassage',
+    })
+    assert r.status_code == 201
+
+
+def test_notify_new_brew_step_if_due(monkeypatch):
+    """Coeur du correctif : une étape créée pour AUJOURD'HUI après l'heure du
+    rappel quotidien (8h) doit être rattrapée immédiatement (le job une-fois-
+    par-jour ne la reverra jamais, sa date planifiée ne sera déjà plus
+    "aujourd'hui" à son prochain passage) ; avant 8h, on laisse le job normal
+    s'en charger pour ne pas notifier en double."""
+    from datetime import datetime, timezone
+    from blueprints import integrations
+
+    sent = []
+    monkeypatch.setattr(integrations, '_tg_get_settings', lambda: ('tok', 'chat', {}, 'UTC'))
+    monkeypatch.setattr(integrations, '_tg_send', lambda token, chat_id, text: sent.append(text))
+
+    # "Aujourd'hui" du point de vue du test = la date mockée ci-dessous
+    # (2025-01-20), pas la vraie date du jour - scheduled_date doit y
+    # correspondre pour tomber dans le cas "prevu aujourd'hui".
+    step = {'id': 1, 'title': 'Ajout houblon', 'notes': None, 'scheduled_date': '2025-01-20', 'telegram_notify': 1}
+
+    # Après 8h → rattrapage immédiat.
+    monkeypatch.setattr(
+        integrations, 'datetime',
+        type('_DT', (), {'now': staticmethod(lambda tz=None: datetime(2025, 1, 20, 9, 0, tzinfo=timezone.utc))}),
+    )
+    integrations.notify_new_brew_step_if_due(step, 'Brassin Test')
+    assert len(sent) == 1
+    assert 'Ajout houblon' in sent[0]
+
+    # Avant 8h → le job quotidien s'en charge, pas de doublon ici.
+    sent.clear()
+    monkeypatch.setattr(
+        integrations, 'datetime',
+        type('_DT', (), {'now': staticmethod(lambda tz=None: datetime(2025, 1, 20, 7, 0, tzinfo=timezone.utc))}),
+    )
+    integrations.notify_new_brew_step_if_due(step, 'Brassin Test')
+    assert sent == []
+
+    # telegram_notify désactivé → jamais de notification, quelle que soit l'heure.
+    monkeypatch.setattr(
+        integrations, 'datetime',
+        type('_DT', (), {'now': staticmethod(lambda tz=None: datetime(2025, 1, 20, 9, 0, tzinfo=timezone.utc))}),
+    )
+    integrations.notify_new_brew_step_if_due({**step, 'telegram_notify': 0}, 'Brassin Test')
+    assert sent == []
+
+
 # ── Déduction de stock du dry hop ─────────────────────────────────────────────
 
 def _inv_qty(client, item_id):

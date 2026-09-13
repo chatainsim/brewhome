@@ -661,7 +661,8 @@ def get_brew_steps(brew_id):
 @bp.route('/api/brews/<int:brew_id>/steps', methods=['POST'])
 def add_brew_step(brew_id):
     with get_db() as conn:
-        if not conn.execute('SELECT 1 FROM brews WHERE id=?', (brew_id,)).fetchone():
+        brew_row = conn.execute('SELECT name FROM brews WHERE id=?', (brew_id,)).fetchone()
+        if not brew_row:
             return api_error('not_found', 404)
     d = request.json or {}
     scheduled_date = (d.get('scheduled_date') or '').strip()
@@ -676,7 +677,16 @@ def add_brew_step(brew_id):
              1 if d.get('telegram_notify', True) else 0)
         )
         row = conn.execute('SELECT * FROM brew_steps WHERE id=?', (cur.lastrowid,)).fetchone()
-        return jsonify(dict(row)), 201
+    step = dict(row)
+    # Rattrape le job quotidien de 8h s'il a deja tourne (voir
+    # notify_new_brew_step_if_due) - hors contexte DB pour ne pas garder de
+    # verrou pendant l'appel reseau Telegram.
+    try:
+        from blueprints.integrations import notify_new_brew_step_if_due
+        notify_new_brew_step_if_due(step, brew_row['name'])
+    except Exception as e:
+        current_app.logger.warning('tg brew step notification failed: %s', e)
+    return jsonify(step), 201
 
 
 @bp.route('/api/brew-steps/<int:step_id>', methods=['PUT'])

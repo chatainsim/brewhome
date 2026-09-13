@@ -628,6 +628,36 @@ def _tg_check_brew_steps():
             current_app.logger.warning(f"_tg_check_brew_steps: send error (step {step['id']!r}): {e}")
 
 
+def notify_new_brew_step_if_due(step, brew_name):
+    """Rattrape une etape de brassin creee pour AUJOURD'HUI apres l'heure du
+    rappel quotidien (8h, voir _tg_check_brew_steps/_reschedule_telegram_locked) :
+    ce job ne tourne qu'une fois par jour sur scheduled_date == aujourd'hui,
+    donc une etape ajoutee apres son passage ne serait jamais notifiee (le
+    lendemain, sa date planifiee n'est deja plus "aujourd'hui"). Avant 8h,
+    on laisse le job du jour s'en charger normalement (evite une notif en
+    double)."""
+    if not step.get('telegram_notify'):
+        return
+    token, chat_id, _, tz_str = _tg_get_settings()
+    if not token or not chat_id:
+        return
+    try:
+        tz = ZoneInfo(tz_str or 'UTC')
+    except Exception:
+        tz = timezone.utc
+    now = datetime.now(tz)
+    if step.get('scheduled_date') != now.date().isoformat() or now.hour < 8:
+        return
+    notes_line = f'\n📝 {step["notes"]}' if step.get('notes') else ''
+    try:
+        _tg_send(token, chat_id,
+            f'🔔 <b>Étape brassage</b> — {brew_name}\n\n'
+            f'<b>{step["title"]}</b> est prévu aujourd\'hui !'
+            f'{notes_line}')
+    except Exception as e:
+        current_app.logger.warning(f"notify_new_brew_step_if_due: send error (step {step.get('id')!r}): {e}")
+
+
 def _tg_check_spindle_stability():
     """Vérifie si des spindles actifs ont une densité stable depuis N jours et envoie une notif Telegram."""
     token, chat_id, notifs, _ = _tg_get_settings()
