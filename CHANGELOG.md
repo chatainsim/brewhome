@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-18] — 12 · version 0.1.9
+
+### Corrigé
+- **Profils d'eau — commune dont le nom contient une apostrophe** : le bouton d'enregistrement d'une commune HubEau restait sans effet pour « L'Isle-d'Abeau », « L'Étang-Salé » et consorts. Les données insérées dans les attributs HTML sont désormais échappées pour ce contexte précis, correction appliquée à l'ensemble de l'interface (brouillons, calendrier, recettes, densimètres, cœur).
+
+### Modifié
+- **Export SQL — purge des réglages sensibles** : l'export applique désormais la même purge que la sauvegarde GitHub, jetons d'API retirés. Cette logique n'existait que côté sauvegarde ; elle est factorisée en un seul point pour que les deux chemins de sortie ne puissent plus diverger, et couverte par des tests.
+
+---
+
 ## [2026-08-28] — 11 · version 0.1.8
 
 ### Ajouté
