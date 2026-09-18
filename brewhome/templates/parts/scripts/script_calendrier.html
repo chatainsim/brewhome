@@ -607,7 +607,7 @@ function calEvClick(e, idx) {
     } else {
       html += `<div style="margin-top:8px">
         <button class="btn btn-sm btn-ghost" style="width:100%;font-size:.75rem"
-          onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${ev.date.replace(/'/g,'\\\'') }','${rawLabel.replace(/'/g,'\\\'')}'),300)">
+          onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${escJsAttr(ev.date)}','${escJsAttr(rawLabel)}'),300)">
           <i class="fas fa-plus"></i> ${t('cal.prepare_draft')}
         </button>
       </div>`;
@@ -647,7 +647,7 @@ function calEvClick(e, idx) {
       html += `</div>`;
     } else {
       html += `<button class="btn btn-sm btn-ghost" style="width:100%;font-size:.75rem"
-        onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${(ev.eventDate||'').replace(/'/g,'\\\'') }','${evLabel.replace(/'/g,'\\\'')}'),300)">
+        onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${escJsAttr(ev.eventDate||'')}','${escJsAttr(evLabel)}'),300)">
         <i class="fas fa-plus"></i> ${t('cal.prepare_draft')}
       </button>`;
     }
@@ -688,7 +688,7 @@ function calEvClick(e, idx) {
       <div style="font-size:.75rem;color:#a855f7;font-style:italic;margin-bottom:8px">${t('cal.remind_msg')}</div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-sm btn-ghost" style="flex:1;font-size:.75rem"
-          onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${(ev.eventDate||'').replace(/'/g,'\\\'') }','${(ce?.title||'').replace(/'/g,'\\\'')}'),300)">
+          onclick="_closeCalPopover();navigate('brouillons');setTimeout(()=>newDraftForEvent('${escJsAttr(ev.eventDate||'')}','${escJsAttr(ce?.title||'')}'),300)">
           <i class="fas fa-plus"></i> ${t('cal.prepare_draft')}
         </button>
         ${ce ? `<button class="btn btn-sm btn-ghost" style="font-size:.75rem"

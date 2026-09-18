@@ -10,7 +10,7 @@ from flask import Blueprint, Response, jsonify, request, current_app
 
 from db import get_db, get_readings_db, _log, DB_PATH, READINGS_DB_PATH
 from constants import BrewStatus, BottleSize
-from helpers import api_error
+from helpers import api_error, strip_secret_settings
 
 bp = Blueprint('admin', __name__)
 
@@ -505,13 +505,29 @@ def admin_export_sql():
     token = request.args.get('token', '')
     if not secrets.compare_digest(token, EXPORT_TOKEN):
         return api_error('forbidden', 403, detail='Invalid or missing export token')
-    lines = []
-    conn = sqlite3.connect(DB_PATH)
+
+    # La base est recopiée en mémoire pour y purger les secrets avant le dump :
+    # le fichier produit est téléchargé, conservé, parfois déposé ailleurs, et
+    # ne doit pas contenir de PAT GitHub ni de jeton Telegram exploitables.
+    # Purger la copie plutôt que réécrire le SQL évite tout oubli de format.
+    source = sqlite3.connect(DB_PATH)
+    export = sqlite3.connect(':memory:')
     try:
-        for line in conn.iterdump():
-            lines.append(line)
+        source.backup(export)
     finally:
-        conn.close()
+        source.close()
+
+    try:
+        export.row_factory = sqlite3.Row
+        rows = export.execute('SELECT key, value FROM app_settings').fetchall()
+        kept = strip_secret_settings({r['key']: r['value'] for r in rows})
+        export.execute('DELETE FROM app_settings')
+        export.executemany('INSERT INTO app_settings (key, value) VALUES (?,?)',
+                           list(kept.items()))
+        lines = list(export.iterdump())
+    finally:
+        export.close()
+
     sql_str = '\n'.join(lines)
     filename = f'brewhome_{datetime.now().strftime("%Y-%m-%d")}.sql'
     return Response(sql_str, mimetype='text/plain',

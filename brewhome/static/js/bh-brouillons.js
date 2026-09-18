@@ -582,7 +582,7 @@ function _populateDraftEventPicker() {
       const dayStr = new Date(e.date + 'T00:00:00').toLocaleDateString(_lang || 'fr', { day:'numeric' });
       const linked = _currentDraftTargetDate === e.date;
       html += `<div class="ing-suggest-item" style="${linked?'background:rgba(139,92,246,.15)':''}"
-        onclick="linkDraftToEvent('${e.date}','${e.label.replace(/'/g,"\\'")}')">
+        onclick="linkDraftToEvent('${escJsAttr(e.date)}','${escJsAttr(e.label)}')">
         <span style="display:flex;align-items:center;gap:8px">
           <span style="width:8px;height:8px;border-radius:50%;background:${e.color};flex-shrink:0"></span>
           <span>${e.emoji} ${esc(e.label)}</span>
@@ -707,8 +707,8 @@ function renderDraftIngRows() {
       <div class="ing-name" style="position:relative;flex:2;min-width:0">
         <input type="text" class="draft-ing-name-input" placeholder="${t('rec.ing_name')}" value="${esc(ing.name)}"
           autocomplete="off"
-          oninput="_draftIngredients[${idx}].name=this.value;draftIngSearch(this,${idx},'${ing.category}');scheduleDraftSave()"
-          onfocus="draftIngSearch(this,${idx},'${ing.category}')"
+          oninput="_draftIngredients[${idx}].name=this.value;draftIngSearch(this,${idx},'${escJsAttr(ing.category)}');scheduleDraftSave()"
+          onfocus="draftIngSearch(this,${idx},'${escJsAttr(ing.category)}')"
           onblur="setTimeout(()=>{document.querySelectorAll('#draft-ing-rows .ing-suggest').forEach(s=>s.classList.remove('open'))},200)"
           style="width:100%;font-size:.875rem">
         <div class="ing-suggest" id="draft-sug-${ing._rid}"></div>

@@ -7,6 +7,15 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Échappement pour une chaîne JS placée entre apostrophes DANS un attribut
+// HTML — typiquement onclick="f('...')". esc() seul n'y suffit pas : il ne
+// touche pas à l'apostrophe, qui referme la chaîne JS. L'ordre compte, les
+// antislashs d'abord, sinon on échapperait les antislashs qu'on vient d'ajouter.
+function escJsAttr(s) {
+  if (s === null || s === undefined) return '';
+  return esc(String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+
 // ── Markdown minimal (notes recettes / brouillons) ────────────────────────────
 // Supporte : # titres, **gras**, *italique*, ~~barré~~, `code`,
 //            - / * listes, 1. listes numérotées, > citation, ---
@@ -817,7 +826,7 @@ function _renderSettingsWorldEvents() {
     const dDateFull = ov.date_mmdd ? `${new Date().getFullYear()}-${ov.date_mmdd}` : origDate;
     const hasOv     = !!(ov.emoji || ov.label || ov.color || ov.desc !== undefined || ov.style !== undefined || ov.date_mmdd);
     const id        = _wevId(eKey);
-    const safeOrig  = eKey.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const safeOrig  = escJsAttr(eKey);
 
     if (_editingWorldEv === eKey) {
       return `<div style="padding:12px;border-radius:8px;background:var(--card2);border:1px solid rgba(245,158,11,.4)">
@@ -1255,7 +1264,7 @@ async function hubEauFetch() {
         </table>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" onclick="hubEauApply()"><i class="fas fa-check"></i> ${t('settings.water.hubeau_apply_btn')}</button>
-          <button class="btn btn-ghost btn-sm" onclick="showHubEauSaveForm('${esc(communeText)}')">
+          <button class="btn btn-ghost btn-sm" onclick="showHubEauSaveForm('${escJsAttr(communeText)}')">
             <i class="fas fa-bookmark"></i> ${t('settings.water.hubeau_save_profile')}
           </button>
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('hubeau-result').style.display='none'">${t('common.close')}</button>

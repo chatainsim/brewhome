@@ -347,7 +347,7 @@ function beerTypeSearch(input) {
     if (!matches.length) continue;
     html += `<div class="ing-suggest-cat">${esc(_beerTypeLabel(grp))}</div>`;
     matches.forEach(t => {
-      html += `<div class="ing-suggest-item" onmousedown="selectBeerType('${t.replace(/'/g,"\\'")}')"><span>${esc(t)}</span></div>`;
+      html += `<div class="ing-suggest-item" onmousedown="selectBeerType('${escJsAttr(t)}')"><span>${esc(t)}</span></div>`;
     });
   }
 
@@ -357,7 +357,7 @@ function beerTypeSearch(input) {
     for (const [cat, styles] of Object.entries(bycat)) {
       html += `<div class="ing-suggest-cat" style="color:var(--gold)">BJCP — ${esc(cat)}</div>`;
       styles.forEach(s => {
-        html += `<div class="ing-suggest-item" onmousedown="selectBeerType('${s.name.replace(/'/g,"\\'")}')"><span style="font-size:.83rem">${esc(s.name)}</span></div>`;
+        html += `<div class="ing-suggest-item" onmousedown="selectBeerType('${escJsAttr(s.name)}')"><span style="font-size:.83rem">${esc(s.name)}</span></div>`;
       });
     }
   }
@@ -1176,7 +1176,7 @@ function filterKegManufacturer() {
   const items = q ? _KEG_MANUFACTURERS.filter(m => m.toLowerCase().includes(q)) : _KEG_MANUFACTURERS;
   if (!items.length) { box.classList.remove('open'); return; }
   box.innerHTML = items.map(m =>
-    `<div class="ing-suggest-item" onmousedown="selectKegManufacturer('${m.replace(/'/g,"\\'")}')"><span>${esc(m)}</span></div>`
+    `<div class="ing-suggest-item" onmousedown="selectKegManufacturer('${escJsAttr(m)}')"><span>${esc(m)}</span></div>`
   ).join('');
   box.classList.add('open');
 }
@@ -2039,7 +2039,7 @@ async function openBrewTimerForBrew(brewId) {
 
   presets.innerHTML = steps.map(s =>
     `<button class="btn btn-ghost btn-sm" style="font-size:.7rem;padding:3px 7px;border-color:${s.color}40"
-      onclick="addBrewTimer('${s.name.replace(/'/g, "\\'")}',${s.mins})">${s.name}</button>`
+      onclick="addBrewTimer('${escJsAttr(s.name)}',${s.mins})">${s.name}</button>`
   ).join('');
 
   const ti = document.getElementById('brew-timer-title');

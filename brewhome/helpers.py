@@ -269,3 +269,39 @@ def _make_thumb(data_url: str, max_px: int = 200) -> str:
         return f'data:image/jpeg;base64,{base64.b64encode(buf.getvalue()).decode()}'
     except Exception:
         return data_url
+
+# ── Purge des secrets (exports et sauvegardes) ────────────────────────────────
+
+#: Réglages à ne jamais laisser sortir de l'application : PAT GitHub (accès en
+#: écriture aux dépôts), jeton du bot Telegram, clés d'API IA.
+SECRET_SETTING_KEYS = frozenset((
+    'gh_data_pat', 'gh_vitrine_pat', 'ai_api_key', 'telegram_token',
+))
+
+#: Réglages dont la valeur JSON contient des PAT imbriqués.
+SECRET_TARGET_KEYS = ('gh_data_targets', 'gh_vitrine_targets')
+
+
+def strip_secret_settings(settings: dict) -> dict:
+    """Retire les secrets d'un dictionnaire de réglages avant export.
+
+    Utilisée par la sauvegarde GitHub *et* par l'export SQL : ces deux
+    chemins ont divergé une fois, l'export laissant filer en clair ce que la
+    sauvegarde purgeait. Une seule implémentation évite que ça recommence.
+
+    Un JSON de cibles illisible fait supprimer la clé entière plutôt que de
+    la laisser passer : mieux vaut perdre un réglage qu'un jeton.
+    """
+    out = {k: v for k, v in settings.items() if k not in SECRET_SETTING_KEYS}
+    for key in SECRET_TARGET_KEYS:
+        raw = out.get(key)
+        if not raw:
+            continue
+        try:
+            targets = json.loads(raw)
+            for target in targets:
+                target.pop('pat', None)
+            out[key] = json.dumps(targets, ensure_ascii=False)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            out.pop(key, None)
+    return out

@@ -2075,7 +2075,7 @@ function renderRecipeView() {
       if (!linked.length) return '';
       const thumbs = linked.map(b => `
         <div style="display:flex;flex-direction:column;align-items:center;gap:5px;cursor:zoom-in"
-          onclick="openImgLightbox('${b.photo.replace(/'/g,"\\'")}','${esc(b.name).replace(/'/g,"\\'")}')">
+          onclick="openImgLightbox('${escJsAttr(b.photo)}','${escJsAttr(b.name)}')">
           <img src="${b.photo}" alt="${esc(b.name)}"
             style="width:90px;height:90px;object-fit:cover;border-radius:10px;
               border:2px solid var(--border);transition:transform .15s;box-shadow:0 2px 6px rgba(0,0,0,.25)"
