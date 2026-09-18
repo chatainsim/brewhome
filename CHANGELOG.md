@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-18] — 13 · version 0.1.10
+
+### Corrigé
+- **Cave — bouton « Modifier » sans effet, transfert de fût et enregistrement des stocks cassés** : depuis l'ajout des tailles 25 cl et 50 cl, le code de la cave construisait les identifiants de champs à partir de la clé complète (`beer-f-25cl`) alors que le formulaire utilise `beer-f-25`. L'élément étant introuvable, le remplissage du modal s'interrompait avant affichage. Une fonction `sizeId()` rend désormais la convention explicite, appliquée aux dix emplacements concernés.
+
+---
+
 ## [2026-09-18] — 12 · version 0.1.9
 
 ### Corrigé
