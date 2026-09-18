@@ -702,8 +702,8 @@ function openBeerModal(beer = null) {
   document.getElementById('beer-f-type').value    = beer ? (beer.type||'') : '';
   document.getElementById('beer-f-abv').value     = beer ? (beer.abv||'') : '';
   BOTTLE_SIZES.forEach(size => {
-    document.getElementById(`beer-f-${size}`).value = beer ? (beer[`stock_${size}`]||0) : 0;
-    const wrap = document.getElementById(`beer-f-${size}-wrap`);
+    document.getElementById(`beer-f-${sizeId(size)}`).value = beer ? (beer[`stock_${size}`]||0) : 0;
+    const wrap = document.getElementById(`beer-f-${sizeId(size)}-wrap`);
     if (wrap) wrap.style.display = isSizeUsable(size, beer) ? '' : 'none';
   });
   document.getElementById('beer-f-origin').value  = beer ? (beer.origin||'') : '';
@@ -722,8 +722,8 @@ function openBeerModal(beer = null) {
   const initWrap = document.getElementById('beer-f-init-wrap');
   if (beer) {
     BOTTLE_SIZES.forEach(size => {
-      document.getElementById(`beer-f-${size}-init`).value = beer[`initial_${size}`] || 0;
-      const iwrap = document.getElementById(`beer-f-${size}-init-wrap`);
+      document.getElementById(`beer-f-${sizeId(size)}-init`).value = beer[`initial_${size}`] || 0;
+      const iwrap = document.getElementById(`beer-f-${sizeId(size)}-init-wrap`);
       if (iwrap) iwrap.style.display = isSizeUsable(size, beer) ? '' : 'none';
     });
     initWrap.style.display = '';
@@ -1059,11 +1059,11 @@ async function saveBeer() {
   }
   const id = document.getElementById('beer-f-id').value;
   const stocks = {};
-  BOTTLE_SIZES.forEach(size => { stocks[`stock_${size}`] = parseInt(document.getElementById(`beer-f-${size}`).value) || 0; });
+  BOTTLE_SIZES.forEach(size => { stocks[`stock_${size}`] = parseInt(document.getElementById(`beer-f-${sizeId(size)}`).value) || 0; });
   const kegVal = document.getElementById('beer-f-keg').value;
   const kegLiters = kegVal !== '' ? (parseFloat(kegVal) || 0) : null;
   const inits = {};
-  if (id) BOTTLE_SIZES.forEach(size => { inits[`initial_${size}`] = parseInt(document.getElementById(`beer-f-${size}-init`).value) || 0; });
+  if (id) BOTTLE_SIZES.forEach(size => { inits[`initial_${size}`] = parseInt(document.getElementById(`beer-f-${sizeId(size)}-init`).value) || 0; });
   const payload = {
     name,
     type:         document.getElementById('beer-f-type').value || null,
@@ -1153,8 +1153,8 @@ function openKegTransferModal(id) {
   document.getElementById('keg-tr-current').textContent = `${t('cave.keg_available')} ${beer.keg_liters || 0} L`;
   document.getElementById('keg-tr-consumed').value = 0;
   BOTTLE_SIZES.forEach(size => {
-    document.getElementById(`keg-tr-${size}`).value = 0;
-    const wrap = document.getElementById(`keg-tr-${size}-wrap`);
+    document.getElementById(`keg-tr-${sizeId(size)}`).value = 0;
+    const wrap = document.getElementById(`keg-tr-${sizeId(size)}-wrap`);
     if (wrap) wrap.style.display = isSizeUsable(size, beer) ? '' : 'none';
   });
   document.getElementById('keg-tr-save-btn').disabled = true;
@@ -1168,7 +1168,7 @@ function updateKegCalc() {
   const available = beer.keg_liters || 0;
   const consumed  = parseFloat(document.getElementById('keg-tr-consumed').value) || 0;
   const bottles   = {};
-  BOTTLE_SIZES.forEach(size => { bottles[size] = parseInt(document.getElementById(`keg-tr-${size}`).value) || 0; });
+  BOTTLE_SIZES.forEach(size => { bottles[size] = parseInt(document.getElementById(`keg-tr-${sizeId(size)}`).value) || 0; });
   const bottled   = BOTTLE_SIZES.reduce((sum, size) => sum + bottles[size] * BOTTLE_SIZE_LITERS[size], 0);
   const total     = consumed + bottled;
   const remaining = Math.max(0, available - total);
@@ -1193,7 +1193,7 @@ async function saveKegTransfer() {
   const available = beer.keg_liters || 0;
   const consumed  = parseFloat(document.getElementById('keg-tr-consumed').value) || 0;
   const bottles   = {};
-  BOTTLE_SIZES.forEach(size => { bottles[size] = parseInt(document.getElementById(`keg-tr-${size}`).value) || 0; });
+  BOTTLE_SIZES.forEach(size => { bottles[size] = parseInt(document.getElementById(`keg-tr-${sizeId(size)}`).value) || 0; });
   const bottled   = BOTTLE_SIZES.reduce((sum, size) => sum + bottles[size] * BOTTLE_SIZE_LITERS[size], 0);
   const total     = consumed + bottled;
   if (total <= 0 || total > available) { toast(t('cave.err_keg_vol'), 'error'); return; }

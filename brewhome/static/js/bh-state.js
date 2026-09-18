@@ -61,6 +61,12 @@ function getThresh(cat) { return ((appSettings.thresholds||{})[cat] ?? DEFAULT_T
 
 // ── Tailles de bouteille (25cl/33cl/50cl/75cl) ─────────────────────────────────
 const BOTTLE_SIZES = ['25cl', '33cl', '50cl', '75cl'];
+
+// Les clés de données gardent le suffixe (stock_25cl), les identifiants DOM
+// ne l'ont pas (beer-f-25, keg-tr-25). Passer par cette fonction plutôt que
+// d'interpoler la taille brute, sinon getElementById renvoie null et
+// l'affectation qui suit interrompt tout le rendu.
+const sizeId = size => String(size).replace('cl', '');
 const BOTTLE_SIZE_LITERS = { '25cl': 0.25, '33cl': 0.33, '50cl': 0.50, '75cl': 0.75 };
 const DEFAULT_BOTTLE_SIZES = { '25cl': false, '33cl': true, '50cl': false, '75cl': true };
 function bottleSizesEnabled() { return { ...DEFAULT_BOTTLE_SIZES, ...(appSettings.bottleSizes || {}) }; }
