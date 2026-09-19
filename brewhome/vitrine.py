@@ -195,8 +195,8 @@ def make_card(beer, photo_map, vitrine_sizes, settings):
         keg_block = ''
 
     brew_info = [x for x in (
-        f'🍺 Brassé le {v_date(beer["brew_date"])}' if beer.get('brew_date') else '',
-        f'🍾 Embouteillé le {v_date(beer["bottling_date"])}' if beer.get('bottling_date') else '',
+        f'🍺 Brassée le {v_date(beer["brew_date"])}' if beer.get('brew_date') else '',
+        f'🍾 Embouteillée le {v_date(beer["bottling_date"])}' if beer.get('bottling_date') else '',
         ((f'<a class="recipe-link" href="recipes/{beer["recipe_id"]}.html">📋 {esc(beer["recipe_name"])}</a>'
           if beer.get('recipe_id') else f'📋 {esc(beer["recipe_name"])}') if beer.get('recipe_name') else ''),
         (f'<a class="recipe-link" href="{esc(beer["brew_photos_url"])}" target="_blank" rel="noopener">📷 Photos</a>'
@@ -308,8 +308,8 @@ def beer_header(beer, photo_src, settings):
                f'      <div class="bsi-l">en fût</div>\n      {barre}\n    </div>')
 
     dates = '<span class="bh-sep">·</span>'.join([x for x in (
-        f'🍺 Brassé le {v_date(beer["brew_date"])}' if beer.get('brew_date') else '',
-        f'🍾 Embouteillé le {v_date(beer["bottling_date"])}' if beer.get('bottling_date') else '',
+        f'🍺 Brassée le {v_date(beer["brew_date"])}' if beer.get('brew_date') else '',
+        f'🍾 Embouteillée le {v_date(beer["bottling_date"])}' if beer.get('bottling_date') else '',
         f'📍 {esc(beer["origin"])}' if beer.get('origin') else '',
     ) if x])
 

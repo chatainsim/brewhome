@@ -130,6 +130,9 @@ function _doSyncSettingsToServer() {
     gh_data_backup_weekday: appSettings.github?.backup?.weekday != null ? String(appSettings.github.backup.weekday) : null,
     gh_data_backup_day:     appSettings.github?.backup?.day     != null ? String(appSettings.github.backup.day)     : null,
     gh_data_backup_notify:  appSettings.github?.backup?.notify  ? 'true' : null,
+    gh_vitrine_auto_enabled: appSettings.github?.vitrine?.auto?.enabled ? 'true' : null,
+    gh_vitrine_auto_hour:    appSettings.github?.vitrine?.auto?.hour   != null ? String(appSettings.github.vitrine.auto.hour)   : null,
+    gh_vitrine_auto_minute:  appSettings.github?.vitrine?.auto?.minute != null ? String(appSettings.github.vitrine.auto.minute) : null,
     ai_provider:       appSettings.ai?.provider     || null,
     ai_model:          appSettings.ai?.model        || null,
     ai_size:           appSettings.ai?.size         || null,
@@ -234,6 +237,15 @@ function _loadSettingsFromServer(srv) {
     if (srv.gh_data_backup_weekday != null) bk.weekday = parseInt(srv.gh_data_backup_weekday) ?? 0;
     if (srv.gh_data_backup_day     != null) bk.day     = parseInt(srv.gh_data_backup_day)    || 1;
     if (srv.gh_data_last_backup    != null) bk.lastBackup = srv.gh_data_last_backup;
+  }
+  if (srv.gh_vitrine_auto_enabled != null || srv.gh_vitrine_auto_hour != null) {
+    appSettings.github = appSettings.github || {};
+    appSettings.github.vitrine = appSettings.github.vitrine || {};
+    const au = appSettings.github.vitrine.auto = appSettings.github.vitrine.auto || {};
+    if (srv.gh_vitrine_auto_enabled != null) au.enabled = srv.gh_vitrine_auto_enabled === 'true';
+    if (srv.gh_vitrine_auto_hour    != null) au.hour    = parseInt(srv.gh_vitrine_auto_hour)   || 2;
+    if (srv.gh_vitrine_auto_minute  != null) au.minute  = parseInt(srv.gh_vitrine_auto_minute) || 0;
+    if (srv.gh_vitrine_last_push    != null) appSettings.github.vitrine.lastPush = srv.gh_vitrine_last_push;
   }
   // IA
   if (srv.ai_provider != null || srv.ai_model != null || srv.ai_size != null || srv.ai_quality != null || srv.ai_api_key != null) {

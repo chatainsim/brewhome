@@ -311,7 +311,8 @@ def _migrate_scripts_to_js():
 
 if __name__ == '__main__':
     _setup_logging(app)
-    from blueprints.integrations import reschedule_telegram, reschedule_github_backup
+    from blueprints.integrations import (reschedule_telegram, reschedule_github_backup,
+                                         reschedule_vitrine_push)
     with app.app_context():
         _migrate_scripts_to_js()
         os.makedirs(PHOTOS_DIR, exist_ok=True)
@@ -328,6 +329,10 @@ if __name__ == '__main__':
             reschedule_github_backup()
         except Exception as e:
             app.logger.warning(f"GitHub backup scheduler init error: {e}")
+        try:
+            reschedule_vitrine_push()
+        except Exception as e:
+            app.logger.warning(f"Vitrine scheduler init error: {e}")
         _scheduler.add_job(
             auto_purge_soft_deleted,
             trigger='interval', days=1,

@@ -241,6 +241,12 @@ def save_app_settings():
             reschedule_github_backup()
         except Exception as e:
             current_app.logger.warning(f"GitHub backup reschedule error: {e}")
+    if any(k.startswith('gh_vitrine_auto_') for k in data):
+        try:
+            from blueprints.integrations import reschedule_vitrine_push
+            reschedule_vitrine_push()
+        except Exception as e:
+            current_app.logger.warning(f"Vitrine reschedule error: {e}")
     return jsonify({'success': True})
 
 

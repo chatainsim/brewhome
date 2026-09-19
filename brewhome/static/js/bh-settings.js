@@ -1719,6 +1719,7 @@ function renderSettingsGithub() {
     : [{ provider: d.provider || 'github', apiUrl: d.apiUrl || '', repo: d.repo || '', branch: d.branch || 'main', pat: d.pat || '' }];
   _renderGhTargets('vit', vitTargets);
   _renderGhTargets('dat', datTargets);
+  _ghVitAutoFill();
   // Sauvegarde automatique
   const enabled = !!bk.enabled;
   document.getElementById('gh-backup-enabled').checked = enabled;
@@ -1844,6 +1845,18 @@ function _captureGithubSettings() {
     },
   };
   saveSettings();
+
+  // Publication automatique de la vitrine
+  const vitAuto = document.getElementById('gh-vit-auto');
+  if (vitAuto) {
+    appSettings.github = appSettings.github || {};
+    appSettings.github.vitrine = appSettings.github.vitrine || {};
+    appSettings.github.vitrine.auto = {
+      enabled: vitAuto.checked,
+      hour:   Math.max(0, Math.min(23, parseInt(document.getElementById('gh-vit-auto-hour').value, 10) || 0)),
+      minute: Math.max(0, Math.min(59, parseInt(document.getElementById('gh-vit-auto-minute').value, 10) || 0)),
+    };
+  }
 }
 
 function saveGithubSettings() {

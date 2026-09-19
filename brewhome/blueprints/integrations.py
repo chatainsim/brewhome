@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import base64
 import time
@@ -13,6 +14,7 @@ from flask import Blueprint, jsonify, request, current_app, Response
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.base import JobLookupError
 
+import vitrine
 from db import get_db, get_readings_db, _log, PHOTOS_DIR
 from constants import BrewStatus, BottleSize
 from helpers import api_error, strip_secret_settings, beer_liters, enabled_bottle_sizes
@@ -1338,6 +1340,208 @@ def _github_data_backup():
                 current_app.logger.warning(f'GitHub backup Telegram notify error: {te}')
     except Exception as e:
         current_app.logger.error(f'GitHub backup error: {e}')
+
+
+# ── Vitrine ──────────────────────────────────────────────────────────────
+
+def _vitrine_targets():
+    """Destinations de la vitrine, format moderne ou champs isolés d'origine."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM app_settings WHERE key IN "
+            "('gh_vitrine_repo','gh_vitrine_branch','gh_vitrine_pat','gh_vitrine_api_url','gh_vitrine_targets')"
+        ).fetchall()
+    cfg = {r['key']: r['value'] for r in rows}
+    targets = []
+    if cfg.get('gh_vitrine_targets'):
+        try:
+            targets = [t for t in json.loads(cfg['gh_vitrine_targets']) if t.get('repo') and t.get('pat')]
+        except (json.JSONDecodeError, ValueError):
+            pass
+    if not targets:
+        repo, pat = cfg.get('gh_vitrine_repo', '').strip(), cfg.get('gh_vitrine_pat', '').strip()
+        if repo and pat:
+            targets = [{'repo': repo, 'pat': pat,
+                        'branch': cfg.get('gh_vitrine_branch', 'main').strip() or 'main',
+                        'apiUrl': (cfg.get('gh_vitrine_api_url') or 'https://api.github.com').rstrip('/')}]
+    return targets
+
+
+def _vitrine_donnees():
+    """Bières, recettes, catalogue et réglages, tels que les attend le rendu.
+
+    Les bières reprennent la jointure de /api/beers : le nom de recette et les
+    mesures du brassin ne sont pas dans la table beers.
+    """
+    with get_db() as conn:
+        beers = [dict(r) for r in conn.execute(
+            "SELECT b.*, br.brew_date, br.photos_url AS brew_photos_url, r.name AS recipe_name, "
+            "       br.og AS brew_og, br.fg AS brew_fg, br.abv AS brew_abv "
+            "FROM beers b "
+            "LEFT JOIN brews br ON b.brew_id = br.id "
+            "LEFT JOIN recipes r ON b.recipe_id = r.id "
+            "WHERE b.deleted_at IS NULL "
+            "ORDER BY COALESCE(b.sort_order, 9999) ASC, b.created_at DESC").fetchall()]
+        recipes = []
+        for r in conn.execute('SELECT * FROM recipes WHERE deleted_at IS NULL').fetchall():
+            rec = dict(r)
+            rec['ingredients'] = [dict(i) for i in conn.execute(
+                'SELECT * FROM recipe_ingredients WHERE recipe_id=?', (r['id'],)).fetchall()]
+            recipes.append(rec)
+        catalog = [dict(r) for r in conn.execute('SELECT * FROM ingredient_catalog').fetchall()]
+        reglages = {r['key']: r['value'] for r in conn.execute(
+            'SELECT key, value FROM app_settings').fetchall()}
+
+    beers = [b for b in beers if not b.get('archived')]
+    settings = {
+        'appName': reglages.get('app_name'),
+        'accentColor': reglages.get('accent_color') or '#f5a623',
+        'appIcon': reglages.get('app_icon'),
+        'bottleSizes': json.loads(reglages['bottle_sizes_enabled'])
+                       if reglages.get('bottle_sizes_enabled') else None,
+    }
+    return beers, recipes, catalog, settings
+
+
+def _vitrine_photo(beer):
+    """(extension, octets) de la photo d'une bière, ou None.
+
+    Deux stockages coexistent selon l'ancienneté de la fiche : un fichier sur
+    disque, ou une image encodée dans la colonne.
+    """
+    fname = beer.get('photo_file')
+    if fname:
+        try:
+            with open(os.path.join(PHOTOS_DIR, fname), 'rb') as fh:
+                return ('png' if fname.lower().endswith('.png') else 'jpg'), fh.read()
+        except OSError:
+            return None
+    m = re.match(r'^data:image/(\w+);base64,(.+)$', beer.get('photo') or '', re.S)
+    if m:
+        ext = 'jpg' if m.group(1) == 'jpeg' else m.group(1)
+        try:
+            return ext, base64.b64decode(m.group(2))
+        except Exception:
+            return None
+    return None
+
+
+def _vitrine_fichiers():
+    """Construit la liste (chemin, contenu) de la vitrine complète."""
+    beers, recipes, catalog, settings = _vitrine_donnees()
+
+    photo_map, images = {}, []
+    for b in beers:
+        p = _vitrine_photo(b)
+        if not p:
+            continue
+        ext, data = p
+        photo_map[b['id']] = {'ext': ext}
+        images.append((f'images/beer-{b["id"]}.{ext}', data))
+
+    icon_path = None
+    m = re.match(r'^data:image/(\w+);base64,(.+)$', settings.get('appIcon') or '', re.S)
+    if m:
+        ext = 'jpg' if m.group(1) == 'jpeg' else m.group(1)
+        try:
+            images.append((f'images/app-icon.{ext}', base64.b64decode(m.group(2))))
+            icon_path = f'images/app-icon.{ext}'
+        except Exception:
+            icon_path = None
+
+    fichiers = [('index.html', vitrine.generate_vitrine_html(beers, photo_map, icon_path, settings))]
+
+    # beers.json : les adresses locales deviennent les chemins du dépôt.
+    pour_json = []
+    for b in beers:
+        c = dict(b)
+        ph = photo_map.get(b['id'])
+        c['photo'] = f'images/beer-{b["id"]}.{ph["ext"]}' if ph else None
+        c.pop('photo_file', None)
+        pour_json.append(c)
+    fichiers.append(('beers.json', json.dumps(pour_json, ensure_ascii=False, indent=2, default=str)))
+
+    ids = {b['recipe_id'] for b in beers if b.get('recipe_id')}
+    for rec in [r for r in recipes if r['id'] in ids]:
+        beer = next((b for b in beers if b.get('recipe_id') == rec['id']), None)
+        ph = photo_map.get(beer['id']) if beer else None
+        src = f'../images/beer-{beer["id"]}.{ph["ext"]}' if ph else None
+        fichiers.append((f'recipes/{rec["id"]}.html',
+                         vitrine.generate_recipe_html(
+                             rec, beer, vitrine.rec_theoretical(rec, catalog), src, settings)))
+    fichiers.extend(images)
+    return fichiers, len(beers)
+
+
+def push_vitrine(force=False):
+    """Génère la vitrine et la pousse vers toutes les destinations."""
+    targets = _vitrine_targets()
+    if not targets:
+        return {'ok': False, 'error': 'no_target'}
+
+    fichiers, nb_beers = _vitrine_fichiers()
+    date_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+    pousses = inchanges = erreurs = 0
+    messages = []
+    for tgt in targets:
+        branche = (tgt.get('branch') or 'main').strip() or 'main'
+        api = (tgt.get('apiUrl') or 'https://api.github.com').rstrip('/')
+        for chemin, contenu in fichiers:
+            try:
+                msg = f'vitrine: {chemin} {date_str}' + (' (forcé)' if force else '')
+                if _gh_push_file(tgt['repo'], tgt['pat'], branche, chemin, contenu, msg, api_base=api):
+                    pousses += 1
+                else:
+                    inchanges += 1
+            except Exception as exc:
+                erreurs += 1
+                messages.append(f'[{tgt["repo"]}] {chemin}: {exc}')
+                current_app.logger.warning(f'vitrine push error ({tgt["repo"]}/{chemin}): {exc}')
+
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES ('gh_vitrine_last_push',?)",
+                     (date_str,))
+    current_app.logger.info(
+        f'vitrine: {pousses} fichier(s) mis à jour, {inchanges} inchangé(s), {erreurs} erreur(s)')
+    return {'ok': erreurs == 0, 'beers': nb_beers, 'files': pousses,
+            'skipped': inchanges, 'errors': erreurs, 'messages': messages[:5]}
+
+
+def _vitrine_auto():
+    """Publication planifiée de la vitrine."""
+    try:
+        res = push_vitrine()
+        if not res.get('ok') and res.get('error') == 'no_target':
+            current_app.logger.warning('vitrine auto : aucune destination configurée, publication ignorée')
+    except Exception as e:
+        current_app.logger.error(f'vitrine auto error: {e}')
+
+
+def reschedule_vitrine_push():
+    """Re-planifie la publication automatique de la vitrine."""
+    try:
+        _scheduler.remove_job('vitrine_push')
+    except JobLookupError:
+        pass
+    with get_db() as conn:
+        rows = conn.execute("SELECT key, value FROM app_settings WHERE key LIKE 'gh_vitrine_auto_%'").fetchall()
+    cfg = {r['key']: r['value'] for r in rows}
+    if cfg.get('gh_vitrine_auto_enabled') != 'true':
+        return
+    hour = int(cfg.get('gh_vitrine_auto_hour', '2'))
+    minute = int(cfg.get('gh_vitrine_auto_minute', '0'))
+    _scheduler.add_job(_vitrine_auto, CronTrigger(hour=hour, minute=minute),
+                       id='vitrine_push', replace_existing=True)
+
+
+@bp.route('/api/vitrine/push', methods=['POST'])
+def api_push_vitrine():
+    """Publication depuis l'interface : même code que la publication planifiée."""
+    force = bool((request.json or {}).get('force'))
+    res = push_vitrine(force=force)
+    if res.get('error') == 'no_target':
+        return api_error('missing_field', 400, detail='Aucune destination vitrine configurée')
+    return jsonify(res)
 
 
 def reschedule_github_backup():

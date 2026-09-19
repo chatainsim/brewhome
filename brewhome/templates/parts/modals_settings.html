@@ -409,6 +409,14 @@
                   <button id="btn-push-vitrine-force" class="btn btn-ghost btn-sm" onclick="withBtn(this, () => pushVitrine(true))" title="Forcer l'envoi même si les fichiers sont identiques"><i class="fas fa-rotate"></i> <span data-i18n="settings.github.btn_force">Forcer</span></button>
                 </div>
                 <p style="font-size:.73rem;color:var(--muted);margin:0" data-i18n="settings.github.vitrine_hint">Pousse <code>index.html</code> + <code>beers.json</code>. "Forcer" crée un commit même si le contenu est inchangé.</p>
+                <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin-top:4px">
+                  <input type="checkbox" id="gh-vit-auto" onchange="_ghVitAutoToggle()">
+                  <span data-i18n="settings.github.vitrine_auto">Publier automatiquement chaque jour à</span>
+                  <input type="number" id="gh-vit-auto-hour" class="input" min="0" max="23" style="width:64px" value="2">
+                  <span>h</span>
+                  <input type="number" id="gh-vit-auto-minute" class="input" min="0" max="59" style="width:64px" value="0">
+                </label>
+                <p id="gh-vit-last" style="font-size:.73rem;color:var(--muted);margin:0"></p>
               </div>
             </div>
 

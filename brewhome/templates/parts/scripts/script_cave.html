@@ -489,8 +489,8 @@ function openBeerDetail(id) {
     const totalL = beerLiters(b).toFixed(2);
     const metaParts = [`<i class="fas fa-wine-bottle"></i> ${totalL} L en cave`];
     const fmtDate = d => d ? d.split('-').reverse().join('/') : null;
-    if (b.brew_date)        metaParts.push(`<i class="fas fa-fire-flame-curved"></i> Brassé le ${fmtDate(b.brew_date)}`);
-    if (b.bottling_date)    metaParts.push(`<i class="fas fa-wine-bottle"></i> Embouteillé le ${fmtDate(b.bottling_date)}`);
+    if (b.brew_date)        metaParts.push(`<i class="fas fa-fire-flame-curved"></i> Brassée le ${fmtDate(b.brew_date)}`);
+    if (b.bottling_date)    metaParts.push(`<i class="fas fa-wine-bottle"></i> Embouteillée le ${fmtDate(b.bottling_date)}`);
     if (b.brew_photos_url) {
       const _safeUrl = /^https?:\/\//i.test(b.brew_photos_url) ? esc(b.brew_photos_url) : null;
       if (_safeUrl) metaParts.push(`<a href="${_safeUrl}" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:none"><i class="fas fa-images"></i> ${t('brew.photos_url_open')}</a>`);

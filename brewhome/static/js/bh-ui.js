@@ -199,36 +199,6 @@ async function pushToGithub(repo, pat, branch, filePath, content, message, binar
 }
 
 // Extrait le base64 pur et l'extension depuis un data URL (ex: data:image/jpeg;base64,...)
-function _parsePhotoDataUrl(dataUrl) {
-  if (!dataUrl) return null;
-  const m = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/s);
-  if (!m) return null;
-  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
-  return { ext, b64: m[2] };
-}
-
-async function _resolvePhoto(photo) {
-  if (!photo) return null;
-  // Already base64 data URL
-  const parsed = _parsePhotoDataUrl(photo);
-  if (parsed) return parsed;
-  // Local Flask URL (/api/beer-photos/...) → fetch binary and convert
-  if (photo.startsWith('/api/beer-photos/') || photo.startsWith('/api/draft-images/')) {
-    try {
-      const resp = await fetch(photo);
-      if (!resp.ok) return null;
-      const ab  = await resp.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(ab)));
-      const ext = photo.endsWith('.png') ? 'png' : 'jpg';
-      return { ext, b64 };
-    } catch(e) {
-      console.warn('[BrewHome] _resolvePhoto fetch failed:', photo, e);
-      return null;
-    }
-  }
-  return null;
-}
-
 // esc() est définie dans bh-core.js — alias pour compatibilité interne
 const _vEsc = esc;
 
@@ -236,209 +206,6 @@ function _vDate(iso) {
   if (!iso) return '';
   try { return new Date(iso).toLocaleDateString(_lang || 'fr', { day:'2-digit', month:'long', year:'numeric' }); }
   catch(_) { return iso; }
-}
-
-function generateVitrineHtml(beers, photoMap, iconPath) {
-  const date   = new Date().toLocaleDateString(_lang || 'fr', { day:'2-digit', month:'long', year:'numeric' });
-  const vitrineSizes = BOTTLE_SIZES.filter(size => isSizeEnabled(size) || beers.some(b => (b[`stock_${size}`]||0) > 0));
-  const totalByS  = {}; vitrineSizes.forEach(size => { totalByS[size] = beers.reduce((s, b) => s + (b[`stock_${size}`] || 0), 0); });
-  const totalKeg = beers.reduce((s, b) => s + (b.keg_liters  || 0), 0);
-
-  const makeCard = b => {
-    const photo  = photoMap && photoMap[b.id];
-    const imgSrc = photo ? `images/beer-${b.id}.${photo.ext}` : null;
-    const abv    = b.abv != null ? `${parseFloat(b.abv).toFixed(1)} %` : null;
-    const kegL   = b.keg_liters          ?? 0;
-    const kegI   = b.keg_initial_liters  ?? 0;
-    const hasKeg = kegL > 0 || kegI > 0;
-    const pctKeg = kegI > 0 ? Math.round(Math.min(100, kegL / kegI * 100)) : -1;
-
-    const stockItem = (count, label, cls, pct) => `
-      <div class="si ${cls}">
-        <div class="si-n">${count > 0 ? count : '–'}</div>
-        <div class="si-l">${label}</div>
-        ${count > 0 && pct >= 0 ? `<div class="si-bar"><div class="si-fill" style="width:${pct}%"></div></div>` : ''}
-        ${count === 0 ? `<div class="si-empty">épuisé</div>` : ''}
-      </div>`;
-
-    const kegBarColor = kegL === 0 ? '#333' : pctKeg >= 0 && pctKeg <= 40 ? '#f59e0b' : 'var(--amber)';
-    const kegBlock = hasKeg ? `
-      <div class="keg-row">
-        <span class="keg-icon">🛢</span>
-        <div class="keg-info">
-          <span class="keg-val">${kegL % 1 === 0 ? kegL : kegL.toFixed(1)} L</span>
-          <span class="keg-lbl">en fût</span>
-          ${kegI > 0 && kegI > kegL ? `<div class="keg-bar"><div class="keg-fill" style="width:${pctKeg}%;background:${kegBarColor}"></div></div>` : ''}
-        </div>
-        ${kegI > 0 ? `<span class="keg-init">/ ${kegI % 1 === 0 ? kegI : kegI.toFixed(1)} L</span>` : ''}
-      </div>` : '';
-
-    const brewInfo = [
-      b.brew_date        ? `🍺 Brassé le ${_vDate(b.brew_date)}`          : '',
-      b.bottling_date    ? `🍾 Embouteillé le ${_vDate(b.bottling_date)}` : '',
-      b.recipe_name      ? (b.recipe_id ? `<a class="recipe-link" href="recipes/${b.recipe_id}.html">📋 ${_vEsc(b.recipe_name)}</a>` : `📋 ${_vEsc(b.recipe_name)}`) : '',
-      b.brew_photos_url  ? `<a class="recipe-link" href="${_vEsc(b.brew_photos_url)}" target="_blank" rel="noopener">📷 Photos</a>` : '',
-    ].filter(Boolean);
-
-    return `
-    <div class="card" id="beer-${b.id}">
-      ${imgSrc
-        ? `<img class="card-img" src="${imgSrc}" loading="lazy" alt="${_vEsc(b.name)}" data-name="${_vEsc(b.name)}" onclick="openLb(this,this.dataset.name)">`
-        : `<div class="card-img-ph">🍺</div>`}
-      <div class="card-body">
-        <div class="card-name">${_vEsc(b.name)}</div>
-        ${b.type ? `<div class="card-type">${_vEsc(b.type)}</div>` : ''}
-        ${abv    ? `<div class="card-abv">ABV <strong>${abv}</strong></div>` : ''}
-        ${b.refermentation ? `<div class="referm-badge">🔄 ${(() => {
-          if (!b.bottling_date || !b.refermentation_days) return 'Refermentation en cours';
-          const dEnd  = new Date(b.bottling_date + 'T00:00:00');
-          dEnd.setDate(dEnd.getDate() + b.refermentation_days);
-          const today = new Date(); today.setHours(0,0,0,0);
-          const delta = Math.round((dEnd - today) / 86400000);
-          if (delta > 0)  return `Prête dans ${delta} j (${_vDate(_ymd(dEnd))})`;
-          if (delta === 0) return 'Prête aujourd\'hui ! 🎉';
-          return `Prête depuis ${-delta} j`;
-        })()}</div>` : ''}
-        ${kegBlock}
-        <div class="stock-row">
-          ${vitrineSizes.map(size => {
-            const count = b[`stock_${size}`] ?? 0;
-            const init  = b[`initial_${size}`] > 0 ? b[`initial_${size}`] : 0;
-            const pct   = init > 0 ? Math.round(Math.min(100, count / init * 100)) : -1;
-            const cls   = count === 0 ? 'zero' : pct >= 0 && pct <= 40 ? 'low' : 'ok';
-            return stockItem(count, `${size.replace('cl','')} cl`, cls, pct);
-          }).join('<div class="stock-sep"></div>')}
-        </div>
-        ${b.origin      ? `<div class="card-origin">📍 ${_vEsc(b.origin)}</div>` : ''}
-        ${b.description ? `<p class="card-desc">${_vEsc(b.description)}</p>` : ''}
-        ${brewInfo.length ? `<div class="card-foot">${brewInfo.join('<span class="sep">·</span>')}</div>` : ''}
-        ${appSettings.appName ? `<div class="card-brand">${_vEsc(appSettings.appName)}</div>` : ''}
-      </div>
-    </div>`;
-  };
-  const inStock   = beers.filter(b => beerLiters(b) > 0);
-  const exhausted = beers.filter(b => beerLiters(b) === 0);
-  const cardsActive    = inStock.map(makeCard).join('');
-  const cardsExhausted = exhausted.map(makeCard).join('');
-
-  return `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ma cave à bières</title>
-<style>
-:root{--bg:#0f0f0f;--card:#1a1a1a;--border:#272727;--text:#e8e0d0;--muted:#888;--amber:${appSettings.accentColor || '#f5a623'};--hop:#7ec845;--info:#60a5fa}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-header{text-align:center;padding:48px 16px 28px}
-h1{font-size:2.2rem;font-weight:900;color:var(--amber);letter-spacing:-.03em;margin-bottom:6px}
-.subtitle{font-size:.85rem;color:var(--muted)}
-.stats{display:flex;justify-content:center;gap:32px;margin:22px 0 40px;flex-wrap:wrap}
-.stat-val{font-size:1.7rem;font-weight:800;color:var(--amber);line-height:1}
-.stat-lbl{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-top:3px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:22px;max-width:1200px;margin:0 auto;padding:0 16px 60px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:transform .18s,box-shadow .18s}
-.card:hover{transform:translateY(-4px);box-shadow:0 16px 48px rgba(0,0,0,.55)}
-.card-img{width:100%;height:210px;object-fit:cover;display:block;cursor:zoom-in;transition:opacity .15s}.card-img:hover{opacity:.9}
-.card-img-ph{height:110px;background:linear-gradient(135deg,#1e1e1e,#262626);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#333}
-#lb{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;cursor:zoom-out;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px}
-#lb.open{display:flex}
-#lb img{max-width:92vw;max-height:82vh;object-fit:contain;border-radius:10px;box-shadow:0 24px 80px rgba(0,0,0,.7)}
-#lb-caption{font-size:.9rem;color:#ccc;max-width:80vw;text-align:center}
-#lb-close{position:fixed;top:16px;right:20px;font-size:1.6rem;color:#aaa;cursor:pointer;background:none;border:none;line-height:1;padding:4px 8px}
-#lb-close:hover{color:#fff}
-.card-body{padding:16px;flex:1;display:flex;flex-direction:column;gap:9px}
-.card-name{font-size:1.08rem;font-weight:700;line-height:1.3}
-.card-type{font-size:.79rem;color:var(--amber);font-style:italic}
-.card-abv{font-size:.8rem;color:#999}
-.card-abv strong{color:var(--hop);font-size:.95rem}
-.stock-row{display:flex;background:#111;border-radius:10px;overflow:hidden;border:1px solid var(--border)}
-.stock-sep{width:1px;background:var(--border);flex-shrink:0}
-.si{flex:1;padding:10px 12px;display:flex;flex-direction:column;align-items:center;gap:2px}
-.si-n{font-size:2rem;font-weight:800;line-height:1}
-.si-l{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.si-bar{width:80%;height:4px;background:#2a2a2a;border-radius:2px;margin-top:5px}
-.si-fill{height:100%;border-radius:2px}
-.si-empty{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
-.si.ok  .si-n{color:#4ade80}.si.ok  .si-fill{background:#4ade80}
-.si.low .si-n{color:#f59e0b}.si.low .si-fill{background:#f59e0b}
-.si.zero .si-n{color:#333}.si.zero .si-empty{color:#c0392b}
-.card-origin{font-size:.75rem;color:var(--muted)}
-.card-desc{font-size:.82rem;color:#aaa;line-height:1.55;flex:1}
-.card-foot{font-size:.71rem;color:#555;display:flex;gap:6px;flex-wrap:wrap;margin-top:2px;padding-top:8px;border-top:1px solid var(--border);align-items:center}
-.sep{color:#333}
-a.recipe-link{color:var(--amber);text-decoration:none;font-weight:500}
-a.recipe-link:hover{text-decoration:underline}
-.empty{text-align:center;color:var(--muted);padding:80px 20px;grid-column:1/-1}
-footer{text-align:center;padding:20px;font-size:.74rem;color:#444;border-top:1px solid var(--border)}
-.appname{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:var(--amber);opacity:.75;margin-bottom:10px}
-.card-brand{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--amber);opacity:.45;text-align:right;margin-top:4px}
-.keg-row{display:flex;align-items:center;gap:10px;background:rgba(245,166,35,.07);border:1px solid rgba(245,166,35,.2);border-radius:9px;padding:8px 12px}
-.keg-icon{font-size:1.15rem;line-height:1}
-.keg-info{flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px}
-.keg-val{font-size:1.05rem;font-weight:800;color:var(--amber)}
-.keg-lbl{font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.keg-bar{width:100%;height:4px;background:#2a2a2a;border-radius:2px;margin-top:2px}
-.keg-fill{height:100%;border-radius:2px}
-.keg-init{font-size:.7rem;color:var(--muted);white-space:nowrap}
-.referm-badge{display:inline-flex;align-items:center;gap:5px;font-size:.73rem;font-weight:600;color:#60a5fa;background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.25);border-radius:20px;padding:3px 10px}
-.section-divider{max-width:1200px;margin:40px auto 28px;padding:0 16px;display:flex;align-items:center;gap:14px}
-.section-divider-line{flex:1;height:1px;background:var(--border)}
-.section-divider-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#444;white-space:nowrap}
-.grid-exhausted .card{opacity:.5;filter:grayscale(.6)}
-.grid-exhausted .card:hover{opacity:.75;filter:grayscale(.3)}
-</style>
-</head>
-<body>
-<header>
-  ${iconPath ? `<img src="${iconPath}" alt="" style="width:56px;height:56px;object-fit:contain;border-radius:12px;margin-bottom:8px;display:block;margin-left:auto;margin-right:auto">` : ''}
-  ${appSettings.appName ? `<div class="appname">${_vEsc(appSettings.appName)}</div>` : ''}
-  <h1>🍺 Ma cave à bières</h1>
-  <div class="subtitle">Mise à jour le ${date}</div>
-  <div class="stats">
-    <div><div class="stat-val">${beers.length}</div><div class="stat-lbl">Bières</div></div>
-    ${vitrineSizes.map(size => `<div><div class="stat-val">${totalByS[size]}</div><div class="stat-lbl">Bouteilles ${size.replace('cl','')} cl</div></div>`).join('')}
-    ${totalKeg > 0 ? `<div><div class="stat-val">${totalKeg % 1 === 0 ? totalKeg : totalKeg.toFixed(1)}</div><div class="stat-lbl">Litres en fût</div></div>` : ''}
-  </div>
-</header>
-${inStock.length === 0 && exhausted.length === 0
-  ? '<div class="grid"><div class="empty">Aucune bière disponible pour le moment.</div></div>'
-  : `<div class="grid">${cardsActive}</div>
-     ${exhausted.length ? `
-     <div class="section-divider">
-       <div class="section-divider-line"></div>
-       <div class="section-divider-label">Épuisées (${exhausted.length})</div>
-       <div class="section-divider-line"></div>
-     </div>
-     <div class="grid grid-exhausted">${cardsExhausted}</div>` : ''}`
-}
-<footer>Généré par ${_vEsc(appSettings.appName || 'BrewHome')}</footer>
-
-<div id="lb" onclick="closeLb()">
-  <button id="lb-close" onclick="closeLb()" title="${t('common.close')}">✕</button>
-  <img id="lb-img" src="" alt="" onclick="event.stopPropagation();closeLb()" style="cursor:zoom-out">
-  <div id="lb-caption"></div>
-</div>
-<script>
-function openLb(el, name) {
-  document.getElementById('lb-img').src = el.src;
-  document.getElementById('lb-caption').textContent = name;
-  document.getElementById('lb').classList.add('open');
-  document.body.style.overflow = 'hidden';
-}
-function closeLb() {
-  document.getElementById('lb').classList.remove('open');
-  document.body.style.overflow = '';
-}
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  const lb = document.getElementById('lb');
-  if (lb?.classList.contains('open')) { closeLb(); return; }
-});
-<\/script>
-</body>
-</html>`;
 }
 
 // ── Global search ─────────────────────────────────────────────────────────────
@@ -674,195 +441,6 @@ document.addEventListener('keydown', e => {
    arrive sur les ingrédients sans savoir de quelle bière il s'agit, ni ce
    qu'il en reste. Reprend les informations de la carte d'accueil, en gardant
    les chemins relatifs au dossier recipes/. */
-function _vBeerHeader(beer, photoSrc) {
-  if (!beer) return '';
-  const abv  = beer.abv != null ? `${parseFloat(beer.abv).toFixed(1)} %` : null;
-  const kegL = beer.keg_liters ?? 0;
-  const kegI = beer.keg_initial_liters ?? 0;
-
-  // Les tailles proposées globalement, plus celles que cette bière possède
-  // malgré tout : une taille désactivée depuis ne doit pas faire disparaître
-  // un stock existant.
-  const sizes = BOTTLE_SIZES.filter(sz => isSizeEnabled(sz) || (beer[`stock_${sz}`] || 0) > 0);
-  const stock = sizes.map(sz => {
-    const count = beer[`stock_${sz}`] ?? 0;
-    const init  = beer[`initial_${sz}`] > 0 ? beer[`initial_${sz}`] : 0;
-    const pct   = init > 0 ? Math.round(Math.min(100, count / init * 100)) : -1;
-    const cls   = count === 0 ? 'zero' : (pct >= 0 && pct <= 40 ? 'low' : 'ok');
-    return `<div class="bsi ${cls}">
-      <div class="bsi-n">${count > 0 ? count : '–'}</div>
-      <div class="bsi-l">${_vEsc(sz.replace('cl', ''))} cl</div>
-      ${count > 0 && pct >= 0 ? `<div class="bsi-bar"><div class="bsi-fill" style="width:${pct}%"></div></div>` : ''}
-    </div>`;
-  }).join('');
-
-  const keg = (kegL > 0 || kegI > 0) ? `<div class="bsi ${kegL === 0 ? 'zero' : 'ok'}">
-      <div class="bsi-n">${kegL % 1 === 0 ? kegL : kegL.toFixed(1)} L</div>
-      <div class="bsi-l">en fût</div>
-      ${kegI > 0 && kegI > kegL ? `<div class="bsi-bar"><div class="bsi-fill" style="width:${Math.round(Math.min(100, kegL / kegI * 100))}%"></div></div>` : ''}
-    </div>` : '';
-
-  const dates = [
-    beer.brew_date     ? `🍺 Brassé le ${_vDate(beer.brew_date)}`          : '',
-    beer.bottling_date ? `🍾 Embouteillé le ${_vDate(beer.bottling_date)}` : '',
-    beer.origin        ? `📍 ${_vEsc(beer.origin)}`                        : '',
-  ].filter(Boolean).join('<span class="bh-sep">·</span>');
-
-  return `
-  <div class="beer-head">
-    ${photoSrc
-      ? `<img class="bh-img" src="${_vEsc(photoSrc)}" alt="${_vEsc(beer.name)}" loading="lazy">`
-      : `<div class="bh-img bh-img-ph">🍺</div>`}
-    <div class="bh-body">
-      <div class="bh-name">${_vEsc(beer.name)}</div>
-      <div class="bh-meta">
-        ${beer.type ? `<span class="bh-type">${_vEsc(beer.type)}</span>` : ''}
-        ${abv ? `<span class="bh-abv">ABV <strong>${abv}</strong></span>` : ''}
-      </div>
-      ${(stock || keg) ? `<div class="bh-stock">${stock}${keg}</div>` : ''}
-      ${beer.description ? `<p class="bh-desc">${_vEsc(beer.description)}</p>` : ''}
-      ${dates ? `<div class="bh-dates">${dates}</div>` : ''}
-      <a class="bh-link" href="../index.html#beer-${beer.id}">Voir dans la cave →</a>
-    </div>
-  </div>`;
-}
-
-function generateRecipeHtml(rec, beer, theo, photoSrc) {
-  const _e = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const ings   = rec.ingredients || [];
-  const malts  = ings.filter(i => i.category === 'malt');
-  const hops   = ings.filter(i => i.category === 'houblon').sort((a,b) => (b.hop_time||0)-(a.hop_time||0));
-  const yeasts = ings.filter(i => i.category === 'levure');
-  const misc   = ings.filter(i => i.category === 'autre');
-
-  const HOP_TYPE = { ebullition:'Ébullition', whirlpool:'Whirlpool', flameout:'Flameout', dryhop:'Dry-hop' };
-  const mc = (val, lbl) => `<div class="mc"><div class="mc-val">${_e(val)}</div><div class="mc-lbl">${_e(lbl)}</div></div>`;
-  const tbl = (thead, tbody) => `<table><thead><tr>${thead.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${tbody}</tbody></table>`;
-  const sec = lbl => `<div class="section">${lbl}</div>`;
-
-  const accentColor = typeof appSettings !== 'undefined' ? (appSettings.accentColor || '#f5a623') : '#f5a623';
-  const appNameStr  = typeof appSettings !== 'undefined' ? (appSettings.appName || 'BrewHome') : 'BrewHome';
-
-  const totalKg = malts.reduce((s,m) => s + (m.unit==='kg' ? +m.quantity : (+m.quantity)/1000), 0);
-
-  const maltRows  = malts.map(m  => `<tr><td>${_e(m.name)}</td><td>${m.quantity} ${_e(m.unit)}</td><td>${m.ebc!=null?m.ebc:'–'}</td></tr>`).join('');
-  const hopRows   = hops.map(h   => `<tr><td>${_e(h.name)}</td><td>${h.quantity} ${_e(h.unit)}</td><td>${h.alpha!=null?h.alpha+' %':'–'}</td><td>${h.hop_time!=null?h.hop_time+' min ':''} ${_e(HOP_TYPE[h.hop_type]||h.hop_type||'')}</td></tr>`).join('');
-  const yeastRows = yeasts.map(y => `<tr><td>${_e(y.name)}</td><td>${y.quantity} ${_e(y.unit)}</td></tr>`).join('');
-  const miscRows  = misc.map(m   => `<tr><td>${_e(m.name)}</td><td>${m.quantity} ${_e(m.unit)}</td><td>${_e(m.other_type||'–')}</td></tr>`).join('');
-
-  const metricsHtml = theo
-    ? [mc(theo.og.toFixed(3),'DI théo.'), mc(theo.fg.toFixed(3),'DF théo.'), mc(theo.abv.toFixed(1)+' %','ABV théo.'), mc((rec.brewhouse_efficiency||72)+' %','Rendement')].join('')
-    : mc((rec.brewhouse_efficiency||72)+' %','Rendement');
-
-  /* Mesures réelles du brassin, sous les valeurs théoriques : c'est ce qui a
-     été relevé, et l'écart avec la théorie est justement l'information utile.
-     L'ABV retombe sur celui de la bière quand le brassin n'en porte pas, les
-     deux champs existant séparément. */
-  const mcr = (val, lbl) => `<div class="mc mc-real"><div class="mc-val">${_e(val)}</div><div class="mc-lbl">${_e(lbl)}</div></div>`;
-  const realOg  = beer && beer.brew_og  != null ? +beer.brew_og  : null;
-  const realFg  = beer && beer.brew_fg  != null ? +beer.brew_fg  : null;
-  const realAbv = beer && beer.brew_abv != null ? +beer.brew_abv
-                : (beer && beer.abv     != null ? +beer.abv : null);
-  const realParts = [
-    realOg  != null ? mcr(realOg.toFixed(3),  'DI mesurée')  : '',
-    realFg  != null ? mcr(realFg.toFixed(3),  'DF mesurée')  : '',
-    realAbv != null ? mcr(realAbv.toFixed(1) + ' %', 'ABV réel') : '',
-  ].filter(Boolean);
-  const realHtml = realParts.length
-    ? `<div class="metrics metrics-real">${realParts.join('')}</div>`
-    : '';
-
-  const subtitle = [rec.style, rec.volume ? rec.volume+' L' : ''].filter(Boolean).join(' · ');
-  const beerLink = beer ? `<div class="beer-link-row"><a href="../index.html#beer-${beer.id}" class="back-beer">🍺 ${_e(beer.name)}</a></div>` : '';
-
-  return `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Recette — ${_e(rec.name)}</title>
-<style>
-:root{--bg:#0f0f0f;--card:#1a1a1a;--border:#272727;--text:#e8e0d0;--muted:#888;--amber:${accentColor};--hop:#7ec845;--info:#60a5fa}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-.container{max-width:720px;margin:0 auto;padding:0 16px 60px}
-header{text-align:center;padding:36px 16px 20px;max-width:720px;margin:0 auto}
-a.back-link{display:inline-block;font-size:.8rem;color:var(--muted);text-decoration:none;margin-bottom:16px;padding:4px 14px;border:1px solid var(--border);border-radius:20px}
-a.back-link:hover{color:var(--text);border-color:var(--amber)}
-h1{font-size:1.9rem;font-weight:900;color:var(--amber);letter-spacing:-.02em;margin-bottom:6px}
-.subtitle{font-size:.85rem;color:var(--muted);margin-bottom:4px}
-.metrics{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:20px 0 0}
-.mc{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 18px;text-align:center;min-width:90px}
-.mc-val{font-size:1.4rem;font-weight:800;color:var(--amber);line-height:1}
-.mc-lbl{font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
-.metrics-real{margin-top:10px}
-.mc-real{border-color:var(--hop);padding:9px 16px;min-width:82px}
-.mc-real .mc-val{color:var(--hop);font-size:1.2rem}
-.section{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--amber);margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
-table{width:100%;border-collapse:collapse;font-size:.87rem}
-th{text-align:left;font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--border)}
-td{padding:7px 10px;border-bottom:1px solid rgba(255,255,255,.04)}
-tr:last-child td{border-bottom:none}
-tr:hover td{background:rgba(255,255,255,.025)}
-.mash-info{display:flex;gap:20px;flex-wrap:wrap;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:.88rem}
-.mi-val{font-weight:700}.mi-lbl{font-size:.7rem;color:var(--muted);margin-top:2px}
-.notes{font-size:.84rem;line-height:1.65;color:#aaa;white-space:pre-wrap;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 16px}
-.beer-head{display:flex;gap:16px;align-items:flex-start;text-align:left;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin:0 0 22px}
-.bh-img{width:112px;height:112px;object-fit:cover;border-radius:10px;flex:0 0 auto;background:#000}
-.bh-img-ph{display:flex;align-items:center;justify-content:center;font-size:2.4rem}
-.bh-body{min-width:0;flex:1}
-.bh-name{font-size:1.15rem;font-weight:800;line-height:1.2}
-.bh-meta{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:3px;font-size:.78rem;color:var(--muted)}
-.bh-abv strong{color:var(--amber)}
-.bh-stock{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.bsi{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:9px;padding:6px 10px;min-width:58px;text-align:center}
-.bsi-n{font-size:1rem;font-weight:800;line-height:1.1}
-.bsi-l{font-size:.6rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:2px}
-.bsi-bar{height:3px;border-radius:2px;background:#333;margin-top:5px;overflow:hidden}
-.bsi-fill{height:100%;background:var(--amber)}
-.bsi.zero .bsi-n{color:#555}
-.bsi.low .bsi-fill{background:#f59e0b}
-.bh-desc{font-size:.8rem;line-height:1.5;color:#aaa;margin-top:9px}
-.bh-dates{font-size:.72rem;color:var(--muted);margin-top:8px}
-.bh-sep{margin:0 6px;opacity:.5}
-.bh-link{display:inline-block;margin-top:10px;font-size:.75rem;color:var(--amber);text-decoration:none}
-.bh-link:hover{text-decoration:underline}
-@media(max-width:520px){.beer-head{flex-direction:column;align-items:stretch}.bh-img{width:100%;height:170px}}
-.beer-link-row{text-align:center;padding:32px 0}
-a.back-beer{display:inline-block;font-size:.85rem;color:var(--amber);text-decoration:none;padding:8px 22px;border:1px solid var(--amber);border-radius:20px}
-a.back-beer:hover{background:rgba(245,166,35,.1)}
-footer{text-align:center;padding:20px;font-size:.72rem;color:#444;border-top:1px solid var(--border)}
-</style>
-</head>
-<body>
-<header>
-  <a href="../index.html" class="back-link">← Cave à bières</a>
-  ${_vBeerHeader(beer, photoSrc)}
-  <h1>${_e(rec.name)}</h1>
-  ${subtitle ? `<div class="subtitle">${_e(subtitle)}</div>` : ''}
-  <div class="metrics">${metricsHtml}</div>
-  ${realHtml}
-</header>
-<div class="container">
-  ${malts.length  ? sec(`Fermentescibles (${totalKg.toFixed(2)} kg)`) + tbl(['Malt','Quantité','EBC'], maltRows)   : ''}
-  ${hops.length   ? sec('Houblons')   + tbl(['Houblon','Quantité','Alpha','Addition'], hopRows)  : ''}
-  ${yeasts.length ? sec('Levure')     + tbl(['Levure','Quantité'], yeastRows)                    : ''}
-  ${misc.length   ? sec('Divers')     + tbl(['Ingrédient','Quantité','Type'], miscRows)          : ''}
-  ${(rec.mash_temp||rec.mash_time||rec.boil_time) ? `
-  ${sec('Brassage')}
-  <div class="mash-info">
-    ${rec.mash_temp ? `<div><div class="mi-val">${rec.mash_temp} °C</div><div class="mi-lbl">T° empâtage</div></div>` : ''}
-    ${rec.mash_time ? `<div><div class="mi-val">${rec.mash_time} min</div><div class="mi-lbl">Durée empâtage</div></div>` : ''}
-    ${rec.boil_time ? `<div><div class="mi-val">${rec.boil_time} min</div><div class="mi-lbl">Ébullition</div></div>` : ''}
-    ${rec.volume    ? `<div><div class="mi-val">${rec.volume} L</div><div class="mi-lbl">Volume cible</div></div>` : ''}
-  </div>` : ''}
-  ${rec.notes ? `${sec('Notes')}<div class="notes">${_e(rec.notes)}</div>` : ''}
-  ${beerLink}
-</div>
-<footer>Généré par ${_e(appNameStr)}</footer>
-</body>
-</html>`;
-}
-
 function openVitrineTab() {
   const tgt = ((appSettings.github || {}).vitrine?.targets || []).find(t => t.repo && t.provider !== 'custom');
   if (!tgt) { toast(t('settings.github.err_missing_vitrine'), 'error'); return; }
@@ -874,139 +452,40 @@ function openVitrineTab() {
 }
 
 async function pushVitrine(force = false, silent = false) {
-  // Ne capturer les settings que si le formulaire GitHub est effectivement rendu dans le DOM
-  // (cas du modal Paramètres ouvert sur l'onglet github) — appeler depuis la cave sans
-  // l'onglet rendu viderait les targets et supprimerait la configuration.
+  // La vitrine est rendue et poussée par le serveur : c'est le même code que
+  // la publication planifiée, donc une seule implémentation à maintenir et un
+  // rendu identique qu'on clique ici ou que la tâche de nuit s'en charge.
+  // Les réglages du formulaire sont enregistrés d'abord, sans quoi le serveur
+  // pousserait vers les destinations d'avant la saisie en cours.
   const ghForm = document.getElementById('gh-vit-targets');
-  if (ghForm && ghForm.querySelector('.gh-target')) _captureGithubSettings();
-  const targets = ((appSettings.github || {}).vitrine?.targets || []).filter(tgt => tgt.repo && tgt.pat);
-  if (!targets.length) { toast(t('settings.github.err_missing_vitrine'), 'error'); return; }
+  if (ghForm && ghForm.querySelector('.gh-target')) {
+    _captureGithubSettings();
+    try { await saveSettings(); } catch (e) { console.warn('[BrewHome] saveSettings:', e); }
+  }
 
-  // Désactiver l'autre bouton pendant l'opération (withBtn gère le bouton cliqué)
-  const btnForce = document.getElementById(force ? 'btn-push-vitrine' : 'btn-push-vitrine-force');
-  if (btnForce) btnForce.disabled = true;
-
+  const btnAutre = document.getElementById(force ? 'btn-push-vitrine' : 'btn-push-vitrine-force');
+  if (btnAutre) btnAutre.disabled = true;
   try {
-    // Toujours recharger depuis l'API : le cache S.beers peut manquer recipe_name/brew_photos_url
-    // (les PUT /api/beers ne retournent pas les champs JOINés)
-    try { S.beers = await api('GET', '/api/beers'); } catch(e) { console.warn('[BrewHome] beers load failed during push:', e); }
-    const beers   = S.beers.filter(b => !b.archived);
-    const dateStr = new Date().toISOString().slice(0, 10);
-
-    // Construire la map des photos (id → {ext, b64}) — supporte base64 et URLs locales Flask
-    const photoMap = {};
-    await Promise.all(beers.map(async b => {
-      const p = await _resolvePhoto(b.photo);
-      if (p) photoMap[b.id] = p;
-    }));
-
-    // Logo de l'application
-    const appIconParsed = _parsePhotoDataUrl(appSettings.appIcon || null);
-    const iconPath = appIconParsed ? `images/app-icon.${appIconParsed.ext}` : null;
-
-    // Charger les recettes liées aux bières
-    const recipeIds = [...new Set(beers.filter(b => b.recipe_id).map(b => b.recipe_id))];
-    if (recipeIds.length) {
-      try { await ensureRecipesLoaded(); } catch(e) { console.warn('[BrewHome] recipes load failed during push:', e); }
-    }
-    const recipeMap = {};
-    S.recipes.forEach(r => { if (recipeIds.includes(r.id)) recipeMap[r.id] = r; });
-
-    const html = generateVitrineHtml(beers, photoMap, iconPath);
-    // beers.json : remplacer les URLs locales par les chemins relatifs dans le repo vitrine
-    const beersForJson = beers.map(b => {
-      const p = photoMap[b.id];
-      return { ...b, photo: p ? `images/beer-${b.id}.${p.ext}` : null };
-    });
-    const json = JSON.stringify(beersForJson, null, 2);
-
-    // Pages de recettes
-    const recipeFiles = Object.values(recipeMap).map(rec => {
-      const beer = beers.find(b => b.recipe_id === rec.id);
-      const theo = typeof _recTheoretical === 'function' ? _recTheoretical(rec) : null;
-      // La page vit dans recipes/, d'où le ../ devant le chemin de l'image.
-      const bp = beer && photoMap[beer.id];
-      const photoSrc = bp ? `../images/beer-${beer.id}.${bp.ext}` : null;
-      return { path: `recipes/${rec.id}.html`, b64: btoa(unescape(encodeURIComponent(generateRecipeHtml(rec, beer, theo, photoSrc)))) };
-    });
-
-    // Liste des fichiers : { path, b64 }
-    const files = [
-      { path: 'index.html', b64: btoa(unescape(encodeURIComponent(html))) },
-      { path: 'beers.json', b64: btoa(unescape(encodeURIComponent(json))) },
-      ...recipeFiles,
-      ...Object.entries(photoMap).map(([id, { ext, b64 }]) => ({ path: `images/beer-${id}.${ext}`, b64 })),
-      ...(appIconParsed ? [{ path: iconPath, b64: appIconParsed.b64 }] : []),
-    ];
-
-    let totalPushed = 0, totalSkipped = 0;
-    for (const cfg of targets) {
-      const isCustom = cfg.provider === 'custom';
-      const apiBase  = isCustom && cfg.apiUrl ? cfg.apiUrl.replace(/\/+$/, '') : 'https://api.github.com';
-
-      if (isCustom) {
-        // Gitea/Forgejo : Contents API fichier par fichier
-        for (const f of files) {
-          const res = await pushToGithub(cfg.repo, cfg.pat, cfg.branch, f.path,
-            f.b64, `vitrine: ${f.path} ${dateStr}`, true, apiBase);
-          if (!force && res?.skipped) totalSkipped++; else totalPushed++;
-        }
+    const res = await api('POST', '/api/vitrine/push', { force });
+    if (!silent) {
+      if (res.errors) {
+        toast(`${t('settings.github.err_vitrine')} ${res.errors} erreur(s)`, 'error');
+      } else if (!res.files) {
+        toast(t('settings.github.vitrine_up_to_date'), 'info');
       } else {
-        // GitHub : API Git Data — commit unique (blobs → tree → commit → ref)
-        const GH = `${apiBase}/repos/${cfg.repo}`;
-        const headers = {
-          'Authorization': `Bearer ${cfg.pat}`,
-          'Accept': 'application/vnd.github+json',
-          'Content-Type': 'application/json',
-        };
-        const refRes  = await fetch(`${GH}/git/ref/heads/${encodeURIComponent(cfg.branch)}`, { headers, cache: 'no-store' });
-        if (!refRes.ok) throw new Error((await refRes.json()).message || 'Branche introuvable');
-        const { object: { sha: currentCommitSha } } = await refRes.json();
-        const commitRes = await fetch(`${GH}/git/commits/${currentCommitSha}`, { headers });
-        if (!commitRes.ok) throw new Error('Impossible de lire le commit courant');
-        const { tree: { sha: baseTreeSha } } = await commitRes.json();
-        const treeRes = await fetch(`${GH}/git/trees/${baseTreeSha}?recursive=1`, { headers });
-        const existingMap = {};
-        if (treeRes.ok) ((await treeRes.json()).tree || []).forEach(item => { existingMap[item.path] = item.sha; });
-        const blobs = await Promise.all(files.map(async f => {
-          const res = await fetch(`${GH}/git/blobs`, { method: 'POST', headers, body: JSON.stringify({ content: f.b64, encoding: 'base64' }) });
-          if (!res.ok) throw new Error(`Blob ${f.path} : ${(await res.json()).message}`);
-          const { sha } = await res.json();
-          return { path: f.path, sha, changed: existingMap[f.path] !== sha };
-        }));
-        const changed = force ? blobs : blobs.filter(b => b.changed);
-        if (changed.length) {
-          const newTreeRes = await fetch(`${GH}/git/trees`, { method: 'POST', headers, body: JSON.stringify({ base_tree: baseTreeSha, tree: changed.map(b => ({ path: b.path, mode: '100644', type: 'blob', sha: b.sha })) }) });
-          if (!newTreeRes.ok) throw new Error((await newTreeRes.json()).message || 'Erreur création tree');
-          const { sha: newTreeSha } = await newTreeRes.json();
-          const newCommitRes = await fetch(`${GH}/git/commits`, { method: 'POST', headers, body: JSON.stringify({ message: `vitrine: mise à jour ${dateStr} (${changed.length} fichier(s))`, tree: newTreeSha, parents: [currentCommitSha] }) });
-          if (!newCommitRes.ok) throw new Error((await newCommitRes.json()).message || 'Erreur création commit');
-          const { sha: newCommitSha } = await newCommitRes.json();
-          const patchRes = await fetch(`${GH}/git/refs/heads/${encodeURIComponent(cfg.branch)}`, { method: 'PATCH', headers, body: JSON.stringify({ sha: newCommitSha }) });
-          if (!patchRes.ok) throw new Error((await patchRes.json()).message || 'Erreur mise à jour branche');
-          totalPushed += changed.length;
-          totalSkipped += blobs.length - changed.length;
-        } else {
-          totalSkipped += blobs.length;
-        }
+        let msg = t('settings.github.vitrine_pushed')
+          .replace('${beers}', res.beers).replace('${files}', res.files);
+        if (res.skipped) msg += t('settings.github.vitrine_skipped').replace('${n}', res.skipped);
+        if (force) msg += t('settings.github.vitrine_forced');
+        toast(msg, 'success');
       }
     }
-
-    if (!force && totalPushed === 0) {
-      if (!silent) toast(t('settings.github.vitrine_up_to_date'), 'success');
-      return;
-    }
-    if (!silent) {
-      const skipTxt  = totalSkipped ? t('settings.github.vitrine_skipped').replace('${n}', totalSkipped) : '';
-      const forceTxt = force ? t('settings.github.vitrine_forced') : '';
-      toast(t('settings.github.vitrine_pushed').replace('${beers}', beers.length).replace('${files}', totalPushed) + skipTxt + forceTxt, 'success');
-    }
-    _logActivity('backup', 'vitrine', `Vitrine publiée : ${totalPushed} fichier(s)`);
-  } catch(e) {
-    if (!silent) toast(t('settings.github.err_vitrine') + ' ' + e.message, 'error');
-    else console.warn('[BrewHome] auto-push vitrine:', e.message);
+    return res;
+  } catch (e) {
+    if (!silent) toast(`${t('settings.github.err_vitrine')} ${e.message || e}`, 'error');
+    throw e;
   } finally {
-    if (btnForce) btnForce.disabled = false;
+    if (btnAutre) btnAutre.disabled = false;
   }
 }
 
