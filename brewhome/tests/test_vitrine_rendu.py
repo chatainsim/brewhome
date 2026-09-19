@@ -152,3 +152,74 @@ def test_les_volumes_d_eau_apparaissent_sur_la_page():
     d = _donnees()
     produit = V.generate_recipe_html(d['recipes'][0], None, None, None, d['settings'])
     assert "Eau d'empâtage" in produit and 'Eau de rinçage' in produit
+
+
+# ── Estimations ──────────────────────────────────────────────────────────
+
+_STYLES = [{'name': 'American IPA', 'og_min': 1.056, 'og_max': 1.070,
+            'fg_min': 1.008, 'fg_max': 1.014, 'abv_min': 5.5, 'abv_max': 7.5,
+            'ibu_min': 40, 'ibu_max': 70, 'ebc_min': 12, 'ebc_max': 28}]
+
+
+def _recette_est(**extra):
+    base = {'volume': 20, 'brewhouse_efficiency': 72, 'style': 'American IPA',
+            'ingredients': [
+                {'category': 'malt', 'name': 'Pale Ale', 'quantity': 5, 'unit': 'kg', 'gu': 300, 'ebc': 6},
+                {'category': 'houblon', 'name': 'Citra', 'quantity': 60, 'unit': 'g',
+                 'alpha': 12, 'hop_time': 60, 'hop_type': 'ebullition'},
+            ]}
+    base.update(extra)
+    return base
+
+
+def test_estimations_calculees():
+    e = V.rec_estimations(_recette_est())
+    assert V.fixed(e['og'], 3) == '1.054'
+    assert V.fixed(e['fg'], 3) == '1.014'
+    assert V.fixed(e['abv'], 1) == '5.3'
+    assert e['ibu'] > 0 and e['ebc'] > 0
+
+
+def test_le_houblonnage_a_cru_n_amertume_pas():
+    sec = _recette_est(ingredients=[
+        {'category': 'houblon', 'name': 'Citra', 'quantity': 60, 'unit': 'g',
+         'alpha': 12, 'hop_time': 0, 'hop_type': 'dryhop'}])
+    assert V.rec_estimations(sec)['ibu'] is None
+
+
+def test_un_ajout_en_fermentation_compte_a_cent_pour_cent():
+    # Un sucre ajouté après le brassage ne subit pas les pertes de rendement.
+    brassage = _recette_est(ingredients=[
+        {'category': 'autre', 'name': 'Sucre', 'quantity': 1, 'unit': 'kg', 'gu': 380,
+         'other_type': 'ebullition'}])
+    fermentation = _recette_est(ingredients=[
+        {'category': 'autre', 'name': 'Sucre', 'quantity': 1, 'unit': 'kg', 'gu': 380,
+         'other_type': 'fermentation'}])
+    assert V.rec_estimations(fermentation)['og'] > V.rec_estimations(brassage)['og']
+
+
+def test_la_couleur_suit_l_echelle_srm():
+    assert V.ebc_to_color(2) == '#FFE699'       # très pâle
+    assert V.ebc_to_color(85) == '#6B3A00'      # brun foncé (SRM 43)
+    assert V.ebc_to_color(120) == '#3D1F00'     # noir
+
+
+def test_la_valeur_est_verte_dans_la_plage_et_rouge_dehors():
+    dans = V._calc_bar('abv', 6.0, (5.5, 7.5), V.CALC_PARAMS['abv'])
+    dehors = V._calc_bar('abv', 9.0, (5.5, 7.5), V.CALC_PARAMS['abv'])
+    assert 'var(--hop)' in dans and '#e5484d' not in dans
+    assert '#e5484d' in dehors
+
+
+def test_sans_style_renseigne_aucune_plage_n_est_affichee():
+    html = V.estimations_html(_recette_est(style='Style inconnu'), styles=_STYLES)
+    assert 'cb-range' not in html and 'var(--amber)' in html
+
+
+def test_l_encart_reprend_les_plages_du_style():
+    html = V.estimations_html(_recette_est(), styles=_STYLES)
+    assert 'cb-range' in html and 'American IPA' in html and 'Couleur Morey' in html
+
+
+def test_pas_d_encart_sur_une_recette_vide():
+    assert V.estimations_html({'volume': 20, 'ingredients': []}) == ''

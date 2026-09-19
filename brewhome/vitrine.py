@@ -372,6 +372,185 @@ def beer_header(beer, photo_src, settings):
         '  </div>')
 
 
+# ── Estimations (OG/FG/ABV/IBU/EBC) et plages du style ───────────────────
+
+#: Échelles des barres, identiques à celles de l'application.
+CALC_PARAMS = {
+    'og':  {'label': 'OG',  'unit': '',  'dec': 3, 'min': 1.020, 'max': 1.130},
+    'fg':  {'label': 'FG',  'unit': '',  'dec': 3, 'min': 1.002, 'max': 1.030},
+    'abv': {'label': 'ABV', 'unit': '%', 'dec': 1, 'min': 0,     'max': 14},
+    'ibu': {'label': 'IBU', 'unit': '',  'dec': 0, 'min': 0,     'max': 120},
+    'ebc': {'label': 'EBC', 'unit': '',  'dec': 0, 'min': 0,     'max': 120},
+}
+
+#: Couleur de la bière selon l'échelle SRM (formule Morey).
+_SRM_COLORS = [(2, '#FFE699'), (4, '#FFD878'), (6, '#FFCA5A'), (9, '#FFC033'),
+               (12, '#EBB008'), (15, '#D98000'), (18, '#CB6E00'), (22, '#BE5C00'),
+               (28, '#A95200'), (35, '#8D4C00'), (44, '#6B3A00')]
+
+
+def ebc_to_color(ebc):
+    srm = (ebc or 0) / 1.97
+    for seuil, couleur in _SRM_COLORS:
+        if srm < seuil:
+            return couleur
+    return '#3D1F00'
+
+
+def _gu(ing, par_nom):
+    """Points de gravité d'un ingrédient : valeur propre, sinon catalogue."""
+    v = ing.get('gu')
+    if v is None:
+        cat = par_nom.get((ing.get('name') or '').lower())
+        v = cat.get('gu') if cat else None
+    return float(v) if v is not None else None
+
+
+def rec_estimations(rec, catalog=None, ibu_formula='tinseth'):
+    """OG, FG, ABV, IBU et EBC d'une recette, comme les calcule l'application.
+
+    Ce n'est pas le même OG que `rec_theoretical` : celui-ci compte aussi les
+    fermentescibles de la catégorie « autre » — fruits, miel, sucre — et les
+    ajouts en fermentation ou conditionnement y entrent à 100 %, n'ayant pas
+    subi les pertes du brassage.
+    """
+    par_nom = {(c.get('name') or '').lower(): c for c in (catalog or [])}
+    vol = float(rec.get('volume') or 20)
+    eff = float(rec.get('brewhouse_efficiency') or 72)
+    ings = rec.get('ingredients') or []
+
+    points = 0.0
+    for m in [i for i in ings if i.get('category') == 'malt']:
+        gu = _gu(m, par_nom)
+        if not m.get('quantity') or gu is None:
+            continue
+        kg = float(m['quantity']) if m.get('unit') == 'kg' else float(m['quantity']) / 1000
+        points += kg * gu * (eff / 100)
+    for a in [i for i in ings if i.get('category') == 'autre']:
+        gu = _gu(a, par_nom)
+        if not a.get('quantity') or gu is None:
+            continue
+        unit = a.get('unit')
+        kg = float(a['quantity']) if unit == 'kg' else (float(a['quantity']) / 1000 if unit == 'g' else 0)
+        if kg <= 0:
+            continue
+        facteur = 1.0 if a.get('other_type') in ('fermentation', 'packaging') else eff / 100
+        points += kg * gu * facteur
+
+    og = 1 + points / vol / 1000 if points > 0 else None
+    fg = 1 + (og - 1) * 0.25 if og is not None else None
+    abv = (og - fg) * 131.25 if og is not None else None
+
+    # IBU : Tinseth par défaut, Rager si l'application est réglée ainsi.
+    wort_og = og or 1.050
+    ibu = 0.0
+    for h in [i for i in ings if i.get('category') == 'houblon']:
+        if not h.get('quantity') or not h.get('alpha'):
+            continue
+        htype = h.get('hop_type') or 'ebullition'
+        if htype == 'dryhop':
+            continue   # le houblonnage à cru n'amertume pas
+        mins = 15 if htype == 'whirlpool' else (h['hop_time'] if h.get('hop_time') is not None else 60)
+        grammes = float(h['quantity']) * 1000 if h.get('unit') == 'kg' else float(h['quantity'])
+        alpha = float(h['alpha'])
+        if ibu_formula == 'rager':
+            util = 18.11 + 13.86 * math.tanh((float(mins) - 31.32) / 18.27)
+            adj = (wort_og - 1.050) / 0.2 if wort_og > 1.050 else 0
+            ibu += (grammes * (util / 100) * (alpha / 100) * 1000) / (vol * (1 + adj))
+        else:
+            bigness = 1.65 * (0.000125 ** (wort_og - 1))
+            temps = (1 - math.exp(-0.04 * float(mins))) / 4.15
+            ibu += bigness * temps * (alpha / 100) * grammes * 1000 / vol
+
+    # EBC : somme des MCU des malts, convertie par la formule de Morey.
+    mcu = 0.0
+    for m in [i for i in ings if i.get('category') == 'malt']:
+        if not m.get('quantity'):
+            continue
+        ebc_m = m.get('ebc')
+        if ebc_m is None:
+            cat = par_nom.get((m.get('name') or '').lower())
+            ebc_m = cat.get('ebc') if cat else None
+        if ebc_m is None:
+            continue
+        kg = float(m['quantity']) if m.get('unit') == 'kg' else float(m['quantity']) / 1000
+        lovibond = (float(ebc_m) / 1.97 + 0.76) / 1.3546
+        mcu += (kg * 2.20462 * lovibond) / (vol * 0.264172)
+    srm = 1.4922 * (mcu ** 0.6859) if mcu > 0 else None
+    ebc = srm * 1.97 if srm is not None else None
+
+    return {'og': og, 'fg': fg, 'abv': abv,
+            'ibu': ibu if ibu > 0 else None, 'ebc': ebc, 'srm': srm}
+
+
+def bjcp_ranges(style_name, styles):
+    """Plages du style BJCP portant exactement ce nom, ou None."""
+    s = next((x for x in (styles or []) if x.get('name') == style_name), None)
+    if not s:
+        return None
+    return {'name': s.get('name'),
+            'og': (s.get('og_min'), s.get('og_max')),
+            'fg': (s.get('fg_min'), s.get('fg_max')),
+            'abv': (s.get('abv_min'), s.get('abv_max')),
+            'ibu': (s.get('ibu_min'), s.get('ibu_max')),
+            'ebc': (s.get('ebc_min'), s.get('ebc_max'))}
+
+
+def _calc_bar(key, val, plage, cfg):
+    """Une ligne de l'encart : libellé, barre, valeur, plage visée.
+
+    La valeur passe au vert dans la plage du style et au rouge en dehors ;
+    sans style renseigné, elle reste ambre — on ne peut rien juger.
+    """
+    etendue = cfg['max'] - cfg['min']
+    a_plage = plage and plage[0] is not None and plage[1] is not None
+
+    plage_html = ''
+    if a_plage:
+        g = min(100, max(0, (plage[0] - cfg['min']) / etendue * 100))
+        d = min(100, max(0, (plage[1] - cfg['min']) / etendue * 100))
+        plage_html = f'<div class="cb-range" style="left:{g:.1f}%;width:{(d - g):.1f}%"></div>'
+
+    marqueur, couleur = '', 'var(--amber)'
+    if val is not None:
+        pct = min(100, max(0, (val - cfg['min']) / etendue * 100))
+        if a_plage:
+            couleur = 'var(--hop)' if plage[0] <= val <= plage[1] else '#e5484d'
+        marqueur = f'<div class="cb-marker" style="left:{pct:.1f}%;background:{couleur}"></div>'
+
+    val_str = (fixed(val, cfg['dec']) + (' ' + cfg['unit'] if cfg['unit'] else '')) if val is not None else '–'
+    cible = (f'⌖ {fixed(plage[0], cfg["dec"])}–{fixed(plage[1], cfg["dec"])}{cfg["unit"]}'
+             if a_plage else '')
+    return (f'<div class="cb-row"><div class="cb-lbl">{cfg["label"]}</div>'
+            f'<div class="cb-track">{plage_html}{marqueur}</div>'
+            f'<div class="cb-val" style="color:{couleur}">{val_str}</div>'
+            f'<div class="cb-target">{cible}</div></div>')
+
+
+def estimations_html(rec, catalog=None, styles=None, ibu_formula='tinseth'):
+    """Encart « Estimations » d'une page de recette, ou chaîne vide."""
+    est = rec_estimations(rec, catalog, ibu_formula)
+    if all(est[k] is None for k in ('og', 'fg', 'abv', 'ibu', 'ebc')):
+        return ''
+    plages = bjcp_ranges(rec.get('style'), styles) or {}
+
+    barres = ''.join(_calc_bar(k, est[k], plages.get(k), CALC_PARAMS[k])
+                     for k in ('og', 'fg', 'abv', 'ibu', 'ebc'))
+
+    pastille = ''
+    if est['ebc'] is not None:
+        pastille = (f'<div class="cb-swatch"><div class="cb-dot" style="background:{ebc_to_color(est["ebc"])}"></div>'
+                    f'<div><div class="cb-dot-val">EBC {fixed(est["ebc"], 0)}&ensp;·&ensp;SRM {fixed(est["srm"], 0)}</div>'
+                    f'<div class="cb-dot-lbl">Couleur Morey</div></div></div>')
+
+    titre_style = f' — {esc(plages["name"])}' if plages.get('name') else ''
+    formule = 'Rager' if ibu_formula == 'rager' else 'Tinseth'
+    return (f'\n  <div class="calc-panel">\n'
+            f'    <div class="cb-title">Estimations<span class="cb-sub">{titre_style}'
+            f'<span class="cb-formula">IBU : {formule}</span></span></div>\n'
+            f'    {barres}{pastille}\n  </div>')
+
+
 # ── Page d'une recette ───────────────────────────────────────────────────
 
 _HOP_TYPE = {'ebullition': 'Ébullition', 'whirlpool': 'Whirlpool',
@@ -397,7 +576,7 @@ def _qte(ing):
     return f'{num(ing.get("quantity"))} {esc(ing.get("unit"))}'
 
 
-def generate_recipe_html(rec, beer, theo, photo_src, settings):
+def generate_recipe_html(rec, beer, theo, photo_src, settings, catalog=None, styles=None):
     ings = rec.get('ingredients') or []
     malts = [i for i in ings if i.get('category') == 'malt']
     hops = sorted([i for i in ings if i.get('category') == 'houblon'],
@@ -477,4 +656,5 @@ def generate_recipe_html(rec, beer, theo, photo_src, settings):
         brassage,
         (_sec('Notes') + f'<div class="notes">{esc(rec.get("notes"))}</div>') if rec.get('notes') else '',
         beer_link, esc(app_name),
+        estimations_html(rec, catalog, styles, settings.get('ibuFormula') or 'tinseth'),
     ])

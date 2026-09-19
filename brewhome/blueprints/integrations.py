@@ -1389,6 +1389,7 @@ def _vitrine_donnees():
                 'SELECT * FROM recipe_ingredients WHERE recipe_id=?', (r['id'],)).fetchall()]
             recipes.append(rec)
         catalog = [dict(r) for r in conn.execute('SELECT * FROM ingredient_catalog').fetchall()]
+        styles = [dict(r) for r in conn.execute('SELECT * FROM bjcp_styles').fetchall()]
         reglages = {r['key']: r['value'] for r in conn.execute(
             'SELECT key, value FROM app_settings').fetchall()}
 
@@ -1400,7 +1401,12 @@ def _vitrine_donnees():
         'bottleSizes': json.loads(reglages['bottle_sizes_enabled'])
                        if reglages.get('bottle_sizes_enabled') else None,
     }
-    return beers, recipes, catalog, settings
+    # Formule d'amertume : réglage global de l'application, Tinseth par défaut.
+    try:
+        settings['ibuFormula'] = (json.loads(reglages.get('energy') or '{}') or {}).get('ibu_formula') or 'tinseth'
+    except (json.JSONDecodeError, ValueError):
+        settings['ibuFormula'] = 'tinseth'
+    return beers, recipes, catalog, styles, settings
 
 
 def _vitrine_photo(beer):
@@ -1428,7 +1434,7 @@ def _vitrine_photo(beer):
 
 def _vitrine_fichiers():
     """Construit la liste (chemin, contenu) de la vitrine complète."""
-    beers, recipes, catalog, settings = _vitrine_donnees()
+    beers, recipes, catalog, styles, settings = _vitrine_donnees()
 
     photo_map, images = {}, []
     for b in beers:
@@ -1468,7 +1474,8 @@ def _vitrine_fichiers():
         src = f'../images/beer-{beer["id"]}.{ph["ext"]}' if ph else None
         fichiers.append((f'recipes/{rec["id"]}.html',
                          vitrine.generate_recipe_html(
-                             rec, beer, vitrine.rec_theoretical(rec, catalog), src, settings)))
+                             rec, beer, vitrine.rec_theoretical(rec, catalog), src, settings,
+                             catalog=catalog, styles=styles)))
     fichiers.extend(images)
     return fichiers, len(beers)
 

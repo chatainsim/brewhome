@@ -17,6 +17,22 @@ h1{font-size:1.9rem;font-weight:900;color:var(--amber);letter-spacing:-.02em;mar
 .mc{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 18px;text-align:center;min-width:90px}
 .mc-val{font-size:1.4rem;font-weight:800;color:var(--amber);line-height:1}
 .mc-lbl{font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
+.calc-panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin:22px 0 0;text-align:left}
+.cb-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--amber);margin-bottom:12px}
+.cb-sub{color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.7rem}
+.cb-formula{margin-left:10px}
+.cb-row{display:grid;grid-template-columns:40px 1fr 72px auto;align-items:center;gap:10px;margin-bottom:7px;font-size:.8rem}
+.cb-lbl{font-weight:700;color:var(--muted)}
+.cb-track{position:relative;height:9px;background:#2a2a2a;border-radius:5px}
+.cb-range{position:absolute;top:0;height:100%;background:rgba(245,166,35,.55);border-radius:5px}
+.cb-marker{position:absolute;top:-3px;width:3px;height:15px;border-radius:2px}
+.cb-val{font-weight:700;text-align:right}
+.cb-target{font-size:.7rem;color:var(--muted);white-space:nowrap}
+.cb-swatch{display:flex;align-items:center;gap:10px;margin-top:10px}
+.cb-dot{width:34px;height:34px;border-radius:50%;flex-shrink:0;border:2px solid rgba(255,255,255,.18);box-shadow:inset 0 -3px 8px rgba(0,0,0,.35)}
+.cb-dot-val{font-size:.82rem;font-weight:600}
+.cb-dot-lbl{font-size:.7rem;color:var(--muted)}
+@media(max-width:560px){.cb-row{grid-template-columns:34px 1fr 62px}.cb-target{display:none}}
 .metrics-real{margin-top:10px}
 .mc-real{border-color:var(--hop);padding:9px 16px;min-width:82px}
 .mc-real .mc-val{color:var(--hop);font-size:1.2rem}
@@ -64,6 +80,7 @@ footer{text-align:center;padding:20px;font-size:.72rem;color:#444;border-top:1px
   @@4@@
   <div class="metrics">@@5@@</div>
   @@6@@
+  @@15@@
 </header>
 <div class="container">
   @@7@@
