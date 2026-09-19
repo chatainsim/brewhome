@@ -1,9 +1,11 @@
-"""Le rendu Python de la vitrine doit rester identique à celui du JavaScript.
+"""Le rendu de la vitrine ne doit pas changer par inadvertance.
 
-Les témoins `fixtures/vitrine_*.html` ont été produits par les gabarits
-JavaScript d'origine (`generateVitrineHtml` / `generateRecipeHtml`) sur le jeu
-de données `fixtures/vitrine_data.json`. Toute divergence de rendu — un
-arrondi, un format de date, une espace — fait échouer ces tests.
+Les témoins `fixtures/vitrine_*.html` sont nés de la sortie des gabarits
+JavaScript d'origine, sur le jeu de données `fixtures/vitrine_data.json`.
+C'est ainsi que la fidélité du portage a été établie. Le JavaScript ayant été
+supprimé depuis, ils servent désormais de référence de non-régression : toute
+modification du rendu — un arrondi, un format de date, une espace — fait
+échouer ces tests, et les mettre à jour doit être un geste délibéré.
 
 Les primitives sont testées à part parce que c'est là qu'étaient les vrais
 pièges : `toFixed` et `Math.round` n'arrondissent pas comme Python, et les
@@ -104,3 +106,49 @@ def test_les_mesures_retombent_sur_l_abv_de_la_biere():
     beer.pop('brew_abv'); beer.pop('brew_og'); beer.pop('brew_fg')
     produit = V.generate_recipe_html(d['recipes'][0], beer, None, None, d['settings'])
     assert 'ABV réel' in produit and 'DI mesurée' not in produit
+
+
+# ── Volumes d'eau ────────────────────────────────────────────────────────
+
+def _recette_eau(**extra):
+    base = {'volume': 20, 'boil_time': 60, 'mash_ratio': 3, 'evap_rate': 3,
+            'grain_absorption': 0.8,
+            'ingredients': [{'category': 'malt', 'quantity': 5, 'unit': 'kg'}]}
+    base.update(extra)
+    return base
+
+
+def test_eau_calculee_comme_dans_l_application():
+    eau = V.rec_water(_recette_eau())
+    assert round(eau['mash'], 1) == 15.0
+    assert round(eau['sparge'], 1) == 12.0
+
+
+def test_l_empatage_ne_descend_pas_sous_55_pour_cent_du_total():
+    # Un ratio faible donnerait moins d'eau d'empâtage que de rinçage.
+    eau = V.rec_water(_recette_eau(mash_ratio=1))
+    assert eau['mash'] >= eau['total'] * 0.55 - 1e-9
+    assert eau['mash'] >= eau['sparge']
+
+
+def test_une_valeur_manuelle_prend_le_pas_et_le_rincage_s_ajuste():
+    eau = V.rec_water(_recette_eau(water_mash_override=18))
+    assert round(eau['mash'], 1) == 18.0
+    assert round(eau['sparge'], 1) == 9.0   # le total reste inchangé
+    assert eau['manual_mash'] and not eau['manual_sparge']
+
+
+def test_un_rincage_manuel_ne_deplace_pas_l_empatage():
+    eau = V.rec_water(_recette_eau(water_sparge_override=9))
+    assert round(eau['mash'], 1) == 15.0
+    assert round(eau['sparge'], 1) == 9.0
+
+
+def test_pas_de_volume_d_eau_sans_grain():
+    assert V.rec_water(_recette_eau(ingredients=[])) is None
+
+
+def test_les_volumes_d_eau_apparaissent_sur_la_page():
+    d = _donnees()
+    produit = V.generate_recipe_html(d['recipes'][0], None, None, None, d['settings'])
+    assert "Eau d'empâtage" in produit and 'Eau de rinçage' in produit

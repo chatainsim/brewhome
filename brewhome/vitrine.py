@@ -144,6 +144,41 @@ def rec_theoretical(rec, catalog=None):
     return {'og': og, 'fg': fg, 'abv': (og - fg) * 131.25, 'eff': eff, 'maxPts': max_pts}
 
 
+def rec_water(rec):
+    """Volumes d'eau d'empâtage et de rinçage, en litres.
+
+    Même calcul que la fiche de recette de l'application : l'eau totale est
+    le pré-ébullition augmenté de ce que le grain absorbe, et l'empâtage est
+    le ratio demandé, relevé au besoin à 55 % du total pour qu'il reste
+    supérieur au rinçage. Une valeur saisie à la main prend le pas sur le
+    calcul, séparément pour chacun des deux.
+
+    Renvoie None sans grain : il n'y a alors rien à empâter.
+    """
+    grain_kg = sum((float(i.get('quantity') or 0) if i.get('unit') == 'kg'
+                    else float(i.get('quantity') or 0) / 1000)
+                   for i in (rec.get('ingredients') or []) if i.get('category') == 'malt')
+    if grain_kg <= 0:
+        return None
+
+    vol = float(rec.get('volume') or 20)
+    boil = float(rec.get('boil_time') or 60)
+    ratio = float(rec.get('mash_ratio') or 3)
+    evap = float(rec.get('evap_rate') or 3)
+    absorption = float(rec.get('grain_absorption') or 0.8)
+
+    preboil = vol + evap * (boil / 60)
+    total_auto = preboil + grain_kg * absorption
+    auto_mash = max(grain_kg * ratio, total_auto * 0.55)
+
+    mash_ov = float(rec.get('water_mash_override') or 0)
+    sparge_ov = float(rec.get('water_sparge_override') or 0)
+    mash = mash_ov if mash_ov > 0 else auto_mash
+    sparge = sparge_ov if sparge_ov > 0 else max(0.0, total_auto - mash)
+    return {'mash': mash, 'sparge': sparge, 'total': mash + sparge,
+            'manual_mash': mash_ov > 0, 'manual_sparge': sparge_ov > 0}
+
+
 # ── Carte d'une bière (page d'accueil) ───────────────────────────────────
 
 def _stock_item(count, label, cls, pct):
@@ -412,13 +447,16 @@ def generate_recipe_html(rec, beer, theo, photo_src, settings):
     sous_titre = ' · '.join([x for x in (rec.get('style') or '',
                                          f'{num(rec["volume"])} L' if rec.get('volume') else '') if x])
 
+    eau = rec_water(rec)
     brassage = ''
-    if rec.get('mash_temp') or rec.get('mash_time') or rec.get('boil_time'):
+    if rec.get('mash_temp') or rec.get('mash_time') or rec.get('boil_time') or eau:
         cases = [
             f'<div><div class="mi-val">{num(rec["mash_temp"])} °C</div><div class="mi-lbl">T° empâtage</div></div>' if rec.get('mash_temp') else '',
             f'<div><div class="mi-val">{num(rec["mash_time"])} min</div><div class="mi-lbl">Durée empâtage</div></div>' if rec.get('mash_time') else '',
             f'<div><div class="mi-val">{num(rec["boil_time"])} min</div><div class="mi-lbl">Ébullition</div></div>' if rec.get('boil_time') else '',
             f'<div><div class="mi-val">{num(rec["volume"])} L</div><div class="mi-lbl">Volume cible</div></div>' if rec.get('volume') else '',
+            f'<div><div class="mi-val">{fixed(eau["mash"], 1)} L</div><div class="mi-lbl">Eau d\'empâtage</div></div>' if eau else '',
+            f'<div><div class="mi-val">{fixed(eau["sparge"], 1)} L</div><div class="mi-lbl">Eau de rinçage</div></div>' if eau else '',
         ]
         # Une entrée par ligne, y compris vide : le gabarit les sépare par des
         # retours à la ligne, qu'une jointure simple supprimerait.
