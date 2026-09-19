@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-19] — 16 · version 0.1.13
+
+### Ajouté
+- **Vitrine — eau d'empâtage et de rinçage sur les pages de recette** : les deux volumes apparaissent dans la section *Brassage*, à la suite de la température, des durées et du volume cible. Le calcul est celui de la fiche de recette de l'application, valeurs saisies à la main comprises ; une recette sans grain n'affiche rien.
+
+---
+
 ## [2026-09-19] — 15 · version 0.1.12
 
 ### Ajouté
