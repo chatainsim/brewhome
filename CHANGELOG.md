@@ -4,6 +4,20 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-19] — 15 · version 0.1.12
+
+### Ajouté
+- **Vitrine — publication automatique** : la vitrine peut se publier seule chaque jour à l'heure choisie, 2 h du matin par défaut. Le réglage se trouve dans *Paramètres › GitHub*, sous les boutons de la vitrine, avec la date de la dernière publication.
+
+### Modifié
+- **Vitrine — rendu déplacé côté serveur** : les pages étaient fabriquées par le navigateur, ce qui interdisait toute publication planifiée. Le bouton et la tâche de nuit exécutent désormais le même code, et le rendu JavaScript est supprimé — une seule implémentation à maintenir. Le résultat a été comparé octet par octet à l'ancien sur l'ensemble des bières et des recettes.
+
+### Corrigé
+- **Vitrine — date de fin de refermentation décalée d'un jour** : la date « Prête le » était calculée à minuit heure locale puis convertie en UTC, ce qui la ramenait à la veille.
+- **Accord au féminin** : « Brassée le » et « Embouteillée le » dans la vitrine et la fiche de la cave, le sujet étant une bière.
+
+---
+
 ## [2026-09-19] — 14 · version 0.1.11
 
 ### Ajouté

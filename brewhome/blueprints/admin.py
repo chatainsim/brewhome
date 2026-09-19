@@ -14,7 +14,7 @@ from helpers import api_error, strip_secret_settings
 
 bp = Blueprint('admin', __name__)
 
-APP_VERSION = "0.1.11"
+APP_VERSION = "0.1.12"
 
 # Token généré à chaque démarrage du serveur — requis pour télécharger l'export SQL.
 # Injecté dans le HTML de la page principale (variable JS _BH_EXPORT_TOKEN).
