@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ma cave à bières</title>
+<style>
+:root{--bg:#0f0f0f;--card:#1a1a1a;--border:#272727;--text:#e8e0d0;--muted:#888;--amber:#f5a623;--hop:#7ec845;--info:#60a5fa}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+header{text-align:center;padding:48px 16px 28px}
+h1{font-size:2.2rem;font-weight:900;color:var(--amber);letter-spacing:-.03em;margin-bottom:6px}
+.subtitle{font-size:.85rem;color:var(--muted)}
+.stats{display:flex;justify-content:center;gap:32px;margin:22px 0 40px;flex-wrap:wrap}
+.stat-val{font-size:1.7rem;font-weight:800;color:var(--amber);line-height:1}
+.stat-lbl{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-top:3px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:22px;max-width:1200px;margin:0 auto;padding:0 16px 60px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:transform .18s,box-shadow .18s}
+.card:hover{transform:translateY(-4px);box-shadow:0 16px 48px rgba(0,0,0,.55)}
+.card-img{width:100%;height:210px;object-fit:cover;display:block;cursor:zoom-in;transition:opacity .15s}.card-img:hover{opacity:.9}
+.card-img-ph{height:110px;background:linear-gradient(135deg,#1e1e1e,#262626);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#333}
+#lb{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;cursor:zoom-out;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px}
+#lb.open{display:flex}
+#lb img{max-width:92vw;max-height:82vh;object-fit:contain;border-radius:10px;box-shadow:0 24px 80px rgba(0,0,0,.7)}
+#lb-caption{font-size:.9rem;color:#ccc;max-width:80vw;text-align:center}
+#lb-close{position:fixed;top:16px;right:20px;font-size:1.6rem;color:#aaa;cursor:pointer;background:none;border:none;line-height:1;padding:4px 8px}
+#lb-close:hover{color:#fff}
+.card-body{padding:16px;flex:1;display:flex;flex-direction:column;gap:9px}
+.card-name{font-size:1.08rem;font-weight:700;line-height:1.3}
+.card-type{font-size:.79rem;color:var(--amber);font-style:italic}
+.card-abv{font-size:.8rem;color:#999}
+.card-abv strong{color:var(--hop);font-size:.95rem}
+.stock-row{display:flex;background:#111;border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.stock-sep{width:1px;background:var(--border);flex-shrink:0}
+.si{flex:1;padding:10px 12px;display:flex;flex-direction:column;align-items:center;gap:2px}
+.si-n{font-size:2rem;font-weight:800;line-height:1}
+.si-l{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.si-bar{width:80%;height:4px;background:#2a2a2a;border-radius:2px;margin-top:5px}
+.si-fill{height:100%;border-radius:2px}
+.si-empty{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.si.ok  .si-n{color:#4ade80}.si.ok  .si-fill{background:#4ade80}
+.si.low .si-n{color:#f59e0b}.si.low .si-fill{background:#f59e0b}
+.si.zero .si-n{color:#333}.si.zero .si-empty{color:#c0392b}
+.card-origin{font-size:.75rem;color:var(--muted)}
+.card-desc{font-size:.82rem;color:#aaa;line-height:1.55;flex:1}
+.card-foot{font-size:.71rem;color:#555;display:flex;gap:6px;flex-wrap:wrap;margin-top:2px;padding-top:8px;border-top:1px solid var(--border);align-items:center}
+.sep{color:#333}
+a.recipe-link{color:var(--amber);text-decoration:none;font-weight:500}
+a.recipe-link:hover{text-decoration:underline}
+.empty{text-align:center;color:var(--muted);padding:80px 20px;grid-column:1/-1}
+footer{text-align:center;padding:20px;font-size:.74rem;color:#444;border-top:1px solid var(--border)}
+.appname{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:var(--amber);opacity:.75;margin-bottom:10px}
+.card-brand{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--amber);opacity:.45;text-align:right;margin-top:4px}
+.keg-row{display:flex;align-items:center;gap:10px;background:rgba(245,166,35,.07);border:1px solid rgba(245,166,35,.2);border-radius:9px;padding:8px 12px}
+.keg-icon{font-size:1.15rem;line-height:1}
+.keg-info{flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px}
+.keg-val{font-size:1.05rem;font-weight:800;color:var(--amber)}
+.keg-lbl{font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.keg-bar{width:100%;height:4px;background:#2a2a2a;border-radius:2px;margin-top:2px}
+.keg-fill{height:100%;border-radius:2px}
+.keg-init{font-size:.7rem;color:var(--muted);white-space:nowrap}
+.referm-badge{display:inline-flex;align-items:center;gap:5px;font-size:.73rem;font-weight:600;color:#60a5fa;background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.25);border-radius:20px;padding:3px 10px}
+.section-divider{max-width:1200px;margin:40px auto 28px;padding:0 16px;display:flex;align-items:center;gap:14px}
+.section-divider-line{flex:1;height:1px;background:var(--border)}
+.section-divider-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#444;white-space:nowrap}
+.grid-exhausted .card{opacity:.5;filter:grayscale(.6)}
+.grid-exhausted .card:hover{opacity:.75;filter:grayscale(.3)}
+</style>
+</head>
+<body>
+<header>
+  <img src="images/app-icon.png" alt="" style="width:56px;height:56px;object-fit:contain;border-radius:12px;margin-bottom:8px;display:block;margin-left:auto;margin-right:auto">
+  <div class="appname">Test Brew</div>
+  <h1>🍺 Ma cave à bières</h1>
+  <div class="subtitle">Mise à jour le 19 septembre 2026</div>
+  <div class="stats">
+    <div><div class="stat-val">2</div><div class="stat-lbl">Bières</div></div>
+    <div><div class="stat-val">12</div><div class="stat-lbl">Bouteilles 33 cl</div></div><div><div class="stat-val">0</div><div class="stat-lbl">Bouteilles 75 cl</div></div>
+    <div><div class="stat-val">8.5</div><div class="stat-lbl">Litres en fût</div></div>
+  </div>
+</header>
+<div class="grid">
+    <div class="card" id="beer-1">
+      <img class="card-img" src="images/beer-1.jpg" loading="lazy" alt="Test'IPA" data-name="Test'IPA" onclick="openLb(this,this.dataset.name)">
+      <div class="card-body">
+        <div class="card-name">Test'IPA</div>
+        <div class="card-type">American IPA</div>
+        <div class="card-abv">ABV <strong>5.3 %</strong></div>
+        
+        
+      <div class="keg-row">
+        <span class="keg-icon">🛢</span>
+        <div class="keg-info">
+          <span class="keg-val">8.5 L</span>
+          <span class="keg-lbl">en fût</span>
+          <div class="keg-bar"><div class="keg-fill" style="width:45%;background:var(--amber)"></div></div>
+        </div>
+        <span class="keg-init">/ 19 L</span>
+      </div>
+        <div class="stock-row">
+          
+      <div class="si ok">
+        <div class="si-n">12</div>
+        <div class="si-l">33 cl</div>
+        <div class="si-bar"><div class="si-fill" style="width:50%"></div></div>
+        
+      </div><div class="stock-sep"></div>
+      <div class="si zero">
+        <div class="si-n">–</div>
+        <div class="si-l">75 cl</div>
+        
+        <div class="si-empty">épuisé</div>
+      </div>
+        </div>
+        <div class="card-origin">📍 Maison</div>
+        <p class="card-desc">Houblon &lt;cru&gt; &amp; &quot;co&quot;</p>
+        <div class="card-foot">🍺 Brassé le 04 juillet 2026<span class="sep">·</span>🍾 Embouteillé le 25 juillet 2026<span class="sep">·</span><a class="recipe-link" href="recipes/1.html">📋 IPA test</a></div>
+        <div class="card-brand">Test Brew</div>
+      </div>
+    </div></div>
+     
+     <div class="section-divider">
+       <div class="section-divider-line"></div>
+       <div class="section-divider-label">Épuisées (1)</div>
+       <div class="section-divider-line"></div>
+     </div>
+     <div class="grid grid-exhausted">
+    <div class="card" id="beer-2">
+      <div class="card-img-ph">🍺</div>
+      <div class="card-body">
+        <div class="card-name">Épuisée</div>
+        <div class="card-type">Stout</div>
+        <div class="card-abv">ABV <strong>7.0 %</strong></div>
+        
+        
+        <div class="stock-row">
+          
+      <div class="si zero">
+        <div class="si-n">–</div>
+        <div class="si-l">33 cl</div>
+        
+        <div class="si-empty">épuisé</div>
+      </div><div class="stock-sep"></div>
+      <div class="si zero">
+        <div class="si-n">–</div>
+        <div class="si-l">75 cl</div>
+        
+        <div class="si-empty">épuisé</div>
+      </div>
+        </div>
+        
+        
+        
+        <div class="card-brand">Test Brew</div>
+      </div>
+    </div></div>
+<footer>Généré par Test Brew</footer>
+
+<div id="lb" onclick="closeLb()">
+  <button id="lb-close" onclick="closeLb()" title="Fermer">✕</button>
+  <img id="lb-img" src="" alt="" onclick="event.stopPropagation();closeLb()" style="cursor:zoom-out">
+  <div id="lb-caption"></div>
+</div>
+<script>
+function openLb(el, name) {
+  document.getElementById('lb-img').src = el.src;
+  document.getElementById('lb-caption').textContent = name;
+  document.getElementById('lb').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeLb() {
+  document.getElementById('lb').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const lb = document.getElementById('lb');
+  if (lb?.classList.contains('open')) { closeLb(); return; }
+});
+</script>
+</body>
+</html>

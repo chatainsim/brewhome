@@ -1,0 +1,23 @@
+{
+  "beers": [
+    {"id": 1, "name": "Test'IPA", "type": "American IPA", "abv": 5.25,
+     "stock_33cl": 12, "initial_33cl": 24, "stock_75cl": 0, "initial_75cl": 6,
+     "keg_liters": 8.5, "keg_initial_liters": 19, "brew_date": "2026-07-04",
+     "bottling_date": "2026-07-25", "origin": "Maison", "description": "Houblon <cru> & \"co\"",
+     "recipe_id": 1, "recipe_name": "IPA test", "brew_og": 1.058, "brew_fg": 1.009, "brew_abv": 5.25},
+    {"id": 2, "name": "Épuisée", "type": "Stout", "abv": 7,
+     "stock_33cl": 0, "initial_33cl": 12, "keg_liters": 0}
+  ],
+  "recipes": [
+    {"id": 1, "name": "IPA test", "style": "American IPA", "volume": 20,
+     "brewhouse_efficiency": 72, "mash_temp": 66, "mash_time": 60, "boil_time": 60,
+     "notes": "Dry-hop 4 jours.",
+     "ingredients": [
+       {"category": "malt", "name": "Pale Ale", "quantity": 4.5, "unit": "kg", "ebc": 6, "gu": 300},
+       {"category": "houblon", "name": "Citra", "quantity": 40, "unit": "g", "alpha": 12, "hop_time": 10, "hop_type": "ebullition"},
+       {"category": "levure", "name": "US-05", "quantity": 11.5, "unit": "g"},
+       {"category": "autre", "name": "Irish Moss", "quantity": 5, "unit": "g", "other_type": "clarifiant"}
+     ]}
+  ],
+  "settings": {"appName": "Test Brew", "accentColor": "#f5a623", "bottleSizes": {"33cl": true, "75cl": true}}
+}
