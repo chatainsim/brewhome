@@ -670,7 +670,65 @@ document.addEventListener('keydown', e => {
   }
 });
 
-function generateRecipeHtml(rec, beer, theo) {
+/* En-tête « bière » des pages de recette.
+   Le QR code des étiquettes mène directement à la recette : sans ce bloc, on
+   arrive sur les ingrédients sans savoir de quelle bière il s'agit, ni ce
+   qu'il en reste. Reprend les informations de la carte d'accueil, en gardant
+   les chemins relatifs au dossier recipes/. */
+function _vBeerHeader(beer, photoSrc) {
+  if (!beer) return '';
+  const abv  = beer.abv != null ? `${parseFloat(beer.abv).toFixed(1)} %` : null;
+  const kegL = beer.keg_liters ?? 0;
+  const kegI = beer.keg_initial_liters ?? 0;
+
+  // Les tailles proposées globalement, plus celles que cette bière possède
+  // malgré tout : une taille désactivée depuis ne doit pas faire disparaître
+  // un stock existant.
+  const sizes = BOTTLE_SIZES.filter(sz => isSizeEnabled(sz) || (beer[`stock_${sz}`] || 0) > 0);
+  const stock = sizes.map(sz => {
+    const count = beer[`stock_${sz}`] ?? 0;
+    const init  = beer[`initial_${sz}`] > 0 ? beer[`initial_${sz}`] : 0;
+    const pct   = init > 0 ? Math.round(Math.min(100, count / init * 100)) : -1;
+    const cls   = count === 0 ? 'zero' : (pct >= 0 && pct <= 40 ? 'low' : 'ok');
+    return `<div class="bsi ${cls}">
+      <div class="bsi-n">${count > 0 ? count : '–'}</div>
+      <div class="bsi-l">${_vEsc(sz.replace('cl', ''))} cl</div>
+      ${count > 0 && pct >= 0 ? `<div class="bsi-bar"><div class="bsi-fill" style="width:${pct}%"></div></div>` : ''}
+    </div>`;
+  }).join('');
+
+  const keg = (kegL > 0 || kegI > 0) ? `<div class="bsi ${kegL === 0 ? 'zero' : 'ok'}">
+      <div class="bsi-n">${kegL % 1 === 0 ? kegL : kegL.toFixed(1)} L</div>
+      <div class="bsi-l">en fût</div>
+      ${kegI > 0 && kegI > kegL ? `<div class="bsi-bar"><div class="bsi-fill" style="width:${Math.round(Math.min(100, kegL / kegI * 100))}%"></div></div>` : ''}
+    </div>` : '';
+
+  const dates = [
+    beer.brew_date     ? `🍺 Brassé le ${_vDate(beer.brew_date)}`          : '',
+    beer.bottling_date ? `🍾 Embouteillé le ${_vDate(beer.bottling_date)}` : '',
+    beer.origin        ? `📍 ${_vEsc(beer.origin)}`                        : '',
+  ].filter(Boolean).join('<span class="bh-sep">·</span>');
+
+  return `
+  <div class="beer-head">
+    ${photoSrc
+      ? `<img class="bh-img" src="${_vEsc(photoSrc)}" alt="${_vEsc(beer.name)}" loading="lazy">`
+      : `<div class="bh-img bh-img-ph">🍺</div>`}
+    <div class="bh-body">
+      <div class="bh-name">${_vEsc(beer.name)}</div>
+      <div class="bh-meta">
+        ${beer.type ? `<span class="bh-type">${_vEsc(beer.type)}</span>` : ''}
+        ${abv ? `<span class="bh-abv">ABV <strong>${abv}</strong></span>` : ''}
+      </div>
+      ${(stock || keg) ? `<div class="bh-stock">${stock}${keg}</div>` : ''}
+      ${beer.description ? `<p class="bh-desc">${_vEsc(beer.description)}</p>` : ''}
+      ${dates ? `<div class="bh-dates">${dates}</div>` : ''}
+      <a class="bh-link" href="../index.html#beer-${beer.id}">Voir dans la cave →</a>
+    </div>
+  </div>`;
+}
+
+function generateRecipeHtml(rec, beer, theo, photoSrc) {
   const _e = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const ings   = rec.ingredients || [];
   const malts  = ings.filter(i => i.category === 'malt');
@@ -728,6 +786,27 @@ tr:hover td{background:rgba(255,255,255,.025)}
 .mash-info{display:flex;gap:20px;flex-wrap:wrap;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:.88rem}
 .mi-val{font-weight:700}.mi-lbl{font-size:.7rem;color:var(--muted);margin-top:2px}
 .notes{font-size:.84rem;line-height:1.65;color:#aaa;white-space:pre-wrap;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 16px}
+.beer-head{display:flex;gap:16px;align-items:flex-start;text-align:left;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin:0 0 22px}
+.bh-img{width:112px;height:112px;object-fit:cover;border-radius:10px;flex:0 0 auto;background:#000}
+.bh-img-ph{display:flex;align-items:center;justify-content:center;font-size:2.4rem}
+.bh-body{min-width:0;flex:1}
+.bh-name{font-size:1.15rem;font-weight:800;line-height:1.2}
+.bh-meta{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:3px;font-size:.78rem;color:var(--muted)}
+.bh-abv strong{color:var(--amber)}
+.bh-stock{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.bsi{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:9px;padding:6px 10px;min-width:58px;text-align:center}
+.bsi-n{font-size:1rem;font-weight:800;line-height:1.1}
+.bsi-l{font-size:.6rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:2px}
+.bsi-bar{height:3px;border-radius:2px;background:#333;margin-top:5px;overflow:hidden}
+.bsi-fill{height:100%;background:var(--amber)}
+.bsi.zero .bsi-n{color:#555}
+.bsi.low .bsi-fill{background:#f59e0b}
+.bh-desc{font-size:.8rem;line-height:1.5;color:#aaa;margin-top:9px}
+.bh-dates{font-size:.72rem;color:var(--muted);margin-top:8px}
+.bh-sep{margin:0 6px;opacity:.5}
+.bh-link{display:inline-block;margin-top:10px;font-size:.75rem;color:var(--amber);text-decoration:none}
+.bh-link:hover{text-decoration:underline}
+@media(max-width:520px){.beer-head{flex-direction:column;align-items:stretch}.bh-img{width:100%;height:170px}}
 .beer-link-row{text-align:center;padding:32px 0}
 a.back-beer{display:inline-block;font-size:.85rem;color:var(--amber);text-decoration:none;padding:8px 22px;border:1px solid var(--amber);border-radius:20px}
 a.back-beer:hover{background:rgba(245,166,35,.1)}
@@ -737,6 +816,7 @@ footer{text-align:center;padding:20px;font-size:.72rem;color:#444;border-top:1px
 <body>
 <header>
   <a href="../index.html" class="back-link">← Cave à bières</a>
+  ${_vBeerHeader(beer, photoSrc)}
   <h1>${_e(rec.name)}</h1>
   ${subtitle ? `<div class="subtitle">${_e(subtitle)}</div>` : ''}
   <div class="metrics">${metricsHtml}</div>
@@ -823,7 +903,10 @@ async function pushVitrine(force = false, silent = false) {
     const recipeFiles = Object.values(recipeMap).map(rec => {
       const beer = beers.find(b => b.recipe_id === rec.id);
       const theo = typeof _recTheoretical === 'function' ? _recTheoretical(rec) : null;
-      return { path: `recipes/${rec.id}.html`, b64: btoa(unescape(encodeURIComponent(generateRecipeHtml(rec, beer, theo)))) };
+      // La page vit dans recipes/, d'où le ../ devant le chemin de l'image.
+      const bp = beer && photoMap[beer.id];
+      const photoSrc = bp ? `../images/beer-${beer.id}.${bp.ext}` : null;
+      return { path: `recipes/${rec.id}.html`, b64: btoa(unescape(encodeURIComponent(generateRecipeHtml(rec, beer, theo, photoSrc)))) };
     });
 
     // Liste des fichiers : { path, b64 }
