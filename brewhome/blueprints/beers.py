@@ -82,7 +82,8 @@ _BEER_SCHEMA = {
 def get_beers():
     with get_db() as conn:
         rows = conn.execute(
-            '''SELECT b.*, br.brew_date, br.photos_url as brew_photos_url, r.name as recipe_name
+            '''SELECT b.*, br.brew_date, br.photos_url as brew_photos_url, r.name as recipe_name,
+                      br.og AS brew_og, br.fg AS brew_fg, br.abv AS brew_abv
                FROM beers b
                LEFT JOIN brews br ON b.brew_id=br.id
                LEFT JOIN recipes r ON b.recipe_id=r.id
@@ -202,7 +203,8 @@ def update_beer(beer_id):
         )
         row = conn.execute(
             '''SELECT b.*, br.brew_date AS brew_date, br.photos_url AS brew_photos_url,
-                      r.name AS recipe_name
+                      r.name AS recipe_name,
+                      br.og AS brew_og, br.fg AS brew_fg, br.abv AS brew_abv
                FROM beers b
                LEFT JOIN brews br ON b.brew_id = br.id
                LEFT JOIN recipes r ON b.recipe_id = r.id

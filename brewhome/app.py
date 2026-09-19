@@ -274,16 +274,33 @@ def _migrate_scripts_to_js():
         else:
             continue  # aucune source disponible
 
-        # Recompiler si la destination est absente ou plus ancienne que la source
-        if os.path.exists(dst) and os.path.getmtime(active_src) <= os.path.getmtime(dst):
-            continue
+        def _compile(text):
+            text = re.sub(r'^\s*<script[^>]*>\n?', '', text)
+            text = re.sub(r'\n?</script>[\s\S]*$', '', text)
+            if src_name == 'script_settings.html':
+                text = text.replace("{{ '{{' }}", '{{').replace("{{ '}}' }}", '}}')
+            return text
 
         with open(active_src, 'r', encoding='utf-8') as f:
-            content = f.read()
-        content = re.sub(r'^\s*<script[^>]*>\n?', '', content)
-        content = re.sub(r'\n?</script>[\s\S]*$', '', content)
-        if src_name == 'script_settings.html':
-            content = content.replace("{{ '{{' }}", '{{').replace("{{ '}}' }}", '}}')
+            content = _compile(f.read())
+
+        if os.path.exists(dst):
+            with open(dst, 'r', encoding='utf-8') as f:
+                current = f.read()
+            # Sortie plus récente que sa source ET différente de ce que la
+            # source produirait : quelqu'un a édité le .js directement. Le
+            # travail sera perdu au premier changement du .html, sans bruit —
+            # d'où cet avertissement, le seul endroit où le cas est visible.
+            if os.path.getmtime(active_src) <= os.path.getmtime(dst):
+                if current != content:
+                    app.logger.warning(
+                        'compile_scripts: %s a été modifié directement et diffère de sa source '
+                        '%s. Cette modification sera perdue dès que la source changera : '
+                        'reporte-la dans %s.', dst_name, src_name, src_name)
+                continue
+            if current == content:
+                continue  # rien à réécrire, seule la date de la source a bougé
+
         with open(dst, 'w', encoding='utf-8') as f:
             f.write(content)
         app.logger.info(f'compile_scripts: {src_name} → {dst_name}')

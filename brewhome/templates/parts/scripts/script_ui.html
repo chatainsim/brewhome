@@ -755,6 +755,24 @@ function generateRecipeHtml(rec, beer, theo, photoSrc) {
     ? [mc(theo.og.toFixed(3),'DI théo.'), mc(theo.fg.toFixed(3),'DF théo.'), mc(theo.abv.toFixed(1)+' %','ABV théo.'), mc((rec.brewhouse_efficiency||72)+' %','Rendement')].join('')
     : mc((rec.brewhouse_efficiency||72)+' %','Rendement');
 
+  /* Mesures réelles du brassin, sous les valeurs théoriques : c'est ce qui a
+     été relevé, et l'écart avec la théorie est justement l'information utile.
+     L'ABV retombe sur celui de la bière quand le brassin n'en porte pas, les
+     deux champs existant séparément. */
+  const mcr = (val, lbl) => `<div class="mc mc-real"><div class="mc-val">${_e(val)}</div><div class="mc-lbl">${_e(lbl)}</div></div>`;
+  const realOg  = beer && beer.brew_og  != null ? +beer.brew_og  : null;
+  const realFg  = beer && beer.brew_fg  != null ? +beer.brew_fg  : null;
+  const realAbv = beer && beer.brew_abv != null ? +beer.brew_abv
+                : (beer && beer.abv     != null ? +beer.abv : null);
+  const realParts = [
+    realOg  != null ? mcr(realOg.toFixed(3),  'DI mesurée')  : '',
+    realFg  != null ? mcr(realFg.toFixed(3),  'DF mesurée')  : '',
+    realAbv != null ? mcr(realAbv.toFixed(1) + ' %', 'ABV réel') : '',
+  ].filter(Boolean);
+  const realHtml = realParts.length
+    ? `<div class="metrics metrics-real">${realParts.join('')}</div>`
+    : '';
+
   const subtitle = [rec.style, rec.volume ? rec.volume+' L' : ''].filter(Boolean).join(' · ');
   const beerLink = beer ? `<div class="beer-link-row"><a href="../index.html#beer-${beer.id}" class="back-beer">🍺 ${_e(beer.name)}</a></div>` : '';
 
@@ -777,6 +795,9 @@ h1{font-size:1.9rem;font-weight:900;color:var(--amber);letter-spacing:-.02em;mar
 .mc{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 18px;text-align:center;min-width:90px}
 .mc-val{font-size:1.4rem;font-weight:800;color:var(--amber);line-height:1}
 .mc-lbl{font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
+.metrics-real{margin-top:10px}
+.mc-real{border-color:var(--hop);padding:9px 16px;min-width:82px}
+.mc-real .mc-val{color:var(--hop);font-size:1.2rem}
 .section{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--amber);margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:.87rem}
 th{text-align:left;font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--border)}
@@ -820,6 +841,7 @@ footer{text-align:center;padding:20px;font-size:.72rem;color:#444;border-top:1px
   <h1>${_e(rec.name)}</h1>
   ${subtitle ? `<div class="subtitle">${_e(subtitle)}</div>` : ''}
   <div class="metrics">${metricsHtml}</div>
+  ${realHtml}
 </header>
 <div class="container">
   ${malts.length  ? sec(`Fermentescibles (${totalKg.toFixed(2)} kg)`) + tbl(['Malt','Quantité','EBC'], maltRows)   : ''}
