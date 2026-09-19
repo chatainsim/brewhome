@@ -4,6 +4,17 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-19] — 14 · version 0.1.11
+
+### Ajouté
+- **Vitrine — rappel de la bière en tête des pages de recette** : le QR code des étiquettes menant directement à la recette, on arrivait sur la liste des ingrédients sans savoir de quelle bière il s'agissait ni ce qu'il en restait. Les pages s'ouvrent désormais sur l'étiquette, le nom, le type, l'ABV, le stock par contenance avec sa barre de remplissage, le contenu du fût, la description et les dates de brassage et d'embouteillage.
+- **Vitrine — densités et ABV mesurés** : les pages de recette n'affichaient que les valeurs calculées. Les relevés du brassin apparaissent maintenant juste en dessous, l'écart avec la théorie étant l'information utile. L'API des bières expose pour cela les mesures du brassin, aliasées afin de ne pas écraser l'ABV propre à la bière.
+
+### Corrigé
+- **Scripts — modification perdue sans avertissement** : `templates/parts/scripts/*.html` sont les sources et `static/js/bh-*.js` les sorties compilées ; une modification faite directement dans une sortie disparaissait au premier changement de sa source, silencieusement. La compilation compare désormais le contenu et signale le cas dans le journal, en nommant les deux fichiers.
+
+---
+
 ## [2026-09-18] — 13 · version 0.1.10
 
 ### Corrigé
