@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-19] — 17 · version 0.1.14
+
+### Ajouté
+- **Vitrine — encart des estimations sur les pages de recette** : OG, FG, ABV, IBU et EBC, avec la barre de la plage du style, la valeur en vert dedans et en rouge dehors, et la pastille de couleur Morey. Même encart que la fiche de recette de l'application, mêmes formules — Tinseth ou Rager selon le réglage global, plages issues des styles BJCP. Sans style reconnu, les valeurs restent neutres, faute de référence pour les juger.
+
+---
+
 ## [2026-09-19] — 16 · version 0.1.13
 
 ### Ajouté
