@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-20] — 18 · version 0.1.15
+
+### Ajouté
+- **Brassins — nettoyage du graphe de fermentation** : le journal de fermentation liste les relevés par origine (densimètre, sonde de température, saisie manuelle) avec leur nombre et leur période, et permet de supprimer une origine entière. Jusqu'ici seules les mesures saisies à la main pouvaient être retirées ; celles des sondes n'étaient ni listées ni supprimables, alors qu'elles sont tracées sur la courbe.
+
+### Corrigé
+- **Brassins — une sonde pouvait être reliée à un brassin terminé** : ses relevés s'ajoutaient alors à une courbe de fermentation close, qu'ils faussaient avec des températures de cuve sans rapport. L'association est désormais refusée, pour les sondes de température comme pour les densimètres ; détacher reste possible.
+
+---
+
 ## [2026-09-19] — 17 · version 0.1.14
 
 ### Ajouté
