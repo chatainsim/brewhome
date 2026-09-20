@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-20] — 20 · version 0.1.17
+
+### Corrigé
+- **Brassins — le graphe de fermentation ne traçait plus la courbe** : les relevés d'une sonde de température n'ont pas de densité et laissent des trous dans la série. Mêlés à ceux d'un densimètre, ils isolaient chaque mesure entre deux trous et aucun trait ne les reliait — la courbe disparaissait alors que les données étaient bien présentes. Les séries densité, ABV et température des deux graphes de fermentation relient désormais les mesures par-dessus les trous.
+
+---
+
 ## [2026-09-20] — 19 · version 0.1.16
 
 ### Ajouté
