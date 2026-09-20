@@ -2934,3 +2934,60 @@ async function saveBrewStepEdit(stepId) {
   } catch(e) { toast(t('common.error'), 'error'); }
 }
 
+
+// ── NETTOYAGE DU GRAPHE DE FERMENTATION ──────────────────────────────────────
+// Les relevés venus d'une sonde ou d'un densimètre ne figurent pas dans le
+// journal manuel, mais ils sont tracés sur la courbe. Une sonde reliée par
+// erreur à un brassin terminé la fausse donc sans qu'on puisse rien retirer —
+// d'où ce nettoyage par origine.
+
+async function _bflRefreshSources(brewId) {
+  const el = document.getElementById('bfl-sources');
+  if (!el) return;
+  try {
+    const rows = await api('GET', `/api/brews/${brewId}/fermentation/sources`);
+    if (!rows.length) {
+      el.innerHTML = `<div style="color:var(--muted);font-size:.85rem;padding:8px 0">${t('brew.ferm_sources_empty')}</div>`;
+      return;
+    }
+    const libelle = { spindle: t('brew.ferm_src_spindle'), temp_sensor: t('brew.ferm_src_temp'),
+                      manual: t('brew.ferm_src_manual') };
+    const jour = d => d ? d.slice(0, 10).split('-').reverse().join('/') : '';
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.85rem">${rows.map(r => `
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 4px">${libelle[r.source] || esc(r.source)}</td>
+        <td style="padding:6px 4px;color:var(--muted)">${r.count}</td>
+        <td style="padding:6px 4px;color:var(--muted);font-size:.78rem">${jour(r.first_at)} → ${jour(r.last_at)}</td>
+        <td style="padding:6px 4px;text-align:right">
+          <button class="btn btn-icon btn-danger btn-sm" style="padding:2px 6px"
+                  onclick="purgeFermSource(${brewId}, '${esc(r.source)}', ${r.count}, '${esc(libelle[r.source] || r.source)}')">
+            <i class="fas fa-trash" style="font-size:.7rem"></i>
+          </button>
+        </td>
+      </tr>`).join('')}</table>`;
+  } catch (e) {
+    // Surtout pas d'échec muet : une section vide ressemble à « aucun relevé »
+    // alors que c'est l'appel qui a échoué.
+    console.warn('[BrewHome] relevés par origine :', e);
+    el.innerHTML = `<div style="color:var(--danger);font-size:.85rem;padding:8px 0">${t('brew.ferm_sources_err')}</div>`;
+  }
+}
+
+async function purgeFermSource(brewId, source, count, libelle) {
+  // Le libellé lisible, pas la clé technique : « Sonde de température » et
+  // non « temp_sensor », dans un message qui demande de confirmer une
+  // suppression de milliers de lignes.
+  if (!await confirmModal(t('brew.ferm_src_confirm').replace('${n}', count)
+                            .replace('${src}', libelle || source), { danger: true })) return;
+  try {
+    const res = await api('DELETE', `/api/brews/${brewId}/fermentation`, { source });
+    toast(t('brew.ferm_src_deleted').replace('${n}', res.deleted), 'success');
+    await _bflRefresh(brewId);
+    await _bflRefreshSources(brewId);
+    const idx = S.brews.findIndex(b => b.id === brewId);
+    if (idx !== -1) {
+      S.brews[idx].fermentation_count = Math.max(0, (S.brews[idx].fermentation_count || 0) - res.deleted);
+      renderBrassins();
+    }
+  } catch (e) { toast(t('brew.ferm_src_err'), 'error'); }
+}

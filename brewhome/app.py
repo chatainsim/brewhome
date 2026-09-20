@@ -275,6 +275,15 @@ def _migrate_scripts_to_js():
             continue  # aucune source disponible
 
         def _compile(text):
+            # Tout ce qui suit </script> est écarté. Du code ajouté par
+            # inadvertance à la fin du fichier disparaîtrait donc sans bruit :
+            # on le signale plutôt que de le perdre silencieusement.
+            fin = text.find('</script>')
+            if fin != -1 and text[fin + len('</script>'):].strip():
+                app.logger.warning(
+                    'compile_scripts: %s contient du contenu après </script>, '
+                    'qui ne sera pas compilé dans %s. Le déplacer avant la balise.',
+                    src_name, dst_name)
             text = re.sub(r'^\s*<script[^>]*>\n?', '', text)
             text = re.sub(r'\n?</script>[\s\S]*$', '', text)
             if src_name == 'script_settings.html':

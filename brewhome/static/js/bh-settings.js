@@ -2297,3 +2297,24 @@ async function importLocaleFile(input) {
   input.value = '';
 }
 
+
+
+/* Publication automatique de la vitrine : remplissage des champs et
+   enregistrement immédiat à la bascule, pour que le planificateur serveur
+   soit reprogrammé sans attendre un autre enregistrement. */
+function _ghVitAutoFill() {
+  const au = (appSettings.github?.vitrine?.auto) || {};
+  const cb = document.getElementById('gh-vit-auto');
+  if (!cb) return;
+  cb.checked = !!au.enabled;
+  document.getElementById('gh-vit-auto-hour').value   = au.hour   != null ? au.hour   : 2;
+  document.getElementById('gh-vit-auto-minute').value = au.minute != null ? au.minute : 0;
+  const last = document.getElementById('gh-vit-last');
+  const lp = appSettings.github?.vitrine?.lastPush;
+  if (last) last.textContent = lp ? `Dernière publication : ${lp}` : '';
+}
+
+async function _ghVitAutoToggle() {
+  _captureGithubSettings();
+  try { await saveSettings(); } catch (e) { console.warn('[BrewHome] saveSettings:', e); }
+}
