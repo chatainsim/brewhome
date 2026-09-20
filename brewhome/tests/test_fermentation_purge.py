@@ -118,3 +118,56 @@ def test_suppression_ciblee_par_identifiants(client):
 
 def test_brassin_inexistant(client):
     assert client.delete('/api/brews/999999/fermentation', json={'all': True}).status_code == 404
+
+
+# ── Liste filtrable, pour choisir les points à retirer ───────────────────
+
+def test_liste_paginee(client):
+    b = _brassin(client)
+    _releves(b, 'spindle', 12)
+    r = client.get(f'/api/brews/{b}/fermentation/readings?limit=5').get_json()
+    assert r['total'] == 12 and len(r['rows']) == 5
+
+
+def test_liste_filtree_par_origine(client):
+    b = _brassin(client)
+    _releves(b, 'spindle', 4)
+    _releves(b, 'temp_sensor', 7)
+    r = client.get(f'/api/brews/{b}/fermentation/readings?source=temp_sensor').get_json()
+    assert r['total'] == 7
+    assert {x['source'] for x in r['rows']} == {'temp_sensor'}
+
+
+def test_liste_filtree_par_dates(client):
+    b = _brassin(client)
+    _releves(b, 'spindle', 5, jour='2026-09-10')
+    _releves(b, 'spindle', 3, jour='2026-09-12')
+    r = client.get(f'/api/brews/{b}/fermentation/readings?from=2026-09-12').get_json()
+    assert r['total'] == 3
+
+
+def test_la_liste_est_triee_du_plus_recent_au_plus_ancien(client):
+    # L'utilisateur cherche d'abord ce qui vient d'être ajouté par erreur.
+    b = _brassin(client)
+    _releves(b, 'spindle', 3, jour='2026-09-10')
+    rows = client.get(f'/api/brews/{b}/fermentation/readings').get_json()['rows']
+    assert rows[0]['recorded_at'] > rows[-1]['recorded_at']
+
+
+def test_supprimer_les_points_choisis(client):
+    b = _brassin(client)
+    _releves(b, 'spindle', 6)
+    rows = client.get(f'/api/brews/{b}/fermentation/readings').get_json()['rows']
+    choisis = [rows[0]['id'], rows[3]['id']]
+    assert client.delete(f'/api/brews/{b}/fermentation', json={'ids': choisis}).get_json()['deleted'] == 2
+    restants = [r['id'] for r in client.get(f'/api/brews/{b}/fermentation/readings').get_json()['rows']]
+    assert not set(choisis) & set(restants)
+
+
+def test_limite_de_pagination_bornee(client):
+    b = _brassin(client)
+    _releves(b, 'spindle', 2)
+    # Une limite démesurée ne doit pas devenir un moyen de tout charger.
+    r = client.get(f'/api/brews/{b}/fermentation/readings?limit=99999').get_json()
+    assert r['total'] == 2
+    assert client.get(f'/api/brews/{b}/fermentation/readings?limit=abc').status_code == 400

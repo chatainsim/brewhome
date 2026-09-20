@@ -2541,6 +2541,9 @@ async function openFermLog(brewId, btn) {
   openModal('brew-ferm-log-modal');
   await _bflRefresh(brewId);
   await _bflRefreshSources(brewId);
+  _bflPickState = { brewId, offset: 0, limit: 100, total: 0, coches: new Set() };
+  ['bfl-pick-from', 'bfl-pick-to'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  await _bflPickLoad(0);
 }
 
 async function _bflRefresh(brewId) {
@@ -2954,6 +2957,12 @@ async function _bflRefreshSources(brewId) {
     const libelle = { spindle: t('brew.ferm_src_spindle'), temp_sensor: t('brew.ferm_src_temp'),
                       manual: t('brew.ferm_src_manual') };
     const jour = d => d ? d.slice(0, 10).split('-').reverse().join('/') : '';
+    // Le sélecteur d'origine ne propose que ce que le brassin contient.
+    const sel = document.getElementById('bfl-pick-source');
+    if (sel) {
+      sel.innerHTML = `<option value="">${t('brew.ferm_pick_any')}</option>` +
+        rows.map(r => `<option value="${esc(r.source)}">${libelle[r.source] || esc(r.source)}</option>`).join('');
+    }
     el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.85rem">${rows.map(r => `
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:6px 4px">${libelle[r.source] || esc(r.source)}</td>
@@ -2992,4 +3001,135 @@ async function purgeFermSource(brewId, source, count, libelle) {
     }
   } catch (e) { toast(t('brew.ferm_src_err'), 'error'); }
 }
+
+// ── SÉLECTION DE RELEVÉS POINT PAR POINT ─────────────────────────────────────
+// Supprimer une origine entière ne convient pas toujours : une sonde peut
+// n'avoir faussé que la fin d'une courbe. On filtre, on coche, on supprime.
+
+let _bflPickState = { brewId: null, offset: 0, limit: 100, total: 0, coches: new Set() };
+
+function _bflPickFiltres() {
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  return { source: v('bfl-pick-source'), from: v('bfl-pick-from'), to: v('bfl-pick-to') };
+}
+
+async function _bflPickLoad(offset) {
+  const el = document.getElementById('bfl-pick');
+  if (!el || !_bflPickState.brewId) return;
+  _bflPickState.offset = offset;
+  if (offset === 0) _bflPickState.coches.clear();
+  const f = _bflPickFiltres();
+  const q = new URLSearchParams({ limit: _bflPickState.limit, offset });
+  if (f.source) q.set('source', f.source);
+  if (f.from) q.set('from', f.from);
+  if (f.to) q.set('to', f.to);
+  try {
+    const res = await api('GET', `/api/brews/${_bflPickState.brewId}/fermentation/readings?${q}`);
+    _bflPickState.total = res.total;
+    _bflPickRender(res.rows);
+  } catch (e) {
+    console.warn('[BrewHome] relevés :', e);
+    el.innerHTML = `<div style="color:var(--danger);font-size:.85rem;padding:8px 0">${t('brew.ferm_sources_err')}</div>`;
+  }
+}
+
+function _bflPickRender(rows) {
+  const el = document.getElementById('bfl-pick');
+  const st = _bflPickState;
+  if (!rows.length) {
+    el.innerHTML = `<div style="color:var(--muted);font-size:.85rem;padding:8px 0">${t('brew.ferm_pick_empty')}</div>`;
+    return;
+  }
+  const fin = Math.min(st.offset + st.limit, st.total);
+  const dt = d => d ? d.slice(8,10) + '/' + d.slice(5,7) + ' ' + d.slice(11,16) : '';
+  el.innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
+      <span style="font-size:.78rem;color:var(--muted)">${st.offset + 1}–${fin} / ${st.total}</span>
+      <button class="btn btn-ghost btn-sm" ${st.offset === 0 ? 'disabled' : ''}
+              onclick="_bflPickLoad(${Math.max(0, st.offset - st.limit)})">←</button>
+      <button class="btn btn-ghost btn-sm" ${fin >= st.total ? 'disabled' : ''}
+              onclick="_bflPickLoad(${st.offset + st.limit})">→</button>
+      <button class="btn btn-ghost btn-sm" onclick="_bflPickToggleAll()">${t('brew.ferm_pick_all')}</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-danger btn-sm" id="bfl-pick-del" onclick="_bflPickDelete()" disabled>
+        <i class="fas fa-trash"></i> <span id="bfl-pick-n">0</span>
+      </button>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:.82rem">${rows.map(r => `
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:4px 2px;width:26px"><input type="checkbox" data-rid="${r.id}"
+            ${st.coches.has(r.id) ? 'checked' : ''} onchange="_bflPickCheck(${r.id}, this.checked)"></td>
+        <td style="padding:4px 2px;white-space:nowrap">${dt(r.recorded_at)}</td>
+        <td style="padding:4px 2px;color:var(--muted)">${r.gravity != null ? (+r.gravity).toFixed(3) : '–'}</td>
+        <td style="padding:4px 2px;color:var(--muted)">${r.temperature != null ? (+r.temperature).toFixed(1) + '°' : '–'}</td>
+        <td style="padding:4px 2px;color:var(--muted);font-size:.72rem">${esc(r.source)}</td>
+      </tr>`).join('')}</table>
+    <div style="margin-top:8px">
+      <button class="btn btn-ghost btn-sm" onclick="_bflPickDeleteMatching()">
+        ${t('brew.ferm_pick_del_all').replace('${n}', st.total)}
+      </button>
+    </div>`;
+  _bflPickSync();
+}
+
+function _bflPickCheck(id, coche) {
+  if (coche) _bflPickState.coches.add(id); else _bflPickState.coches.delete(id);
+  _bflPickSync();
+}
+
+function _bflPickToggleAll() {
+  const cases = document.querySelectorAll('#bfl-pick input[type=checkbox]');
+  const tout = [...cases].every(c => c.checked);
+  cases.forEach(c => { c.checked = !tout; _bflPickCheck(+c.dataset.rid, !tout); });
+}
+
+function _bflPickSync() {
+  const n = _bflPickState.coches.size;
+  const btn = document.getElementById('bfl-pick-del');
+  const lbl = document.getElementById('bfl-pick-n');
+  if (btn) btn.disabled = n === 0;
+  if (lbl) lbl.textContent = n;
+}
+
+async function _bflPickDelete() {
+  const ids = [..._bflPickState.coches];
+  if (!ids.length) return;
+  if (!await confirmModal(t('brew.ferm_pick_confirm').replace('${n}', ids.length), { danger: true })) return;
+  await _bflPickApply({ ids });
+}
+
+async function _bflPickDeleteMatching() {
+  const st = _bflPickState;
+  if (!st.total) return;
+  const f = _bflPickFiltres();
+  // Sans aucun filtre, « tout ce qui correspond » est l'historique entier :
+  // on le dit, plutôt que de laisser croire à une suppression ciblée.
+  const msg = (f.source || f.from || f.to)
+    ? t('brew.ferm_pick_confirm_match').replace('${n}', st.total)
+    : t('brew.ferm_pick_confirm_all').replace('${n}', st.total);
+  if (!await confirmModal(msg, { danger: true })) return;
+  const corps = { all: true };
+  if (f.source) corps.source = f.source;
+  if (f.from) corps.from = f.from;
+  if (f.to) corps.to = f.to;
+  await _bflPickApply(corps);
+}
+
+async function _bflPickApply(corps) {
+  const brewId = _bflPickState.brewId;
+  try {
+    const res = await api('DELETE', `/api/brews/${brewId}/fermentation`, corps);
+    toast(t('brew.ferm_src_deleted').replace('${n}', res.deleted), 'success');
+    _bflPickState.coches.clear();
+    await _bflRefresh(brewId);
+    await _bflRefreshSources(brewId);
+    await _bflPickLoad(0);
+    const idx = S.brews.findIndex(b => b.id === brewId);
+    if (idx !== -1) {
+      S.brews[idx].fermentation_count = Math.max(0, (S.brews[idx].fermentation_count || 0) - res.deleted);
+      renderBrassins();
+    }
+  } catch (e) { toast(t('brew.ferm_src_err'), 'error'); }
+}
+
 </script>

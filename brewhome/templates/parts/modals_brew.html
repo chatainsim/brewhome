@@ -476,6 +476,19 @@
            liste ci-dessus et pourtant tracés sur la courbe -->
       <div class="group-head" style="margin-top:18px"><span data-i18n="brew.ferm_sources_title">Relevés du graphe par origine</span></div>
       <div id="bfl-sources"></div>
+
+      <!-- Sélection point par point : filtrer, cocher, supprimer -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
+        <div class="field" style="flex:1;min-width:130px">
+          <label data-i18n="brew.ferm_pick_source">Origine</label>
+          <select id="bfl-pick-source" class="input" onchange="_bflPickLoad(0)"></select>
+        </div>
+        <div class="field"><label data-i18n="brew.ferm_pick_from">Du</label>
+          <input type="date" id="bfl-pick-from" class="input" onchange="_bflPickLoad(0)"></div>
+        <div class="field"><label data-i18n="brew.ferm_pick_to">Au</label>
+          <input type="date" id="bfl-pick-to" class="input" onchange="_bflPickLoad(0)"></div>
+      </div>
+      <div id="bfl-pick"></div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('brew-ferm-log-modal')" data-i18n="common.close">Fermer</button>

@@ -629,6 +629,47 @@ def purge_brew_fermentation(brew_id):
     return jsonify({'deleted': supprimes})
 
 
+@bp.route('/api/brews/<int:brew_id>/fermentation/readings', methods=['GET'])
+def list_brew_fermentation_readings(brew_id):
+    """Relevés d'un brassin, filtrables et paginés.
+
+    Un brassin peut porter plusieurs milliers de relevés : on ne les renvoie
+    pas tous d'un coup, et le total permet à l'interface d'annoncer ce qu'une
+    suppression « tout ce qui correspond » emporterait.
+    """
+    source = request.args.get('source')
+    depuis = request.args.get('from')
+    jusqua = request.args.get('to')
+    try:
+        limit = min(max(1, int(request.args.get('limit', 100))), 500)
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (TypeError, ValueError):
+        return api_error('validation', 400, detail='limit et offset doivent être des entiers')
+
+    conditions, params = ['brew_id=?'], [brew_id]
+    if source:
+        conditions.append("COALESCE(source,'spindle')=?")
+        params.append(source)
+    if depuis:
+        conditions.append('recorded_at >= ?')
+        params.append(depuis)
+    if jusqua:
+        borne = jusqua.strip()
+        conditions.append('recorded_at <= ?')
+        params.append(borne + ' 23:59:59' if len(borne) == 10 else borne)
+    where = ' AND '.join(conditions)
+
+    with get_db() as conn:
+        total = conn.execute(
+            f'SELECT COUNT(*) FROM brew_fermentation_readings WHERE {where}', params).fetchone()[0]
+        rows = conn.execute(
+            f'''SELECT id, recorded_at, gravity, temperature, COALESCE(source,'spindle') AS source
+                FROM brew_fermentation_readings WHERE {where}
+                ORDER BY recorded_at DESC LIMIT ? OFFSET ?''',
+            [*params, limit, offset]).fetchall()
+    return jsonify({'total': total, 'rows': [dict(r) for r in rows]})
+
+
 @bp.route('/api/brews/<int:brew_id>/fermentation/sources', methods=['GET'])
 def get_brew_fermentation_sources(brew_id):
     """Origines des relevés d'un brassin, avec leur nombre et leur période.
