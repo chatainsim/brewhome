@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-20] — 19 · version 0.1.16
+
+### Ajouté
+- **Brassins — choisir les relevés à supprimer** : le journal de fermentation liste les relevés un par un (date, densité, température, origine) avec une case à cocher, un filtre par origine et par plage de dates, et un bouton qui supprime d'un coup tout ce qui correspond au filtre. Supprimer une origine entière ne convenait pas quand une sonde n'a faussé que la fin d'une courbe.
+
+### Corrigé
+- **Du code ajouté après `</script>` disparaissait à la compilation** : le nettoyage du graphe de fermentation ne fonctionnait nulle part, ses fonctions ayant été écrites hors du bloc script et donc écartées à la compilation. Seul le titre de la section s'affichait, d'où une section vide plutôt qu'une erreur. Le réglage de publication automatique de la vitrine souffrait du même défaut : sa case à cocher ne se remplissait pas et ne sauvegardait rien. La compilation avertit désormais quand une source contient du contenu après cette balise.
+
+---
+
 ## [2026-09-20] — 18 · version 0.1.15
 
 ### Ajouté
