@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 from db import get_db, get_readings_db, READINGS_DB_PATH
 from helpers import _sensor_rate_limit, api_error
-from constants import KegStatus
+from constants import BrewStatus, KegStatus
 
 bp = Blueprint('spindles', __name__)
 
@@ -247,6 +247,9 @@ def create_spindle():
     token = secrets.token_urlsafe(16)
     device_type = d.get('device_type', 'ispindel')
     with get_db() as conn:
+        refus = _refuser_si_brassin_termine(conn, d.get('brew_id'))
+        if refus:
+            return refus
         cur = conn.execute(
             'INSERT INTO spindles (name,token,brew_id,notes,device_type) VALUES (?,?,?,?,?)',
             (d.get('name'), token, d.get('brew_id'), d.get('notes'), device_type)
@@ -255,11 +258,35 @@ def create_spindle():
         return jsonify(dict(row)), 201
 
 
+def _refuser_si_brassin_termine(conn, brew_id):
+    """Erreur si l'on tente de relier une sonde à un brassin terminé.
+
+    Les relevés d'une sonde reliée finissent dans l'historique de fermentation
+    du brassin. Sur un brassin terminé, ils s'ajoutent à une courbe close et
+    la faussent — la température d'une cuve réutilisée n'a rien à voir avec la
+    fermentation d'alors.
+    """
+    if not brew_id:
+        return None
+    row = conn.execute('SELECT status, name FROM brews WHERE id=?', (brew_id,)).fetchone()
+    if not row:
+        return api_error('not_found', 404, detail='Brassin introuvable')
+    if row['status'] == BrewStatus.COMPLETED:
+        return api_error('validation', 400,
+                         detail=f"Le brassin « {row['name']} » est terminé : "
+                                "on ne peut pas y relier une sonde, ses relevés fausseraient "
+                                "la courbe de fermentation.")
+    return None
+
+
 @bp.route('/api/spindles/<int:spindle_id>', methods=['PATCH'])
 def patch_spindle(spindle_id):
     d = request.json or {}
     updates = {col: d[col] for col in _SPINDLE_PATCH_FIELDS if col in d}
     with get_db() as conn:
+        refus = _refuser_si_brassin_termine(conn, updates.get('brew_id'))
+        if refus:
+            return refus
         if 'brew_id' in updates:
             current = conn.execute('SELECT brew_id FROM spindles WHERE id=?', (spindle_id,)).fetchone()
             old_brew_id = current['brew_id'] if current else None
@@ -513,6 +540,9 @@ def patch_temp_sensor(sensor_id):
     d = request.json or {}
     updates = {col: d[col] for col in _TEMP_PATCH_FIELDS if col in d}
     with get_db() as conn:
+        refus = _refuser_si_brassin_termine(conn, updates.get('brew_id'))
+        if refus:
+            return refus
         # Si on retire l'association d'un brassin, migrer les lectures vers brew_fermentation_readings
         if 'brew_id' in updates and not updates['brew_id']:
             current = conn.execute(

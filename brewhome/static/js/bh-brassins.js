@@ -2539,6 +2539,7 @@ async function openFermLog(brewId, btn) {
   document.getElementById('bfl-alert').style.display = 'none';
   openModal('brew-ferm-log-modal');
   await _bflRefresh(brewId);
+  await _bflRefreshSources(brewId);
 }
 
 async function _bflRefresh(brewId) {

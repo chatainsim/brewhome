@@ -579,6 +579,73 @@ def add_brew_fermentation(brew_id):
         return jsonify({'id': cur.lastrowid}), 201
 
 
+@bp.route('/api/brews/<int:brew_id>/fermentation', methods=['DELETE'])
+def purge_brew_fermentation(brew_id):
+    """Supprime des relevés de fermentation d'un brassin.
+
+    Une sonde reliée par erreur à un brassin terminé y laisse des relevés qui
+    faussent la courbe : il faut pouvoir les retirer sans toucher au reste.
+
+    Au moins un filtre est exigé — `ids`, `source`, `from`/`to` — ou `all`
+    explicitement, pour qu'une requête incomplète ne vide pas l'historique.
+    """
+    d = request.get_json(silent=True) or {}
+    conditions, params = ['brew_id=?'], [brew_id]
+
+    ids = d.get('ids')
+    if ids:
+        if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+            return api_error('validation', 400, detail='ids doit être une liste d\'entiers')
+        conditions.append(f'id IN ({",".join("?" * len(ids))})')
+        params.extend(ids)
+    if d.get('source'):
+        conditions.append('source=?')
+        params.append(d['source'])
+    if d.get('from'):
+        conditions.append('recorded_at >= ?')
+        params.append(d['from'])
+    if d.get('to'):
+        # Une date sans heure exclurait la journée qu'elle désigne : les
+        # horodatages stockés portent l'heure, et « 2026-08-28 16:00:00 » est
+        # postérieur à « 2026-08-28 » en comparaison de chaînes.
+        borne = d['to']
+        if len(borne.strip()) == 10:
+            borne = borne.strip() + ' 23:59:59'
+        conditions.append('recorded_at <= ?')
+        params.append(borne)
+
+    if len(conditions) == 1 and not d.get('all'):
+        return api_error('validation', 400,
+                         detail='Préciser ids, source, from/to, ou all pour tout supprimer')
+
+    with get_db() as conn:
+        if not conn.execute('SELECT 1 FROM brews WHERE id=?', (brew_id,)).fetchone():
+            return api_error('not_found', 404)
+        cur = conn.execute(
+            'DELETE FROM brew_fermentation_readings WHERE ' + ' AND '.join(conditions), params)
+        supprimes = cur.rowcount
+        _log('brew', 'fermentation_purge',
+             json.dumps({'_i18n': 'act.ferm_purge', 'n': supprimes}), brew_id, conn)
+    return jsonify({'deleted': supprimes})
+
+
+@bp.route('/api/brews/<int:brew_id>/fermentation/sources', methods=['GET'])
+def get_brew_fermentation_sources(brew_id):
+    """Origines des relevés d'un brassin, avec leur nombre et leur période.
+
+    Sert à proposer un nettoyage ciblé plutôt qu'une suppression à l'aveugle.
+    """
+    with get_db() as conn:
+        rows = conn.execute(
+            '''SELECT COALESCE(source, 'spindle') AS source, COUNT(*) AS count,
+                      MIN(recorded_at) AS first_at, MAX(recorded_at) AS last_at
+               FROM brew_fermentation_readings WHERE brew_id=?
+               GROUP BY COALESCE(source, 'spindle') ORDER BY count DESC''',
+            (brew_id,)
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
 @bp.route('/api/brews/<int:brew_id>/fermentation/<int:reading_id>', methods=['DELETE'])
 def delete_brew_fermentation(brew_id, reading_id):
     with get_db() as conn:
