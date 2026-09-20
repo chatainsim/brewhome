@@ -1428,14 +1428,14 @@ async function openBrewFermentationChart(brewId) {
       data: {
         labels,
         datasets: [
-          { label: t('spin.metric_gravity'), data: gravities, borderColor: '#ff9500',
+          { label: t('spin.metric_gravity'), data: gravities, spanGaps: true, borderColor: '#ff9500',
             backgroundColor: 'rgba(255,149,0,.12)', yAxisID: 'yGrav',
             tension: 0.35, pointRadius: ptRadius, fill: true },
-          { label: abvChartLabel, data: abvData, borderColor: '#22c55e',
+          { label: abvChartLabel, data: abvData, spanGaps: true, borderColor: '#22c55e',
             backgroundColor: 'rgba(34,197,94,.08)', yAxisID: 'yAbv',
             tension: 0.35, pointRadius: ptRadius, fill: false },
           ...(!isDone ? [
-            { label: `${t('spin.metric_temp')} (°C)`, data: temps, borderColor: '#3b82f6',
+            { label: `${t('spin.metric_temp')} (°C)`, data: temps, spanGaps: true, borderColor: '#3b82f6',
               backgroundColor: 'rgba(59,130,246,.08)', yAxisID: 'yTemp',
               tension: 0.35, pointRadius: ptRadius, fill: false },
             ...(targetTempData ? [{
@@ -2444,6 +2444,7 @@ async function _loadSpindleChart({ hours, from, to } = {}) {
           {
             label: t('spin.metric_gravity'),
             data: gravities,
+            spanGaps: true,   // les relevés sans densité ne doivent pas couper la courbe
             borderColor: '#ff9500',
             backgroundColor: 'rgba(255,149,0,.12)',
             yAxisID: 'yGrav',
@@ -2454,6 +2455,7 @@ async function _loadSpindleChart({ hours, from, to } = {}) {
           {
             label: abvChartLabel,
             data: abvData,
+            spanGaps: true,   // les relevés sans densité ne doivent pas couper la courbe
             borderColor: '#22c55e',
             backgroundColor: 'rgba(34,197,94,.08)',
             yAxisID: 'yAbv',
@@ -2464,6 +2466,7 @@ async function _loadSpindleChart({ hours, from, to } = {}) {
           {
             label: `${t('spin.metric_temp')} (°C)`,
             data: temps,
+            spanGaps: true,   // les relevés sans densité ne doivent pas couper la courbe
             borderColor: '#3b82f6',
             backgroundColor: 'rgba(59,130,246,.08)',
             yAxisID: 'yTemp',
