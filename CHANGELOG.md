@@ -4,6 +4,15 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-24] — 22 · version 0.1.19
+
+### Ajouté
+- **Paramètres › IA — interrupteur global** : une case « Activer les fonctions IA », **décochée par défaut**. Décochée, la génération d'images (fiche bière, brouillons) et la suggestion de recette des brouillons disparaissent de l'application, tout comme la configuration des fournisseurs. Les clés et modèles déjà saisis sont conservés et réapparaissent en cochant la case. Le réglage est partagé entre appareils, et le serveur refuse aussi les suggestions tant qu'il est désactivé.
+
+> Après la mise à jour, les fonctions IA sont masquées : cochez la case pour les retrouver.
+
+---
+
 ## [2026-09-24] — 21 · version 0.1.18
 
 ### Ajouté
