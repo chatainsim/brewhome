@@ -4,6 +4,14 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-24] — 24 · version 0.1.21
+
+### Corrigé
+- **Journal d'activité** : la suppression de relevés de fermentation s'affichait « act.ferm_purge » ; elle s'affiche désormais « N relevé(s) de fermentation supprimé(s) ». La duplication d'une recette avait le même défaut.
+- **Textes affichés en clair** : l'avertissement de stock au lancement d'un brassin (« inv.stock_needed… »), des messages de suppression, le nombre d'ingrédients d'une recette et la comparaison de recettes affichaient des clés de traduction au lieu du texte. Une dizaine de libellés restaient aussi en français avec l'interface en anglais.
+
+---
+
 ## [2026-09-24] — 23 · version 0.1.20
 
 ### Modifié
