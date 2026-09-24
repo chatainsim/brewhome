@@ -64,11 +64,11 @@
           <label for="beer-f-photo" style="flex:1;display:block;padding:10px;border:2px dashed var(--border);border-radius:9px;cursor:pointer;text-align:center;color:var(--muted)">
             <i class="fas fa-camera" style="font-size:1.5rem;display:block;margin-bottom:4px"></i> <span data-i18n="cave.photo_click">Cliquer pour ajouter une photo</span>
           </label>
-          <button type="button" id="beer-gen-ai-btn" class="btn btn-ghost btn-sm" onclick="withBtn(this, generateBeerImage)" style="display:none;white-space:nowrap;align-self:center" title="Générer une image avec l'IA configurée">
+          <button type="button" id="beer-gen-ai-btn" class="ai-only btn btn-ghost btn-sm" onclick="withBtn(this, generateBeerImage)" style="display:none;white-space:nowrap;align-self:center" title="Générer une image avec l'IA configurée">
             <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="draft.img_generate">Générer avec IA</span>
           </button>
         </div>
-        <div id="beer-ai-extra-wrap" style="display:none;margin-top:8px">
+        <div id="beer-ai-extra-wrap" class="ai-only" style="display:none;margin-top:8px">
           <textarea id="beer-ai-extra" placeholder="Instructions supplémentaires pour l'IA : couleurs, style graphique, ambiance, ingrédients à illustrer…" style="width:100%;height:60px;font-size:.82rem;resize:vertical"></textarea>
         </div>
         <div style="position:relative;display:inline-block;width:100%">

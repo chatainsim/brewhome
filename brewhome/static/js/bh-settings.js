@@ -1918,6 +1918,7 @@ function renderAITextModelList() {
 
 function renderSettingsAI() {
   const ai = appSettings.ai || {};
+  document.getElementById('ai-enabled').checked = !!ai.enabled;
   // Migration: ancienne clé unique → clé Gemini
   const geminiKey = ai.geminiApiKey || (ai.provider !== 'openai' ? ai.apiKey : '') || '';
   const openaiKey = ai.openaiApiKey || (ai.provider === 'openai' ? ai.apiKey : '') || '';
@@ -1935,6 +1936,7 @@ function renderSettingsAI() {
 
 function saveAISettings() {
   appSettings.ai = {
+    enabled:      isAIEnabled(),
     provider:     document.getElementById('ai-provider').value,
     model:        document.getElementById('ai-model').value,
     geminiApiKey: document.getElementById('ai-gemini-key').value.trim(),
@@ -2078,6 +2080,7 @@ async function triggerTelegram(type) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function generateBeerImage() {
+  if (!isAIEnabled()) return;
   // Recharger les paramètres depuis le serveur pour garantir que la clé API est à jour
   // (évite le cas où localStorage et DB sont désynchronisés après un rechargement de page)
   try {

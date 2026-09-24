@@ -133,6 +133,9 @@ function _doSyncSettingsToServer() {
     gh_vitrine_auto_enabled: appSettings.github?.vitrine?.auto?.enabled ? 'true' : null,
     gh_vitrine_auto_hour:    appSettings.github?.vitrine?.auto?.hour   != null ? String(appSettings.github.vitrine.auto.hour)   : null,
     gh_vitrine_auto_minute:  appSettings.github?.vitrine?.auto?.minute != null ? String(appSettings.github.vitrine.auto.minute) : null,
+    // Toujours explicite (jamais null, qui supprimerait la clé) : un autre appareil
+    // doit voir « false » et non garder sa valeur locale.
+    ai_enabled:        appSettings.ai?.enabled ? 'true' : 'false',
     ai_provider:       appSettings.ai?.provider     || null,
     ai_model:          appSettings.ai?.model        || null,
     ai_size:           appSettings.ai?.size         || null,
@@ -247,7 +250,10 @@ function _loadSettingsFromServer(srv) {
     if (srv.gh_vitrine_auto_minute  != null) au.minute  = parseInt(srv.gh_vitrine_auto_minute) || 0;
     if (srv.gh_vitrine_last_push    != null) appSettings.github.vitrine.lastPush = srv.gh_vitrine_last_push;
   }
-  // IA
+  // IA — désactivée tant que le serveur ne dit pas explicitement le contraire
+  appSettings.ai = appSettings.ai || {};
+  appSettings.ai.enabled = srv.ai_enabled === 'true';
+  applyAIVisibility();
   if (srv.ai_provider != null || srv.ai_model != null || srv.ai_size != null || srv.ai_quality != null || srv.ai_api_key != null) {
     appSettings.ai = appSettings.ai || {};
     if (srv.ai_provider != null) appSettings.ai.provider = srv.ai_provider;
@@ -313,3 +319,22 @@ let _wcSourceProfile  = null; // profil eau source actif dans la correction d'ea
 let _invSugItems = []; // cache for inventory suggest clicks
 let _rSugItems   = []; // cache for recipe ingredient suggest clicks
 
+
+
+// ── Interrupteur global IA ──────────────────────────────────────────────
+// Désactivé par défaut. Les éléments marqués .ai-only sont masqués par la
+// classe « ai-off » posée sur <html> ; les fonctions qui appellent un
+// fournisseur d'IA vérifient aussi isAIEnabled(), au cas où un bouton
+// resterait accessible.
+function isAIEnabled() {
+  try { return !!appSettings?.ai?.enabled; } catch(e) { return false; }
+}
+function applyAIVisibility() {
+  document.documentElement.classList.toggle('ai-off', !isAIEnabled());
+}
+function toggleAIEnabled(on) {
+  appSettings.ai = appSettings.ai || {};
+  appSettings.ai.enabled = !!on;
+  applyAIVisibility();
+  saveSettings();
+}

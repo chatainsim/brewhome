@@ -32,11 +32,11 @@ function setDraftMode(mode) {
       <button class="btn btn-ghost btn-sm draft-back-btn" onclick="_showEditor(false)" title="${t('common.back')}"><i class="fas fa-arrow-left"></i></button>
       <button class="btn btn-primary" onclick="setDraftMode('edit')"><i class="fas fa-pen"></i> ${t('draft.mode_edit')}</button>
       <button class="btn btn-ghost" onclick="draftToRecipe()"><i class="fas fa-scroll"></i> ${t('draft.to_recipe')}</button>
-      <button class="btn btn-ghost" id="draft-ai-btn" onclick="withBtn(this, askGeminiForDraft)"
+      <button class="ai-only btn btn-ghost" id="draft-ai-btn" onclick="withBtn(this, askGeminiForDraft)"
         style="color:#8b5cf6;border-color:rgba(139,92,246,.4)">
         <i class="fas fa-wand-magic-sparkles"></i> ${t('draft.ai_suggest')}
       </button>
-      <label title="${t('draft.ai_use_stock_hint')}" style="display:flex;align-items:center;gap:5px;font-size:.82rem;cursor:pointer;user-select:none;color:var(--muted)">
+      <label class="ai-only" title="${t('draft.ai_use_stock_hint')}" style="display:flex;align-items:center;gap:5px;font-size:.82rem;cursor:pointer;user-select:none;color:var(--muted)">
         <input type="checkbox" id="draft-ai-use-stock"
           onchange="localStorage.setItem('draft-ai-use-stock',this.checked)"
           ${localStorage.getItem('draft-ai-use-stock')==='true'?'checked':''}>
@@ -50,11 +50,11 @@ function setDraftMode(mode) {
     actions.innerHTML = `
       <button class="btn btn-ghost btn-sm draft-back-btn" onclick="_showEditor(false)" title="${t('common.back')}"><i class="fas fa-arrow-left"></i></button>
       <button class="btn btn-ghost" onclick="setDraftMode('view')"><i class="fas fa-eye"></i> ${t('draft.mode_view')}</button>
-      <button class="btn btn-ghost" id="draft-ai-btn" onclick="withBtn(this, askGeminiForDraft)"
+      <button class="ai-only btn btn-ghost" id="draft-ai-btn" onclick="withBtn(this, askGeminiForDraft)"
         style="color:#8b5cf6;border-color:rgba(139,92,246,.4)">
         <i class="fas fa-wand-magic-sparkles"></i> ${t('draft.ai_suggest')}
       </button>
-      <label title="${t('draft.ai_use_stock_hint')}" style="display:flex;align-items:center;gap:5px;font-size:.82rem;cursor:pointer;user-select:none;color:var(--muted)">
+      <label class="ai-only" title="${t('draft.ai_use_stock_hint')}" style="display:flex;align-items:center;gap:5px;font-size:.82rem;cursor:pointer;user-select:none;color:var(--muted)">
         <input type="checkbox" id="draft-ai-use-stock"
           onchange="localStorage.setItem('draft-ai-use-stock',this.checked)"
           ${localStorage.getItem('draft-ai-use-stock')==='true'?'checked':''}>
@@ -982,6 +982,7 @@ function loadDraftImageFile(input) {
 }
 
 async function generateDraftImage() {
+  if (!isAIEnabled()) return;
   if (!_currentDraftId) return;
   const ai = appSettings.ai || {};
   const imgApiKey = ai.provider === 'gemini'
@@ -1025,6 +1026,7 @@ async function generateDraftImage() {
 
 // ── Suggestion IA (Gemini ou OpenAI — appel direct depuis le navigateur) ─────
 async function askGeminiForDraft() {
+  if (!isAIEnabled()) return;
   if (!_currentDraftId) return;
 
   const ai       = appSettings.ai || {};

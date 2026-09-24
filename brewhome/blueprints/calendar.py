@@ -549,9 +549,12 @@ def ai_draft_suggest():
 
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT key, value FROM app_settings WHERE key IN ('ai_api_key', 'ai_model')"
+            "SELECT key, value FROM app_settings WHERE key IN ('ai_api_key', 'ai_model', 'ai_enabled')"
         ).fetchall()
     s = {r['key']: r['value'] for r in rows}
+    # Fonctions IA désactivées par défaut (Paramètres → IA)
+    if s.get('ai_enabled') != 'true':
+        return api_error('ai_disabled', 403, detail='Fonctions IA désactivées (Paramètres → IA)')
     api_key = (s.get('ai_api_key') or '').strip() or None
     if not api_key:
         return api_error('not_configured', 400, detail='Clé API Gemini non configurée (Paramètres → IA)')

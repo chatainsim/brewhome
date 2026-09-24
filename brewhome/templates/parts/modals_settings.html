@@ -498,6 +498,14 @@
 
         <!-- TAB IA -->
         <template id="stab-ai-tpl">
+          <label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:18px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;cursor:pointer">
+            <input type="checkbox" id="ai-enabled" onchange="toggleAIEnabled(this.checked)" style="margin-top:3px">
+            <span>
+              <strong data-i18n="settings.ai.enable">Activer les fonctions IA</strong><br>
+              <span style="color:var(--muted);font-size:.82rem" data-i18n="settings.ai.enable_hint">Désactivées, la génération d'images et les suggestions de recettes disparaissent de l'application.</span>
+            </span>
+          </label>
+          <div class="ai-only">
           <p style="color:var(--muted);font-size:.87rem;margin-bottom:18px" data-i18n="settings.ai.config_hint">Configurez les fournisseurs d'IA pour la génération d'images et les suggestions de recettes.</p>
 
           <!-- Clés API -->
@@ -579,6 +587,7 @@
             </div>
           </div>
 
+          </div>
         </template>
         <div id="stab-ai" style="display:none"></div>
 
