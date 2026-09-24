@@ -399,7 +399,7 @@ function _toastWithUndo(msg, duration = 8000) {
   const el = document.createElement('div');
   el.id = 'shop-undo-toast';
   el.style.cssText = [
-    'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
+    'position:fixed', 'bottom:calc(24px + var(--mnav-h, 0px))', 'left:50%', 'transform:translateX(-50%)',
     'background:var(--bg2)', 'border:1px solid var(--border)', 'border-radius:10px',
     'padding:12px 16px', 'display:flex', 'align-items:center', 'gap:12px',
     'box-shadow:0 4px 20px rgba(0,0,0,.25)', 'z-index:10000', 'max-width:90vw',

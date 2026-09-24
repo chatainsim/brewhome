@@ -1644,8 +1644,15 @@ if (window.Chart) {
         _closeAllNavDd(group);
         const rect = mainBtn.getBoundingClientRect();
         dropdown.style.position = 'fixed';
-        dropdown.style.top      = rect.bottom + 'px';
-        dropdown.style.left     = Math.min(rect.left, window.innerWidth - 170) + 'px';
+        // Barre de navigation en bas (mobile) : le menu s'ouvre au-dessus
+        if (rect.top > window.innerHeight / 2) {
+          const barTop = (mainBtn.closest('.nav-links') || mainBtn).getBoundingClientRect().top;
+          dropdown.style.top    = 'auto';
+          dropdown.style.bottom = (window.innerHeight - barTop + 6) + 'px';
+        } else {
+          dropdown.style.top    = rect.bottom + 'px';
+        }
+        dropdown.style.left     = Math.max(6, Math.min(rect.left, window.innerWidth - 190)) + 'px';
         dropdown.style.zIndex   = '9999';
         group.classList.add('dd-open');
       }

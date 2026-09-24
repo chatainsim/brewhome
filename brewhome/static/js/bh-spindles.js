@@ -1955,7 +1955,7 @@ function _ensureTimerPanel() {
   if (document.getElementById('brew-timer-panel')) return;
   const panel = document.createElement('div');
   panel.id = 'brew-timer-panel';
-  panel.style.cssText = 'position:fixed;bottom:80px;right:24px;z-index:300;width:320px;background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.5);display:none;flex-direction:column;overflow:hidden';
+  panel.style.cssText = 'position:fixed;bottom:calc(80px + var(--mnav-h, 0px));right:24px;z-index:300;width:320px;background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.5);display:none;flex-direction:column;overflow:hidden';
   panel.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border);background:var(--card2)">
       <i class="fas fa-stopwatch" style="color:var(--amber)"></i>

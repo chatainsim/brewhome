@@ -452,6 +452,15 @@ input.rec-field-error,select.rec-field-error{border-color:var(--danger)!importan
   .modal-lg{max-width:calc(100vw - 16px)}
 }
 
+/* Portable / tablette : les libellés des sections ne tiennent pas, et
+   poussaient Thème et Réglages hors de l'écran — icônes seules, nom en infobulle */
+@media(min-width:769px) and (max-width:1580px){
+  .nav-links > .nav-btn > span[data-i18n], .nav-links > .nav-group > .nav-btn > span[data-i18n]{display:none}
+  .nav-links > .nav-btn, .nav-links > .nav-group > .nav-btn{padding:8px 12px}
+  .nav-brand{margin-right:16px}
+  nav{padding:0 12px}
+}
+
 @media(max-width:768px){
   /* Forms */
   .form-row.cols-2,.form-row.cols-3,.form-row.cols-4{grid-template-columns:1fr}
@@ -459,15 +468,41 @@ input.rec-field-error,select.rec-field-error{border-color:var(--danger)!importan
   /* Layout */
   .page{padding:12px;padding-top:74px}
 
-  /* Nav — texte masqué, icônes seulement */
-  nav{padding:0 6px}
+  /* En-têtes de page : titre puis boutons, qui passent à la ligne au lieu
+     d'élargir la page (ce qui poussait Réglages hors de l'écran) */
+  .section-head{flex-wrap:wrap;gap:8px}
+  .section-head .actions{flex-wrap:wrap;min-width:0}
+  #cave-search{width:160px!important}
+  /* Grilles de mise en page déclarées en ligne : une colonne ; et toute grille
+     en ligne laisse rétrécir ses cases sous la largeur de leur contenu */
+  .m-stack{grid-template-columns:1fr!important}
+  .page [style*="grid-template-columns"] > *{min-width:0}
+  .grid-4 > *{min-width:0}
+  .calc-bar-row{grid-template-columns:36px minmax(0,1fr) 54px 92px;gap:6px}
+
+  /* Nav — les sections passent dans une barre fixée en bas de l'écran, où
+     les 8 tiennent ; en haut ne restent que le logo et sauvegarde/thème/réglages.
+     --mnav-h sert aux éléments fixés en bas pour se placer au-dessus. */
+  :root{--mnav-h:calc(58px + env(safe-area-inset-bottom, 0px))}
+  nav{padding:0 6px;backdrop-filter:none} /* sinon la barre fixe se cale sur <nav> et non sur l'écran */
   .nav-brand{font-size:.95rem;margin-right:4px}
-  .nav-links{gap:0;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
-  .nav-links::-webkit-scrollbar{display:none}
+  .nav-links{position:fixed;left:0;right:0;bottom:0;z-index:100;height:var(--mnav-h);
+    padding:0 2px env(safe-area-inset-bottom, 0px);gap:0;align-items:stretch;
+    background:var(--bg2);border-top:1px solid var(--border)}
+  .nav-links > *{flex:1 1 0;min-width:0}
+  .nav-links > .nav-group{align-items:stretch}
+  .nav-links > .nav-group > .nav-btn{width:100%}
+  .nav-links > .nav-btn, .nav-links > .nav-group > .nav-btn{position:relative;justify-content:center;padding:0;border-radius:10px;margin:4px 1px}
   .nav-links .nav-btn span[data-i18n]{display:none}
+  .nav-links > .nav-btn > i:first-child, .nav-links > .nav-group > .nav-btn > i:first-child{font-size:1.2rem}
+  /* compteur en pastille sur l'icône, chevron des sous-menus sous l'icône */
+  .nav-links > .nav-btn > .nav-badge, .nav-links > .nav-group > .nav-btn > .nav-badge{position:absolute;top:3px;left:calc(50% + 4px);padding:0 4px;font-size:.58rem;line-height:1.4}
+  .nav-links > .nav-group > .nav-btn > .fa-chevron-down{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);margin:0!important;font-size:.5rem!important}
   .nav-btn{padding:7px 10px;font-size:.8rem}
   .nav-btn i{font-size:1rem}
   .nav-badge{padding:1px 4px;font-size:.6rem}
+  .page{padding-bottom:calc(var(--mnav-h) + 16px)}
+  #toast{bottom:calc(var(--mnav-h) + 12px);right:12px;left:12px}
   /* Dropdown mobile — texte réactivé, items agrandis pour le tactile */
   .nav-dropdown{min-width:180px}
   .nav-dropdown .nav-btn span[data-i18n]{display:inline}
@@ -476,7 +511,8 @@ input.rec-field-error,select.rec-field-error{border-color:var(--danger)!importan
 
   /* Recettes — masquer la liste quand une recette est ouverte + pleine largeur */
   #recipe-layout:not(.recipe-list-only) > div:first-child{display:none}
-  #recipe-layout:not(.recipe-list-only){grid-template-columns:1fr}
+  #recipe-layout:not(.recipe-list-only){grid-template-columns:minmax(0,1fr)}
+  #recipe-layout > *{min-width:0}
 
   /* Brouillons — masquer la liste quand un brouillon est ouvert */
   #brouillons-layout.draft-editor-open #draft-list-panel{display:none}
