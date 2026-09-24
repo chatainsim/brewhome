@@ -4,6 +4,17 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-24] — 21 · version 0.1.18
+
+### Ajouté
+- **Recettes — hop stand** : nouveau moment d'ajout de houblon, à côté d'Ébullition, Whirlpool et Dry-hop — repos à chaud après l'ébullition, vers 80 °C, avec sa durée en minutes. Pris en compte dans le planning du jour de brassage, l'impression, l'import et l'export BeerXML, la vitrine, et un minuteur par durée de repos. Pour l'amertume, il compte comme 5 min d'ébullition (le whirlpool en vaut 15).
+- **Eau de refroidissement** : nouveau réglage dans *Paramètres › Eau & Énergie*, les litres utilisés en moyenne pour refroidir un brassin. Ils s'ajoutent à l'eau facturée de chaque recette.
+
+### Corrigé
+- **Import/export BeerXML et Brewfather — types d'ajout de houblon** : l'import écrivait « boil », « dry_hop » et « first_wort », que l'application ne reconnaît pas ; ces houblons sortaient du planning du jour de brassage. L'export envoyait les dry-hops comme des houblons d'ébullition. Les deux sens sont corrigés et les recettes déjà importées sont réalignées.
+
+---
+
 ## [2026-09-20] — 20 · version 0.1.17
 
 ### Corrigé
