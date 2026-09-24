@@ -185,6 +185,7 @@ const LOCALES = {
 
     // ── Actions communes ──────────────────────────────────────────────────────
     common: {
+      deleted: 'Supprimé', err_delete: 'Erreur lors de la suppression', ingredients: 'ingrédients',
       save: 'Enregistrer', cancel: 'Annuler', delete: 'Supprimer', edit: 'Modifier',
       add: 'Ajouter', close: 'Fermer', confirm: 'Confirmer', search: 'Rechercher',
       export: 'Exporter', import: 'Importer', loading: 'Chargement…',
@@ -226,6 +227,7 @@ const LOCALES = {
 
     // ── Inventaire ────────────────────────────────────────────────────────────
     inv: {
+      stock_needed: 'Nécessaire :', stock_available: 'disponible :',
       title: 'Inventaire', add: 'Ajouter un ingrédient',
       col_ingredient: 'Ingrédient', col_qty: 'Quantité', col_unit: 'Unité',
       col_cat: 'Catégorie', col_actions: 'Actions',
@@ -302,6 +304,7 @@ const LOCALES = {
 
     // ── Recettes ──────────────────────────────────────────────────────────────
     rec: {
+      water_override_btn: 'Saisir manuellement', water_override_label: 'Volumes manuels', water_override_hint: 'Laisser vide = calculé automatiquement', water_override_reset: 'Auto',
       title: 'Recettes', new: 'Nouvelle recette',
       empty: 'Aucune recette. Créez votre première recette !',
       empty_archived: 'Aucune recette archivée',
@@ -609,6 +612,7 @@ const LOCALES = {
 
     // ── Brassins ──────────────────────────────────────────────────────────────
     brew: {
+      fg_opt: '— optionnel', field_abv: 'ABV (%)',
       title: 'Brassins', new: 'Nouveau brassin',
       empty: 'Aucun brassin en cours',
       modal_new: 'Nouveau brassin', modal_edit: 'Modifier le brassin',
@@ -923,6 +927,7 @@ const LOCALES = {
 
     // ── Capteurs / iSpindel ───────────────────────────────────────────────────
     spin: {
+      temp_hum: 'Entité humidité HA',
       title: 'Capteurs', empty: 'Aucun capteur configuré',
       add: 'Ajouter un capteur', field_name: 'Nom', field_token: 'Token iSpindel',
       field_brew: 'Brassin associé', gravity: 'Densité', temp: 'Température',
@@ -1407,6 +1412,7 @@ const LOCALES = {
         err_fetch: 'Erreur de récupération :',
       },
       github: {
+        vitrine_auto: 'Publier automatiquement chaque jour à',
         vitrine_repo: 'Dépôt vitrine', vitrine_branch: 'Branche',
         vitrine_pat: 'Personal Access Token', publish: 'Publier',
         data_repo: 'Dépôt de sauvegarde', backup: 'Sauvegarder',
@@ -1838,6 +1844,7 @@ const LOCALES = {
     },
 
     common: {
+      deleted: 'Deleted', err_delete: 'Error while deleting', ingredients: 'ingredients',
       save: 'Save', cancel: 'Cancel', delete: 'Delete', edit: 'Edit',
       add: 'Add', close: 'Close', confirm: 'Confirm', search: 'Search',
       export: 'Export', import: 'Import', loading: 'Loading…',
@@ -1877,6 +1884,7 @@ const LOCALES = {
     },
 
     inv: {
+      stock_needed: 'Needed:', stock_available: 'available:',
       title: 'Inventory', add: 'Add an ingredient',
       col_ingredient: 'Ingredient', col_qty: 'Quantity', col_unit: 'Unit',
       col_cat: 'Category', col_actions: 'Actions',
@@ -1952,6 +1960,7 @@ const LOCALES = {
     },
 
     rec: {
+      water_override_btn: 'Enter manually', water_override_label: 'Manual volumes', water_override_hint: 'Leave empty = calculated automatically', water_override_reset: 'Auto',
       title: 'Recipes', new: 'New recipe',
       empty: 'No recipes yet. Create your first recipe!',
       empty_archived: 'No archived recipes',
@@ -2257,6 +2266,7 @@ const LOCALES = {
     },
 
     brew: {
+      fg_opt: '— optional', field_abv: 'ABV (%)',
       title: 'Brews', new: 'New brew',
       empty: 'No active brews',
       modal_new: 'New brew', modal_edit: 'Edit brew',
@@ -2569,6 +2579,7 @@ const LOCALES = {
     },
 
     spin: {
+      temp_hum: 'HA humidity entity',
       title: 'Sensors', empty: 'No sensors configured',
       add: 'Add a sensor', field_name: 'Name', field_token: 'iSpindel token',
       field_brew: 'Associated brew', gravity: 'Gravity', temp: 'Temperature',
@@ -3049,6 +3060,7 @@ const LOCALES = {
         err_fetch: 'Fetch error:',
       },
       github: {
+        vitrine_auto: 'Publish automatically every day at',
         vitrine_repo: 'Showcase repo', vitrine_branch: 'Branch',
         vitrine_pat: 'Personal Access Token', publish: 'Publish',
         data_repo: 'Backup repo', backup: 'Backup',

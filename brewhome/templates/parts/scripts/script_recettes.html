@@ -1493,7 +1493,7 @@ async function saveRecipe(silent = false) {
         mash_temp:'rec.mash_temp', mash_time:'rec.mash_time', boil_time:'rec.boil_time',
         brewhouse_efficiency:'rec.efficiency', ferm_temp:'rec.ferm_temp',
         ferm_time:'rec.ferm_time_label', mash_ratio:'rec.mash_ratio',
-        evap_rate:'rec.evap', grain_absorption:'rec.absorption', volume:'rec.volume',
+        evap_rate:'rec.evap', grain_absorption:'rec.absorption', volume:'rec.field_volume',
         name:'rec.field_name',
       };
       const _fieldIds = {
@@ -2536,13 +2536,13 @@ function renderRecipeCompare() {
 
   // ── Metadata diff ──────────────────────────────────────────────────────────
   const metaFields = [
-    ['volume',               t('rec.volume') || 'Volume (L)'],
+    ['volume',               t('rec.field_volume')],
     ['brewhouse_efficiency', t('rec.efficiency') || 'Efficacité (%)'],
     ['mash_temp',            t('rec.mash_temp') || 'Empâtage (°C)'],
     ['mash_time',            t('rec.mash_time') || 'Durée empâtage (min)'],
     ['boil_time',            t('rec.boil_time') || 'Durée ébullition (min)'],
     ['ferm_temp',            t('rec.ferm_temp') || 'T° fermentation (°C)'],
-    ['ferm_time',            t('rec.ferm_time') || 'Durée fermentation (j)'],
+    ['ferm_time',            t('rec.ferm_time_label')],
   ];
   const changedMeta = metaFields.filter(([k]) => base[k] !== other[k]);
 
