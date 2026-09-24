@@ -282,17 +282,20 @@ def _beerxml_to_recipe(rx):
         use = (_ho('USE') or '').lower()
         time_val = float(_ho('TIME') or 0)
         alpha_val = float(_ho('ALPHA') or 0)
-        hop_type = 'boil'
+        hop_type = 'ebullition'
         hop_time = int(time_val)
         hop_days = None
         if 'dry' in use:
-            hop_type = 'dry_hop'
+            hop_type = 'dryhop'
             hop_days = max(1, int(round(time_val / 1440))) if time_val > 60 else int(time_val)
             hop_time = None
+        elif 'stand' in use:
+            hop_type = 'hopstand'
         elif 'whirlpool' in use or 'aroma' in use:
             hop_type = 'whirlpool'
-        elif 'first' in use:
-            hop_type = 'first_wort'
+        # First wort : houblon mis dès la filtration, qui bout donc toute
+        # l'ébullition. L'application n'a pas de type dédié ; c'est un ajout
+        # d'ébullition, sa durée importée faisant le reste.
         ingredients.append({
             'name': _ho('NAME', '?'), 'category': 'houblon',
             'quantity': round(kg * 1000, 1), 'unit': 'g',
@@ -365,17 +368,20 @@ def _brewfather_to_recipe(bf):
         use = (ho.get('use') or '').lower()
         time_val = float(ho.get('time') or 0)
         alpha = float(ho.get('alpha') or 0)
-        hop_type = 'boil'
+        hop_type = 'ebullition'
         hop_time = int(time_val)
         hop_days = None
         if 'dry' in use:
-            hop_type = 'dry_hop'
+            hop_type = 'dryhop'
             hop_days = int(time_val) if time_val else 3
             hop_time = None
+        elif 'stand' in use:
+            hop_type = 'hopstand'
         elif 'whirlpool' in use or 'aroma' in use:
             hop_type = 'whirlpool'
-        elif 'first' in use:
-            hop_type = 'first_wort'
+        # First wort : houblon mis dès la filtration, qui bout donc toute
+        # l'ébullition. L'application n'a pas de type dédié ; c'est un ajout
+        # d'ébullition, sa durée importée faisant le reste.
         ingredients.append({
             'name': ho.get('name', '?'), 'category': 'houblon',
             'quantity': round(amt_g, 1), 'unit': 'g',
@@ -467,10 +473,14 @@ def _recipe_to_beerxml(recipe, ingredients):
             _sub(ho, 'VERSION', '1')
             _sub(ho, 'AMOUNT', round(_to_kg(ing.get('quantity'), ing.get('unit')), 4))
             _sub(ho, 'ALPHA', ing.get('alpha') or 5.0)
-            ht = (ing.get('hop_type') or 'boil').lower()
-            use_map = {'boil': 'Boil', 'dry_hop': 'Dry Hop', 'whirlpool': 'Aroma', 'first_wort': 'First Wort'}
+            ht = (ing.get('hop_type') or 'ebullition').lower()
+            # Vocabulaire de l'application, plus les anciennes valeurs d'import
+            # tant qu'une base n'a pas été migrée.
+            use_map = {'ebullition': 'Boil', 'dryhop': 'Dry Hop', 'whirlpool': 'Aroma',
+                       'hopstand': 'Aroma', 'flameout': 'Aroma',
+                       'boil': 'Boil', 'dry_hop': 'Dry Hop', 'first_wort': 'First Wort'}
             _sub(ho, 'USE', use_map.get(ht, 'Boil'))
-            if ht == 'dry_hop':
+            if ht in ('dryhop', 'dry_hop'):
                 _sub(ho, 'TIME', int(ing.get('hop_days') or 3) * 1440)
             else:
                 _sub(ho, 'TIME', ing.get('hop_time') or 0)

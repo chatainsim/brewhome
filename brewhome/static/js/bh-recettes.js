@@ -39,12 +39,12 @@ function exportSingleBeerXML(recipeId) {
 
   const hopUseMap = h => {
     if (h.hop_type === 'dryhop')    return 'Dry Hop';
-    if (h.hop_type === 'whirlpool') return 'Aroma';
+    if (h.hop_type === 'whirlpool' || h.hop_type === 'hopstand') return 'Aroma';
     return 'Boil';
   };
   const hopTime = h => {
     if (h.hop_type === 'dryhop')    return parseFloat(h.hop_days)  || 0;
-    if (h.hop_type === 'whirlpool') return parseFloat(h.hop_time)  || 0;
+    if (h.hop_type === 'whirlpool' || h.hop_type === 'hopstand') return parseFloat(h.hop_time)  || 0;
     return h.hop_time != null ? parseFloat(h.hop_time) : (parseFloat(r.boil_time)||60);
   };
   const hops = ings.filter(i => i.category === 'houblon').map(h => `    <HOP>
@@ -225,6 +225,7 @@ async function _parseBeerXML(xmlText) {
       const time  = gn(h, 'TIME');
       let hop_type = null, hop_time = null, hop_days = null;
       if (use === 'dry hop')                        { hop_type = 'dryhop';    hop_days = time; }
+      else if (use === 'hop stand' || use === 'hopstand') { hop_type = 'hopstand'; hop_time = time; }
       else if (use === 'aroma' || use === 'whirlpool') { hop_type = 'whirlpool'; hop_time = time; }
       else                                          { hop_time = time; }
       const amtG = +(amtKg * 1000).toFixed(1);
@@ -511,7 +512,10 @@ function brewCost(b) {
     const absorption = rec.grain_absorption || 0.8;
     const preboil   = vol + evapRate * (boilTime / 60);
     const totalWaterL = preboil + grainKg * absorption;
-    waterCost = totalWaterL * waterPrice;
+    // Refroidissement : moyenne par brassin, non mise à l'échelle du volume
+    // — elle tient à l'installation plus qu'à la recette.
+    const coolingL = parseFloat((appSettings.water || {}).cooling) || 0;
+    waterCost = (totalWaterL + coolingL) * waterPrice;
   }
 
   const gas  = parseFloat(appSettings.energy?.gas_per_brew)  || 0;
@@ -1168,6 +1172,7 @@ function renderIngredientRows() {
             <select onchange="recIngredients[${realIdx}].hop_type=this.value;renderIngredientRows()" style="font-size:.8rem">
               <option value="ebullition" ${ht==='ebullition'?'selected':''}>${t('rec.hop_ebullition')}</option>
               <option value="whirlpool"  ${ht==='whirlpool' ?'selected':''}>${t('rec.hop_whirlpool')}</option>
+              <option value="hopstand"   ${ht==='hopstand'  ?'selected':''}>${t('rec.hop_hopstand')}</option>
               <option value="dryhop"     ${ht==='dryhop'    ?'selected':''}>${t('rec.hop_dryhop')}</option>
             </select>
           </div>
@@ -1962,7 +1967,7 @@ function renderRecipeView() {
     </tr></thead><tbody>`;
     hops.forEach(h => {
       const ht = h.hop_type || 'ebullition';
-      const htLabel = { ebullition: t('rec.hop_ebullition'), whirlpool: t('rec.hop_whirlpool'), dryhop: t('rec.hop_dryhop') }[ht] || ht;
+      const htLabel = { ebullition: t('rec.hop_ebullition'), whirlpool: t('rec.hop_whirlpool'), hopstand: t('rec.hop_hopstand'), dryhop: t('rec.hop_dryhop') }[ht] || ht;
       const dur = ht === 'dryhop'
         ? (h.hop_days != null ? h.hop_days + ' j' : '–')
         : (h.hop_time != null ? h.hop_time + ' min' : '–');
@@ -2695,7 +2700,7 @@ function printRecipe() {
     if (!h.quantity || !h.alpha) return;
     const ht = h.hop_type || 'ebullition';
     if (ht === 'dryhop') return;
-    const mins = ht === 'whirlpool' ? 15 : (h.hop_time ?? 60);
+    const mins = ht === 'whirlpool' ? 15 : ht === 'hopstand' ? 5 : (h.hop_time ?? 60);
     const g = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
     if (_ibuFormulaPrint === 'rager') {
       const util = 18.11 + 13.86 * Math.tanh((mins - 31.32) / 18.27);
@@ -2796,7 +2801,7 @@ function printRecipe() {
       let row = `<td>${esc(i.name)}</td><td>${i.quantity}\u00a0${esc(i.unit)}</td>`;
       if (cat === 'houblon') {
         const ht = i.hop_type || 'ebullition';
-        const htLabel = {ebullition:t('rec.hop_ebullition'), whirlpool:t('rec.hop_whirlpool'), dryhop:t('rec.hop_dryhop')}[ht] || ht;
+        const htLabel = {ebullition:t('rec.hop_ebullition'), whirlpool:t('rec.hop_whirlpool'),hopstand:t('rec.hop_hopstand'), dryhop:t('rec.hop_dryhop')}[ht] || ht;
         const dur = ht === 'dryhop' ? (i.hop_days != null ? i.hop_days + ' j' : '–') : (i.hop_time != null ? i.hop_time + ' min' : '–');
         row += `<td>${i.alpha != null ? i.alpha + '%' : '–'}</td><td>${htLabel}</td><td>${dur}</td>`;
       }
@@ -2908,7 +2913,7 @@ function printBrewingSheet() {
   // Hop schedule sorted high→low boil time (first addition first)
   const boilTime = r.boil_time || 60;
   const hops = recIngredients.filter(i=>i.category==='houblon');
-  const boilHops = hops.filter(h=>['ebullition','whirlpool','flameout'].includes(h.hop_type||'ebullition'))
+  const boilHops = hops.filter(h=>['ebullition','whirlpool','hopstand','flameout'].includes(h.hop_type||'ebullition'))
     .sort((a,b)=>(b.hop_time??boilTime)-(a.hop_time??boilTime));
   const dryHops  = hops.filter(h=>h.hop_type==='dryhop');
   const malts    = recIngredients.filter(i=>i.category==='malt');
@@ -2932,8 +2937,8 @@ function printBrewingSheet() {
   let schedHtml = '<table><thead><tr><th>T (min)</th><th>Houblon</th><th>Qté</th><th>Alpha</th><th>Type</th></tr></thead><tbody>';
   boilHops.forEach(h => {
     const ht = h.hop_type||'ebullition';
-    const mins = ht==='whirlpool'||ht==='flameout' ? 0 : (h.hop_time??boilTime);
-    const type = {ebullition:'Ébullition',whirlpool:'Whirlpool',flameout:'Flammeout'}[ht]||ht;
+    const mins = ht==='whirlpool'||ht==='hopstand'||ht==='flameout' ? 0 : (h.hop_time??boilTime);
+    const type = {ebullition:'Ébullition',whirlpool:'Whirlpool',hopstand:'Hop stand',flameout:'Flameout'}[ht]||ht;
     schedHtml += `<tr><td><strong>${mins}</strong></td><td>${esc(h.name)}</td><td>${h.quantity}\u00a0${h.unit}</td><td>${h.alpha?h.alpha+'%':'–'}</td><td>${type}</td></tr>`;
   });
   if (!boilHops.length) schedHtml += `<tr><td colspan="5" style="color:#aaa;text-align:center">Aucun houblon d'ébullition</td></tr>`;
@@ -2990,7 +2995,7 @@ function printBrewingSheet() {
       ${cb(`Rinçage : <strong>${wv('rw-sparge')} L</strong> à 76°C`)}
       ${cb(`Ébullition : <strong>${boilTime} min</strong>`)}
       ${boilHops.map(h => {
-        const mins = ['whirlpool','flameout'].includes(h.hop_type) ? 0 : (h.hop_time??boilTime);
+        const mins = ['whirlpool','hopstand','flameout'].includes(h.hop_type) ? 0 : (h.hop_time??boilTime);
         return cb(`T+${boilTime-mins} min — Houblon <strong>${esc(h.name)}</strong> ${h.quantity}\u00a0${h.unit}`);
       }).join('')}
       ${cb('Refroidir le moût à la température de fermentation')}
@@ -3056,7 +3061,7 @@ function printCombinedSheet() {
   recIngredients.filter(i=>i.category==='houblon').forEach(h => {
     if (!h.quantity||!h.alpha) return;
     const ht=h.hop_type||'ebullition'; if(ht==='dryhop') return;
-    const mins=ht==='whirlpool'?15:(h.hop_time??60);
+    const mins=ht==='whirlpool'?15:ht==='hopstand'?5:(h.hop_time??60);
     const g=h.unit==='kg'?h.quantity*1000:h.quantity;
     if(_ibuF==='rager'){const util=18.11+13.86*Math.tanh((mins-31.32)/18.27);const adj=wortOG>1.050?(wortOG-1.050)/0.2:0;ibuTotal+=(g*(util/100)*(h.alpha/100)*1000)/(vol*(1+adj));}
     else{ibuTotal+=1.65*Math.pow(0.000125,wortOG-1)*(1-Math.exp(-0.04*mins))/4.15*(h.alpha/100)*g*1000/vol;}
@@ -3122,7 +3127,7 @@ function printCombinedSheet() {
     ingHtml+=`<h3>${catLabels[cat]}</h3><table><thead><tr>${cols}</tr></thead><tbody>`;
     items.forEach(i=>{
       let row=`<td>${esc(i.name)}</td><td>${i.quantity}\u00a0${esc(i.unit)}</td>`;
-      if(cat==='houblon'){const ht=i.hop_type||'ebullition';const htLabel={ebullition:t('rec.hop_ebullition'),whirlpool:t('rec.hop_whirlpool'),dryhop:t('rec.hop_dryhop')}[ht]||ht;const dur=ht==='dryhop'?(i.hop_days!=null?i.hop_days+' j':'–'):(i.hop_time!=null?i.hop_time+' min':'–');row+=`<td>${i.alpha!=null?i.alpha+'%':'–'}</td><td>${htLabel}</td><td>${dur}</td>`;}
+      if(cat==='houblon'){const ht=i.hop_type||'ebullition';const htLabel={ebullition:t('rec.hop_ebullition'),whirlpool:t('rec.hop_whirlpool'),hopstand:t('rec.hop_hopstand'),dryhop:t('rec.hop_dryhop')}[ht]||ht;const dur=ht==='dryhop'?(i.hop_days!=null?i.hop_days+' j':'–'):(i.hop_time!=null?i.hop_time+' min':'–');row+=`<td>${i.alpha!=null?i.alpha+'%':'–'}</td><td>${htLabel}</td><td>${dur}</td>`;}
       if(cat==='autre'){const ot=i.other_type||'ebullition';const otLabel=PRINT_OT[ot]||ot;const dur=(ot==='dryhop')?(i.other_time!=null?i.other_time+' j':'–'):(ot==='ebullition'||ot==='whirlpool')?(i.other_time!=null?i.other_time+' min':'–'):'–';row+=`<td>${otLabel}</td><td>${dur}</td>`;}
       ingHtml+=`<tr>${row}</tr>`;
     });
@@ -3132,7 +3137,7 @@ function printCombinedSheet() {
   // ── Guide de brassage (colonne droite) ────────────────────────────────────
   const boilTime=r.boil_time||60;
   const hops=recIngredients.filter(i=>i.category==='houblon');
-  const boilHops=hops.filter(h=>['ebullition','whirlpool','flameout'].includes(h.hop_type||'ebullition')).sort((a,b)=>(b.hop_time??boilTime)-(a.hop_time??boilTime));
+  const boilHops=hops.filter(h=>['ebullition','whirlpool','hopstand','flameout'].includes(h.hop_type||'ebullition')).sort((a,b)=>(b.hop_time??boilTime)-(a.hop_time??boilTime));
   const dryHops=hops.filter(h=>h.hop_type==='dryhop');
   const yeasts=recIngredients.filter(i=>i.category==='levure');
   const others=recIngredients.filter(i=>i.category==='autre');
@@ -3140,7 +3145,7 @@ function printCombinedSheet() {
   function cb(label){return `<div class="cb"><span class="cbox"></span><span>${label}</span></div>`;}
 
   let schedHtml=`<table><thead><tr><th>T (min)</th><th>${t('cat.houblons')}</th><th>${t('rec.ing_qty_abbr')}</th><th>Alpha</th></tr></thead><tbody>`;
-  boilHops.forEach(h=>{const ht=h.hop_type||'ebullition';const mins=ht==='whirlpool'||ht==='flameout'?0:(h.hop_time??boilTime);schedHtml+=`<tr><td><strong>${mins}</strong></td><td>${esc(h.name)}</td><td>${h.quantity}\u00a0${h.unit}</td><td>${h.alpha?h.alpha+'%':'–'}</td></tr>`;});
+  boilHops.forEach(h=>{const ht=h.hop_type||'ebullition';const mins=ht==='whirlpool'||ht==='hopstand'||ht==='flameout'?0:(h.hop_time??boilTime);schedHtml+=`<tr><td><strong>${mins}</strong></td><td>${esc(h.name)}</td><td>${h.quantity}\u00a0${h.unit}</td><td>${h.alpha?h.alpha+'%':'–'}</td></tr>`;});
   if(!boilHops.length) schedHtml+=`<tr><td colspan="4" style="color:#aaa;text-align:center">–</td></tr>`;
   schedHtml+='</tbody></table>';
 
@@ -3243,7 +3248,7 @@ function printCombinedSheet() {
       ${cb(`${t('rec.sheet_mash')} : <strong>${totalMaltKg.toFixed(2)} kg</strong> — <strong>${r.mash_temp||66}°C</strong> / <strong>${r.mash_time||60} min</strong>`)}
       ${cb(`${t('rec.sheet_sparge')} : <strong>${wv('rw-sparge')} L</strong> à 76°C`)}
       ${cb(`${t('rec.sheet_boil')} : <strong>${boilTime} min</strong>`)}
-      ${boilHops.map(h=>{const mins=['whirlpool','flameout'].includes(h.hop_type)?0:(h.hop_time??boilTime);return cb(`T+${boilTime-mins} min — <strong>${esc(h.name)}</strong> ${h.quantity}\u00a0${h.unit}`);}).join('')}
+      ${boilHops.map(h=>{const mins=['whirlpool','hopstand','flameout'].includes(h.hop_type)?0:(h.hop_time??boilTime);return cb(`T+${boilTime-mins} min — <strong>${esc(h.name)}</strong> ${h.quantity}\u00a0${h.unit}`);}).join('')}
       ${cb(t('rec.sheet_chill'))}
       ${yeasts.map(y=>cb(`${t('rec.sheet_pitch')} : <strong>${esc(y.name)}</strong> ${y.quantity}\u00a0${y.unit} — <strong>${r.ferm_temp||20}°C</strong>`)).join('')}
       ${dryHops.map(h=>cb(`Dry-hop : <strong>${esc(h.name)}</strong> ${h.quantity}\u00a0${h.unit}${h.hop_days!=null?' — '+h.hop_days+' j':''}`)).join('')}

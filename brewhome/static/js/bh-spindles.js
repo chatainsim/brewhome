@@ -127,7 +127,7 @@ function calcBrewStats() {
     if (!h.quantity || !h.alpha) return;
     const ht = h.hop_type || 'ebullition';
     if (ht === 'dryhop') return;
-    const mins  = ht === 'whirlpool' ? 15 : (h.hop_time != null ? h.hop_time : 60);
+    const mins  = ht === 'whirlpool' ? 15 : ht === 'hopstand' ? 5 : (h.hop_time != null ? h.hop_time : 60);
     const grams = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
     if (_ibuFormula === 'rager') {
       const util = 18.11 + 13.86 * Math.tanh((mins - 31.32) / 18.27);
@@ -201,7 +201,10 @@ function calcBrewStats() {
     const abs2   = parseFloat(document.getElementById('rec-absorption').value) || 0.8;
     const preboil2   = vol + evap2 * (boil2/60);
     const totalWater2 = preboil2 + grainKg2 * abs2;
-    waterCost = totalWater2 * waterPrice;
+    // L'eau de refroidissement est facturée comme le reste, mais ne dépend
+    // pas de la recette : c'est une moyenne par brassin, réglée une fois.
+    const cooling2 = parseFloat((appSettings.water || {}).cooling) || 0;
+    waterCost = (totalWater2 + cooling2) * waterPrice;
     totalCost += waterCost;
     hasCost = true;
   }
@@ -2033,9 +2036,18 @@ async function openBrewTimerForBrew(brewId) {
     steps.push({ name: `${t('brew.timer_step_hop')} +${h.hop_time} min`, mins: h.hop_time, color: 'var(--hop)' });
   });
 
-  // Hop stand / whirlpool
+  // Whirlpool : durée conventionnelle de 20 min.
   const hasWhirl = (rec.ingredients || []).some(i => i.category === 'houblon' && i.hop_type === 'whirlpool');
-  if (hasWhirl) steps.push({ name: `${t('brew.timer_step_hopstand')} 20 min`, mins: 20, color: 'var(--hop)' });
+  if (hasWhirl) steps.push({ name: `Whirlpool 20 min`, mins: 20, color: 'var(--hop)' });
+
+  // Hop stand : un minuteur par durée saisie sur la recette (20 min à défaut),
+  // puisque c'est justement la durée du repos à chaud qui le définit.
+  const standTimes = new Set();
+  (rec.ingredients || [])
+    .filter(i => i.category === 'houblon' && i.hop_type === 'hopstand')
+    .forEach(h => standTimes.add(h.hop_time > 0 ? h.hop_time : 20));
+  [...standTimes].sort((a, b) => b - a).forEach(m =>
+    steps.push({ name: `${t('brew.timer_step_hopstand')} ${m} min`, mins: m, color: 'var(--hop)' }));
 
   presets.innerHTML = steps.map(s =>
     `<button class="btn btn-ghost btn-sm" style="font-size:.7rem;padding:3px 7px;border-color:${s.color}40"

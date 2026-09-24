@@ -709,6 +709,12 @@ _MIGRATIONS = [
     #        pour rester un index-only scan sur le CTE beer_agg dans get_brews
     "DROP INDEX IF EXISTS idx_beers_brew_cov",
     "CREATE INDEX IF NOT EXISTS idx_beers_brew_cov ON beers(brew_id, archived, stock_25cl, stock_33cl, stock_50cl, stock_75cl, keg_liters, bottling_date) WHERE brew_id IS NOT NULL",
+    # 142 — l'import BeerXML/Brewfather serveur écrivait « boil », « dry_hop »
+    #        et « first_wort », que l'application ne reconnaît pas : ces
+    #        houblons sortaient du planning du jour de brassage, et un dry-hop
+    #        importé comptait dans l'amertume. Alignement sur son vocabulaire.
+    "UPDATE recipe_ingredients SET hop_type='ebullition' WHERE category='houblon' AND hop_type IN ('boil','first_wort')",
+    "UPDATE recipe_ingredients SET hop_type='dryhop' WHERE category='houblon' AND hop_type='dry_hop'",
     # ── Ajouter les nouvelles migrations ci-dessous ───────────────────────────
 ]
 

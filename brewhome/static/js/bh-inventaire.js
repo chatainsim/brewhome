@@ -556,7 +556,7 @@ function _recipeStats(r) {
     if (!h.quantity || !h.alpha) return;
     const ht   = h.hop_type || 'ebullition';
     if (ht === 'dryhop') return;
-    const mins = ht === 'whirlpool' ? 15 : (h.hop_time ?? 60);
+    const mins = ht === 'whirlpool' ? 15 : ht === 'hopstand' ? 5 : (h.hop_time ?? 60);
     const g    = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
     if (ibuFormula === 'rager') {
       const util = 18.11 + 13.86 * Math.tanh((mins - 31.32) / 18.27);

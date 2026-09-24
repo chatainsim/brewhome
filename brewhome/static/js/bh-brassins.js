@@ -38,7 +38,7 @@ async function openBrewingGuideFromBrew(brewId) {
     r,
     vol:      brew.volume_brewed || r.volume || 20,
     malts:    ings.filter(i => i.category === 'malt'),
-    boilHops: ings.filter(i => i.category === 'houblon' && ['ebullition','whirlpool','flameout'].includes(i.hop_type || 'ebullition'))
+    boilHops: ings.filter(i => i.category === 'houblon' && ['ebullition','whirlpool','hopstand','flameout'].includes(i.hop_type || 'ebullition'))
                   .sort((a, bb) => (bb.hop_time ?? boilTime) - (a.hop_time ?? boilTime)),
     dryHops:  ings.filter(i => i.category === 'houblon' && i.hop_type === 'dryhop'),
     yeasts:   ings.filter(i => i.category === 'levure'),
@@ -70,7 +70,7 @@ function openBrewingGuide() {
     r,
     vol:      parseFloat(document.getElementById('rec-volume')?.value) || r.volume || 20,
     malts:    recIngredients.filter(i => i.category === 'malt'),
-    boilHops: recIngredients.filter(i => i.category === 'houblon' && ['ebullition','whirlpool','flameout'].includes(i.hop_type||'ebullition'))
+    boilHops: recIngredients.filter(i => i.category === 'houblon' && ['ebullition','whirlpool','hopstand','flameout'].includes(i.hop_type||'ebullition'))
                 .sort((a,b) => (b.hop_time??boilTime) - (a.hop_time??boilTime)),
     dryHops:  recIngredients.filter(i => i.category === 'houblon' && i.hop_type === 'dryhop'),
     yeasts:   recIngredients.filter(i => i.category === 'levure'),
@@ -252,7 +252,7 @@ function _bgStartTimer() {
       s.boilHops.forEach((h, idx) => {
         const key = `hop-${idx}`;
         const ht = h.hop_type||'ebullition';
-        const addAt = ['whirlpool','flameout'].includes(ht) ? s.boilTime : s.boilTime-(h.hop_time??s.boilTime);
+        const addAt = ['whirlpool','hopstand','flameout'].includes(ht) ? s.boilTime : s.boilTime-(h.hop_time??s.boilTime);
         if (!s.notified.has(key) && em >= addAt) {
           s.notified.add(key);
           _bgBeep(660, 0.3);
@@ -362,6 +362,7 @@ function _bgHtmlPrep() {
       const qty = hop.unit==='kg' ? `${hop.quantity*1000} g` : `${hop.quantity} ${esc(hop.unit)}`;
       const info = hop.hop_type==='dryhop' ? '(Dry Hop)'
         : hop.hop_type==='whirlpool' ? '(Whirlpool)'
+        : hop.hop_type==='hopstand'  ? '(Hop stand)'
         : hop.hop_type==='flameout'  ? '(Flameout)'
         : `T-${esc(String(hop.hop_time??'?'))} min`;
       h += _bgCheckItem(`hop-${i}`, `<strong>${qty}</strong> — ${esc(hop.name)} <span style="color:var(--muted);font-size:.8rem">${info}</span>`);
@@ -430,7 +431,7 @@ function _bgBoilScheduleHtml() {
   if (!s.boilHops.length) return h + `<div style="color:var(--muted);font-size:.9rem;padding:8px 0">${t('rec.guide_no_hops')}</div>`;
   s.boilHops.forEach((hop, idx) => {
     const ht = hop.hop_type||'ebullition';
-    const addAt = ['whirlpool','flameout'].includes(ht) ? s.boilTime : s.boilTime-(hop.hop_time??s.boilTime);
+    const addAt = ['whirlpool','hopstand','flameout'].includes(ht) ? s.boilTime : s.boilTime-(hop.hop_time??s.boilTime);
     const due = em >= addAt;
     const notif = s.notified.has(`hop-${idx}`);
     const remMin = Math.max(0, addAt - em);
@@ -667,7 +668,7 @@ function _bgFsHtmlBoil() {
     schedHtml = `<div style="width:min(760px,95%);margin:clamp(12px,2vh,24px) auto 0;display:flex;flex-direction:column;gap:10px">`;
     s.boilHops.forEach((hop, idx) => {
       const ht     = hop.hop_type || 'ebullition';
-      const addAt  = ['whirlpool','flameout'].includes(ht) ? s.boilTime : s.boilTime - (hop.hop_time ?? s.boilTime);
+      const addAt  = ['whirlpool','hopstand','flameout'].includes(ht) ? s.boilTime : s.boilTime - (hop.hop_time ?? s.boilTime);
       const due    = em >= addAt;
       const notif  = s.notified.has(`hop-${idx}`);
       const remMin = Math.max(0, addAt - em);
@@ -810,7 +811,7 @@ function _bgFsPortraitNextHopHtml() {
   }
   const hop = s.boilHops[nextIdx];
   const ht = hop.hop_type || 'ebullition';
-  const addAt = ['whirlpool','flameout'].includes(ht) ? s.boilTime : s.boilTime - (hop.hop_time ?? s.boilTime);
+  const addAt = ['whirlpool','hopstand','flameout'].includes(ht) ? s.boilTime : s.boilTime - (hop.hop_time ?? s.boilTime);
   const due = em >= addAt;
   const remMin = Math.max(0, addAt - em);
   const timeLbl = due ? `⚡ ${t('rec.guide_hop_now')}` : `T‑${Math.ceil(remMin)} min`;
@@ -979,7 +980,7 @@ function _bgFsRenderTimer() {
       const el = _bgFsEls?.hops[idx];
       if (!el) return;
       const ht    = hop.hop_type || 'ebullition';
-      const addAt = ['whirlpool','flameout'].includes(ht) ? s.boilTime : s.boilTime - (hop.hop_time ?? s.boilTime);
+      const addAt = ['whirlpool','hopstand','flameout'].includes(ht) ? s.boilTime : s.boilTime - (hop.hop_time ?? s.boilTime);
       const due   = em >= addAt;
       const notif = s.notified.has(`hop-${idx}`);
       const remMin= Math.max(0, addAt - em);
@@ -1645,6 +1646,7 @@ function onBrewRecipeChange() {
         ${ing.category==='houblon' ? (
             ing.hop_type==='dryhop'    ? `<span style="color:var(--info);font-size:.8rem"> [Dry Hop${ing.hop_days!=null?' · '+Number(ing.hop_days)+' j':''}]</span>`
           : ing.hop_type==='whirlpool' ? `<span style="color:var(--muted);font-size:.8rem"> [Whirlpool${ing.hop_time!=null?' −'+Number(ing.hop_time)+' min':''}]</span>`
+          : ing.hop_type==='hopstand'  ? `<span style="color:var(--muted);font-size:.8rem"> [Hop stand${ing.hop_time!=null?' · '+Number(ing.hop_time)+' min':''}]</span>`
           : ing.hop_time!=null         ? `<span style="color:var(--muted);font-size:.8rem"> (−${Number(ing.hop_time)} min)</span>`
           : '') : ''}
       </div>

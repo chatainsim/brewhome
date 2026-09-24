@@ -450,7 +450,11 @@ def rec_estimations(rec, catalog=None, ibu_formula='tinseth'):
         htype = h.get('hop_type') or 'ebullition'
         if htype == 'dryhop':
             continue   # le houblonnage à cru n'amertume pas
-        mins = 15 if htype == 'whirlpool' else (h['hop_time'] if h.get('hop_time') is not None else 60)
+        # Durées équivalentes d'ébullition, conventions de l'application : le
+        # whirlpool en vaut 15 min ; le hop stand, fait vers 80 °C où l'acide
+        # alpha s'isomérise bien moins, en vaut 5.
+        mins = (15 if htype == 'whirlpool' else 5 if htype == 'hopstand'
+                else (h['hop_time'] if h.get('hop_time') is not None else 60))
         grammes = float(h['quantity']) * 1000 if h.get('unit') == 'kg' else float(h['quantity'])
         alpha = float(h['alpha'])
         if ibu_formula == 'rager':
@@ -553,7 +557,7 @@ def estimations_html(rec, catalog=None, styles=None, ibu_formula='tinseth'):
 
 # ── Page d'une recette ───────────────────────────────────────────────────
 
-_HOP_TYPE = {'ebullition': 'Ébullition', 'whirlpool': 'Whirlpool',
+_HOP_TYPE = {'ebullition': 'Ébullition', 'whirlpool': 'Whirlpool', 'hopstand': 'Hop stand',
              'flameout': 'Flameout', 'dryhop': 'Dry-hop'}
 
 

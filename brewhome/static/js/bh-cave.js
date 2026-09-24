@@ -795,7 +795,7 @@ function _labelIbuEbc(recipe) {
   let ibuTotal = 0;
   ings.filter(i => i.category === 'houblon' && i.hop_type !== 'dryhop').forEach(h => {
     if (!h.quantity || !h.alpha) return;
-    const mins  = h.hop_type === 'whirlpool' ? 15 : (h.hop_time != null ? h.hop_time : 60);
+    const mins  = h.hop_type === 'whirlpool' ? 15 : h.hop_type === 'hopstand' ? 5 : (h.hop_time != null ? h.hop_time : 60);
     const grams = h.unit === 'kg' ? h.quantity * 1000 : h.quantity;
     const bigness  = 1.65 * Math.pow(0.000125, og - 1);
     const timeFact = (1 - Math.exp(-0.04 * mins)) / 4.15;
