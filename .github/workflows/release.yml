@@ -10,6 +10,9 @@ on:
     paths:
       - 'brewhome/blueprints/admin.py'
       - 'CHANGELOG.md'
+      # Se relance quand il change lui-même : le script est idempotent (release
+      # déjà publiée → rien à faire), ce run ne sert qu'à valider le workflow.
+      - '.github/workflows/release.yml'
 
 permissions:
   contents: write
@@ -18,7 +21,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Publier la release si elle n'existe pas déjà
         env:
