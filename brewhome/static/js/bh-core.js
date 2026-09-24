@@ -1620,6 +1620,27 @@ if (window.Chart) {
   const savedTheme = localStorage.getItem('brewhome-theme') || 'dark';
   document.documentElement.setAttribute('data-theme', savedTheme);
 
+  // ── Clavier virtuel et barre de navigation du bas ──────────────────────────
+  // Sur Android, le clavier réduit la fenêtre : la barre fixée en bas remontait
+  // au-dessus du clavier et masquait le champ en cours de saisie. Elle est
+  // cachée tant qu'un champ texte a le focus ET que la fenêtre a rétréci — si le
+  // clavier est fermé sans quitter le champ, la barre revient.
+  (function() {
+    const NO_KB = /^(checkbox|radio|button|submit|reset|range|color|file|image|hidden)$/i;
+    const isText = el => !!el && (el.tagName === 'TEXTAREA' || el.isContentEditable ||
+                                  (el.tagName === 'INPUT' && !NO_KB.test(el.type)));
+    let fullH = window.innerHeight, fullW = window.innerWidth;
+    const update = () => {
+      if (window.innerWidth !== fullW) { fullW = window.innerWidth; fullH = window.innerHeight; } // rotation
+      if (!isText(document.activeElement)) fullH = Math.max(fullH, window.innerHeight);
+      const kb = isText(document.activeElement) && window.innerHeight < fullH - 120;
+      document.documentElement.classList.toggle('kb-open', kb);
+    };
+    window.addEventListener('resize', update);
+    document.addEventListener('focusin', () => setTimeout(update, 300));
+    document.addEventListener('focusout', () => setTimeout(update, 50));
+  })();
+
   // ── Dropdowns nav tactiles ─────────────────────────────────────────────────
   // Sur mobile, .nav-links a overflow-x:auto ce qui force overflow-y:auto →
   // le dropdown position:absolute est clippé. Solution : position:fixed
