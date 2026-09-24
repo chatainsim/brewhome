@@ -4,6 +4,17 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-24] — 23 · version 0.1.20
+
+### Modifié
+- **Mobile — barre de navigation en bas** : sur téléphone, seules 2 des 8 sections tenaient dans la barre du haut, les autres demandaient de la faire défiler sans aucun indice. Elles sont désormais dans une barre fixée en bas de l'écran, toutes visibles, avec leurs compteurs ; les sous-menus (Kegs, Courses, Stats, Brouillons) s'ouvrent au-dessus. La barre se cache pendant la saisie au clavier.
+- **Portable et tablette** : entre 769 et 1580 px de large, la barre du haut passe en icônes seules (nom au survol) ; les libellés poussaient Thème et Réglages hors de l'écran.
+
+### Corrigé
+- **Mobile — pages plus larges que l'écran** : tableau de bord, cave, courses, statistiques, calculateurs et édition de recette débordaient, ce qui élargissait la page et cachait Réglages, Thème et Sauvegarde. Les boutons d'en-tête passent à la ligne, les grilles sur deux colonnes passent sur une seule, et le bouton « + Autre » des ingrédients est de nouveau visible.
+
+---
+
 ## [2026-09-24] — 22 · version 0.1.19
 
 ### Ajouté
