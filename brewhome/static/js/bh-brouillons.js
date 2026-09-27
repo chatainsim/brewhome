@@ -431,6 +431,31 @@ async function newDraft() {
   } catch(e) { toast(t('draft.err_create'), 'error'); }
 }
 
+// Import BeerXML : un brouillon par <RECIPE> du fichier, ouvert ensuite.
+async function importDraftsBeerXML(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (_currentDraftId) {
+    clearTimeout(_draftSaveTimer);
+    await saveDraft();
+  }
+  try {
+    const r = await fetch(`/api/import/beerxml/drafts?lang=${encodeURIComponent(_lang || 'fr')}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/xml' },
+      body: await file.text(),
+    });
+    if (!r.ok) throw new Error(r.status);
+    const data = await r.json();
+    if (!data.imported) { toast(t('draft.import_beerxml_none'), 'warning'); return; }
+    S.drafts.unshift(...data.drafts);
+    renderBrouillons();
+    openDraft(data.drafts[0].id);
+    toast(t('draft.imported_beerxml').replace('${n}', data.imported), 'success');
+  } catch(e) { toast(t('draft.err_import_beerxml'), 'error'); }
+}
+
 function scheduleDraftSave() {
   clearTimeout(_draftSaveTimer);
   const el = document.getElementById('draft-save-status');
@@ -835,8 +860,14 @@ async function draftToRecipe() {
         name:              ing.name,
         quantity:          ing.quantity || 0,
         unit:              ing.unit,
-        hop_type:          ing.category === 'houblon' ? 'ebullition' : null,
-        other_type:        ing.category === 'autre'   ? 'ebullition' : null,
+        // Détails repris d'un import BeerXML quand le brouillon en a
+        hop_type:          ing.category === 'houblon' ? (ing.hop_type || 'ebullition') : null,
+        hop_time:          ing.category === 'houblon' ? (ing.hop_time ?? null) : null,
+        hop_days:          ing.category === 'houblon' ? (ing.hop_days ?? null) : null,
+        alpha:             ing.alpha ?? null,
+        ebc:               ing.ebc ?? null,
+        other_type:        ing.category === 'autre'   ? (ing.other_type || 'ebullition') : null,
+        other_time:        ing.category === 'autre'   ? (ing.other_time ?? null) : null,
         inventory_item_id: null,
       });
     });

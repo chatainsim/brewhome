@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-27] — 25 · version 0.1.22
+
+### Ajouté
+- **Brouillons — import BeerXML** : un bouton « Importer BeerXML » sur la page des brouillons crée un brouillon par recette du fichier (BeerSmith, Brewfather, Brewer's Friend…), sans toucher aux recettes. Titre, style, volume et ingrédients sont repris ; le profil (OG, FG, ABV, IBU, EBC), les paliers d'empâtage, l'ébullition, le rendement, la fermentation et le houblonnage détaillé vont dans les notes. « Créer la recette » conserve ensuite le type et la durée de chaque houblon, l'alpha et l'EBC.
+
+### Corrigé
+- **Import BeerXML des recettes — autres ingrédients** : l'étape (`<USE>` : Boil, Mash, Primary…) était enregistrée telle quelle et ne correspondait à aucune option du sélecteur ; elle devient Ébullition, Empâtage, Fermentation… avec sa durée pour l'ébullition.
+
+---
+
 ## [2026-09-24] — 24 · version 0.1.21
 
 ### Corrigé

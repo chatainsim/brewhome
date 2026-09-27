@@ -227,6 +227,14 @@ def import_recipes():
 # BeerXML helpers
 # ---------------------------------------------------------------------------
 
+# <MISC><USE> BeerXML → étape de l'application (valeurs du sélecteur de recette ;
+# la valeur brute « Boil » n'y correspondait à aucune option).
+_BEERXML_MISC_USE = {
+    'mash': 'empatage', 'sparge': 'sparge', 'boil': 'ebullition',
+    'primary': 'fermentation', 'secondary': 'fermentation', 'bottling': 'packaging',
+}
+
+
 def _beerxml_to_recipe(rx):
     """Convert a BeerXML <RECIPE> Element to a recipe dict + ingredients list."""
     def _f(tag, default=None):
@@ -312,9 +320,16 @@ def _beerxml_to_recipe(rx):
     for mi in rx.findall('MISCS/MISC'):
         def _mi(t, d=None, _mi=mi): el = _mi.find(t); return el.text.strip() if el is not None and el.text else d
         kg = float(_mi('AMOUNT') or 0)
+        use = (_mi('USE') or '').strip().lower()
+        other_type = _BEERXML_MISC_USE.get(use, 'ebullition')
+        try:
+            other_time = int(float(_mi('TIME'))) if other_type == 'ebullition' and _mi('TIME') else None
+        except ValueError:
+            other_time = None
         ingredients.append({
             'name': _mi('NAME', '?'), 'category': 'autre',
-            'quantity': round(kg * 1000, 1), 'unit': 'g', 'other_type': _mi('USE', '')
+            'quantity': round(kg * 1000, 1), 'unit': 'g',
+            'other_type': other_type, 'other_time': other_time,
         })
 
     return {
@@ -569,12 +584,12 @@ def _upsert_recipe(conn, recipe):
         conn.execute(
             '''INSERT INTO recipe_ingredients
                (recipe_id,name,category,quantity,unit,hop_time,hop_type,
-                hop_days,other_type,ebc,alpha)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                hop_days,other_type,other_time,ebc,alpha)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
             (rid, ing.get('name', '?'), ing.get('category', 'autre'),
              ing.get('quantity', 0), ing.get('unit', 'g'),
              ing.get('hop_time'), ing.get('hop_type'), ing.get('hop_days'),
-             ing.get('other_type'), ing.get('ebc'), ing.get('alpha'))
+             ing.get('other_type'), ing.get('other_time'), ing.get('ebc'), ing.get('alpha'))
         )
     return rid
 
@@ -635,6 +650,156 @@ def import_beerxml():
             except Exception as e:
                 current_app.logger.warning(f'import_beerxml: skipped recipe: {e}')
     return jsonify({'imported': imported})
+
+
+# Libellés des notes générées à l'import d'un brouillon (le reste du texte
+# est saisi par l'utilisateur, donc dans sa langue : on suit celle de l'interface).
+_DRAFT_NOTE_LABELS = {
+    'fr': {'profile': 'Profil', 'process': 'Procédé', 'hops': 'Houblonnage',
+           'mash': 'Empâtage', 'boil': 'Ébullition', 'eff': 'Rendement',
+           'ferm': 'Fermentation', 'days': 'j', 'dry': 'dry hop', 'stand': 'hopstand',
+           'whirlpool': 'whirlpool', 'imported': 'Importé depuis BeerXML'},
+    'en': {'profile': 'Profile', 'process': 'Process', 'hops': 'Hop schedule',
+           'mash': 'Mash', 'boil': 'Boil', 'eff': 'Efficiency',
+           'ferm': 'Fermentation', 'days': 'd', 'dry': 'dry hop', 'stand': 'hopstand',
+           'whirlpool': 'whirlpool', 'imported': 'Imported from BeerXML'},
+}
+
+
+def _fmt_num(v, digits=1):
+    if v is None:
+        return ''
+    txt = f'{v:.{digits}f}'
+    return txt.rstrip('0').rstrip('.') if '.' in txt else txt
+
+
+def _beerxml_to_draft(rx, lang='fr'):
+    """Un <RECIPE> BeerXML en brouillon : titre, style, volume, ingrédients
+    (avec les détails houblon/malt, repris par « Convertir en recette ») et
+    des notes en Markdown pour ce que le brouillon n'a pas en champ dédié."""
+    L = _DRAFT_NOTE_LABELS.get(lang, _DRAFT_NOTE_LABELS['fr'])
+    recipe = _beerxml_to_recipe(rx)
+
+    def _num(tag):
+        el = rx.find(tag)
+        try:
+            return float(el.text) if el is not None and el.text and el.text.strip() else None
+        except ValueError:
+            return None
+
+    ingredients = []
+    for ing in recipe['ingredients']:
+        d = {'category': ing['category'], 'name': ing['name'],
+             'quantity': ing['quantity'] or None, 'unit': ing['unit']}
+        cat = ing['category']
+        if cat == 'malt':
+            if ing['quantity'] and ing['quantity'] >= 1000:
+                d['quantity'], d['unit'] = round(ing['quantity'] / 1000, 3), 'kg'
+            if ing.get('ebc'):
+                d['ebc'] = ing['ebc']
+        elif cat == 'houblon':
+            for k in ('hop_type', 'hop_time', 'hop_days', 'alpha'):
+                if ing.get(k) is not None:
+                    d[k] = ing[k]
+        elif cat == 'levure':
+            # Le brouillon compte les levures en sachets : une levure liquide = un paquet.
+            d['quantity'], d['unit'] = (ing['quantity'], ing['unit']) if ing['unit'] == 'sachet' else (1, 'sachet')
+        else:
+            for k in ('other_type', 'other_time'):
+                if ing.get(k) is not None:
+                    d[k] = ing[k]
+        ingredients.append(d)
+
+    # Profil : valeurs estimées de préférence (mesurées sinon)
+    og, fg = _num('EST_OG') or _num('OG'), _num('EST_FG') or _num('FG')
+    abv, ibu = _num('EST_ABV') or _num('ABV'), _num('IBU')
+    srm = _num('EST_COLOR')
+    profile = []
+    if og:  profile.append(f'OG {og:.3f}')
+    if fg:  profile.append(f'FG {fg:.3f}')
+    if abv: profile.append(f'{_fmt_num(abv)} % ABV')
+    if ibu: profile.append(f'{_fmt_num(ibu, 0)} IBU')
+    if srm: profile.append(f'{_fmt_num(srm * 1.97, 0)} EBC')
+
+    steps = []
+    for st in rx.findall('MASH/MASH_STEPS/MASH_STEP'):
+        t, m = st.find('STEP_TEMP'), st.find('STEP_TIME')
+        try:
+            steps.append(f'{_fmt_num(float(t.text))} °C × {_fmt_num(float(m.text), 0)} min')
+        except (AttributeError, TypeError, ValueError):
+            continue
+    process = []
+    if steps:
+        process.append(f"{L['mash']} : {', '.join(steps)}")
+    if recipe.get('boil_time'):
+        process.append(f"{L['boil']} : {recipe['boil_time']} min")
+    if recipe.get('brewhouse_efficiency'):
+        process.append(f"{L['eff']} : {_fmt_num(recipe['brewhouse_efficiency'])} %")
+    if recipe.get('ferm_temp') or recipe.get('ferm_time'):
+        bits = [f"{_fmt_num(recipe['ferm_temp'])} °C" if recipe.get('ferm_temp') else '',
+                f"{recipe['ferm_time']} {L['days']}" if recipe.get('ferm_time') else '']
+        process.append(f"{L['ferm']} : {' · '.join(b for b in bits if b)}")
+
+    hops = []
+    for h in (i for i in ingredients if i['category'] == 'houblon'):
+        qty = f"{_fmt_num(h['quantity'])} {h['unit']}" if h.get('quantity') else ''
+        when = {'dryhop': f"{L['dry']} {h.get('hop_days') or ''} {L['days']}".replace('  ', ' '),
+                'hopstand': f"{L['stand']} {h.get('hop_time') or 0} min",
+                'whirlpool': f"{L['whirlpool']} {h.get('hop_time') or 0} min"}.get(
+                    h.get('hop_type'), f"{h.get('hop_time') or 0} min")
+        alpha = f" ({_fmt_num(h['alpha'])} % AA)" if h.get('alpha') else ''
+        hops.append(f"- {h['name']}{alpha} : {qty}, {when}".replace(' : , ', ' : '))
+
+    parts = []
+    if profile:
+        parts.append(f"**{L['profile']}** : {' · '.join(profile)}")
+    if process:
+        parts.append(f"**{L['process']}**\n" + '\n'.join(f'- {p}' for p in process))
+    if hops:
+        parts.append(f"**{L['hops']}**\n" + '\n'.join(hops))
+    if recipe.get('notes'):
+        parts.append(recipe['notes'])
+    parts.append(f"*{L['imported']}*")
+
+    return {
+        'title': recipe['name'][:200],
+        'style': recipe.get('style'),
+        'volume': recipe.get('volume') or None,
+        'ingredients': ingredients,
+        'notes': '\n\n'.join(parts),
+    }
+
+
+@bp.route('/api/import/beerxml/drafts', methods=['POST'])
+def import_beerxml_drafts():
+    """Crée un brouillon par recette du fichier BeerXML (les recettes existantes
+    ne sont pas touchées, contrairement à /api/import/beerxml)."""
+    from blueprints.calendar import _draft_row_to_dict
+    xml_bytes = request.data
+    if not xml_bytes:
+        return api_error('no_data', 400)
+    try:
+        root = DefusedET.fromstring(xml_bytes)
+    except (ET.ParseError, DefusedXmlException) as e:
+        return api_error('xml_parse_error', 400, detail=str(e))
+    recipe_els = [root] if root.tag == 'RECIPE' else root.findall('RECIPE')
+    lang = request.args.get('lang', 'fr')
+    created = []
+    with get_db() as conn:
+        for rx_el in recipe_els:
+            try:
+                d = _beerxml_to_draft(rx_el, lang)
+            except Exception as e:
+                current_app.logger.warning(f'import_beerxml_drafts: skipped recipe: {e}')
+                continue
+            cur = conn.execute(
+                '''INSERT INTO draft_recipes (title, style, volume, ingredients, notes, status, images_files)
+                   VALUES (?, ?, ?, ?, ?, 'idea', '[]')''',
+                (d['title'], d['style'], d['volume'],
+                 json.dumps(d['ingredients'], ensure_ascii=False) if d['ingredients'] else None, d['notes']))
+            created.append(cur.lastrowid)
+        rows = [conn.execute('SELECT * FROM draft_recipes WHERE id=?', (i,)).fetchone() for i in created]
+    return jsonify({'imported': len(rows), 'drafts': [_draft_row_to_dict(r) for r in rows]})
 
 
 @bp.route('/api/import/brewfather', methods=['POST'])
