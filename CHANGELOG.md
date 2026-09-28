@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-28] — 28 · version 0.1.25
+
+### Modifié
+- **Coût d'une recette — ligne « Eau »** : elle précise ce qui est facturé, litres à l'appui : « Eau : brassin 27 L + refroidissement 60 L · 0,0040 €/L ». Le montant comptait déjà les deux, mais le libellé laissait croire à la seule eau du brassin. Sans eau de refroidissement renseignée (Paramètres › Eau), la ligne l'indique. Même libellé dans le coût réel d'un brassin.
+
+---
+
 ## [2026-09-28] — 27 · version 0.1.24
 
 ### Ajouté

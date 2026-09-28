@@ -479,6 +479,19 @@ function recipeCost(r) {
   return has ? total : null;
 }
 
+/**
+ * Libellé de la ligne « Eau » d'un coût : l'eau facturée = eau du brassin
+ * (empâtage + rinçage) + eau de refroidissement (moyenne par brassin réglée
+ * dans Paramètres › Eau). Les litres sont affichés pour que le montant se lise.
+ */
+function waterCostLabel(brewL, coolingL) {
+  const price = (parseFloat((appSettings.water || {}).price) || 0)
+    .toLocaleString(_lang || 'fr', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const fmtL  = v => (Math.round(v * 10) / 10).toLocaleString(_lang || 'fr');
+  const key   = coolingL > 0 ? 'rec.cost_water_detail' : 'rec.cost_water_brew_only';
+  return t(key).replace('${brew}', fmtL(brewL || 0)).replace('${cooling}', fmtL(coolingL || 0)).replace('${price}', price);
+}
+
 function brewCost(b) {
   const rec = b.recipe_id ? S.recipes.find(r => r.id === b.recipe_id) : null;
   if (!rec || !(rec.ingredients || []).length) return null;
@@ -504,7 +517,7 @@ function brewCost(b) {
 
   // Water cost
   const waterPrice = parseFloat((appSettings.water || {}).price) || null;
-  let waterCost = null;
+  let waterCost = null, waterBrewL = null, waterCoolingL = 0;
   if (waterPrice != null && waterPrice > 0 && vol > 0) {
     const grainKg   = (rec.ingredients || []).filter(i => i.category === 'malt')
       .reduce((s, i) => s + (i.unit === 'kg' ? i.quantity : (i.quantity || 0) / 1000), 0) * scaleFactor;
@@ -517,6 +530,8 @@ function brewCost(b) {
     // — elle tient à l'installation plus qu'à la recette.
     const coolingL = parseFloat((appSettings.water || {}).cooling) || 0;
     waterCost = (totalWaterL + coolingL) * waterPrice;
+    waterBrewL = totalWaterL;
+    waterCoolingL = coolingL;
   }
 
   const gas  = parseFloat(appSettings.energy?.gas_per_brew)  || 0;
@@ -534,7 +549,7 @@ function brewCost(b) {
     });
   }
 
-  return { total, ingTotal, waterCost, perLiter, perSize, scaleFactor, cats, ingDetails, gas, elec };
+  return { total, ingTotal, waterCost, waterBrewL, waterCoolingL, perLiter, perSize, scaleFactor, cats, ingDetails, gas, elec };
 }
 
 // Status badges used in the recipe list sidebar

@@ -191,7 +191,7 @@ function calcBrewStats() {
   });
   // Coût de l'eau (prix/L × volume total eau)
   const waterPrice = (appSettings.water || {}).price;
-  let waterCost = null;
+  let waterCost = null, waterBrewL2 = 0, waterCoolingL2 = 0;
   if (waterPrice != null) {
     // totalWater est déjà calculé plus haut via recCalc — on le recalcule ici
     const grainKg2 = recIngredients.filter(i=>i.category==='malt')
@@ -206,6 +206,8 @@ function calcBrewStats() {
     // pas de la recette : c'est une moyenne par brassin, réglée une fois.
     const cooling2 = parseFloat((appSettings.water || {}).cooling) || 0;
     waterCost = (totalWater2 + cooling2) * waterPrice;
+    waterBrewL2 = totalWater2;
+    waterCoolingL2 = cooling2;
     totalCost += waterCost;
     hasCost = true;
   }
@@ -243,7 +245,7 @@ function calcBrewStats() {
       ${waterCost !== null ? `
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 12px;background:var(--card2);border-radius:10px;border-left:3px solid var(--info)">
         <i class="fas fa-droplet" style="color:var(--info);font-size:.8rem"></i>
-        <span style="font-size:.82rem;color:var(--muted);flex:1">${t('rec.cost_water').replace('${price}', ((appSettings.water||{}).price||0).toFixed(4))}</span>
+        <span style="font-size:.82rem;color:var(--muted);flex:1">${esc(waterCostLabel(waterBrewL2, waterCoolingL2))}</span>
         <span style="font-size:.9rem;font-weight:700;color:var(--info)">${waterCost.toFixed(2)} €</span>
         <span style="font-size:.75rem;color:var(--muted)">${(waterCost/totalCost*100).toFixed(0)} ${t('rec.cost_pct_total')}</span>
       </div>` : ''}
@@ -1593,7 +1595,7 @@ function openBrewCostModal(brewId) {
   const waterRow = cd.waterCost != null && cd.waterCost > 0
     ? `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
         <i class="fas fa-droplet" style="color:var(--info);width:14px;flex-shrink:0"></i>
-        <span style="flex:1;font-size:.85rem">${t('rec.cost_water').replace('${price}', ((appSettings.water||{}).price||0).toFixed(4))}</span>
+        <span style="flex:1;font-size:.85rem">${esc(waterCostLabel(cd.waterBrewL, cd.waterCoolingL))}</span>
         <span style="font-size:.72rem;color:var(--muted);margin-right:6px">${cd.total > 0 ? (cd.waterCost/cd.total*100).toFixed(0) : 0}%</span>
         <strong style="color:var(--info);min-width:52px;text-align:right">${cd.waterCost.toFixed(2)} €</strong>
       </div>` : '';
