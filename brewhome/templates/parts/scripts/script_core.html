@@ -350,6 +350,22 @@ function _btnFlash(btn) {
 // ══════════════════════════════════════════════════════════════════════════════
 // TOAST
 // ══════════════════════════════════════════════════════════════════════════════
+/**
+ * Message d'erreur d'un import BeerXML refusé par le serveur (réponse non-OK) :
+ * XML invalide avec ligne, colonne et extrait, ou entités interdites.
+ * Retourne null si la réponse ne décrit pas une erreur XML.
+ */
+async function beerXmlErrorMessage(resp) {
+  const body = await resp.json().catch(() => null);
+  if (!body) return null;
+  if (body.error === 'xml_forbidden') return t('common_err.beerxml_forbidden');
+  if (body.error === 'xml_parse_error' && body.line) {
+    const msg = t('common_err.beerxml_invalid').replace('${line}', body.line).replace('${col}', body.column);
+    return body.excerpt ? `${msg} « ${body.excerpt} »` : msg;
+  }
+  return null;
+}
+
 function toast(msg, type = 'info') {
   if (type === 'success' && _lastSaveBtn) {
     const _flashBtn = _lastSaveBtn; _lastSaveBtn = null;

@@ -447,9 +447,13 @@ async function importDraftsBeerXML(input) {
       headers: { 'Content-Type': 'application/xml' },
       body: await file.text(),
     });
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) {
+      toast((await beerXmlErrorMessage(r)) || t('draft.err_import_beerxml'), 'error');
+      return;
+    }
     const data = await r.json();
     if (!data.imported) { toast(t('draft.import_beerxml_none'), 'warning'); return; }
+    if (data.repaired) toast(t('common_err.beerxml_repaired'), 'info');
     S.drafts.unshift(...data.drafts);
     renderBrouillons();
     openDraft(data.drafts[0].id);

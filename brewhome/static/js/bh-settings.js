@@ -644,9 +644,15 @@ async function importBeerXML(input) {
       headers: {'Content-Type': 'application/xml'},
       body: xml
     });
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) {
+      const why = await beerXmlErrorMessage(r);
+      toast(why || t('settings.import.err_import_beerxml'), 'error');
+      input.value = '';
+      return;
+    }
     const data = await r.json();
     toast(t('settings.import.imported_beerxml').replace('${n}', data.imported), 'success');
+    if (data.repaired) toast(t('common_err.beerxml_repaired'), 'info');
     S.recipes = await api('GET', '/api/recipes');
     renderRecipeList();
   } catch(e) { toast(t('settings.import.err_import_beerxml'), 'error'); }

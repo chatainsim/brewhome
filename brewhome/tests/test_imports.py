@@ -111,7 +111,7 @@ def test_import_beerxml_brouillons_fichier_invalide(client):
     assert client.post('/api/import/beerxml/drafts', data=b'<RECIPES><RECIPE>', content_type='application/xml').status_code == 400
     assert client.post('/api/import/beerxml/drafts', data=b'', content_type='application/xml').status_code == 400
     r = client.post('/api/import/beerxml/drafts', data=b'<RECIPES/>', content_type='application/xml')
-    assert r.get_json() == {'imported': 0, 'drafts': []}
+    assert r.get_json() == {'imported': 0, 'drafts': [], 'repaired': False}
 
 
 def test_import_beerxml_recette_etape_des_autres_ingredients(client):
@@ -121,3 +121,46 @@ def test_import_beerxml_recette_etape_des_autres_ingredients(client):
     recipe = next(x for x in client.get('/api/recipes').get_json() if x['name'] == 'Session IPA')
     moss = next(i for i in recipe['ingredients'] if i['name'] == 'Irish Moss')
     assert (moss['other_type'], moss['other_time']) == ('ebullition', 10)
+
+
+def test_import_beerxml_esperluette_non_echappee_corrigee(client):
+    """« Barbe Rouge & Citra » : XML invalide, mais le seul défaut est le
+    « & » isolé. L'import le corrige et le signale ; les entités valides
+    (&amp;, &#38;) restent intactes."""
+    xml = ('<RECIPES><RECIPE><NAME>IPA Hibiscus (Barbe Rouge & Citra)</NAME><BATCH_SIZE>20</BATCH_SIZE>'
+           '<NOTES>Malt &amp; houblon &#38; baies</NOTES></RECIPE></RECIPES>').encode()
+    r = client.post('/api/import/beerxml/drafts', data=xml, content_type='application/xml')
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['repaired'] is True and body['imported'] == 1
+    d = body['drafts'][0]
+    assert d['title'] == 'IPA Hibiscus (Barbe Rouge & Citra)'
+    assert 'Malt & houblon & baies' in d['notes']
+
+    r = client.post('/api/import/beerxml', data=xml, content_type='application/xml')
+    assert r.status_code == 200 and r.get_json() == {'imported': 1, 'repaired': True}
+
+
+def test_import_beerxml_fichier_valide_non_modifie(client):
+    r = client.post('/api/import/beerxml/drafts', data=_BEERXML_DEUX, content_type='application/xml')
+    assert r.get_json()['repaired'] is False
+
+
+def test_import_beerxml_erreur_situee(client):
+    """Une autre erreur XML n'est pas « réparée » : la réponse donne ligne,
+    colonne et extrait pour que l'interface dise où est le problème."""
+    xml = b'<RECIPES>\n  <RECIPE>\n    <NAME>Sans fin</NAM>\n  </RECIPE>\n</RECIPES>'
+    r = client.post('/api/import/beerxml/drafts', data=xml, content_type='application/xml')
+    assert r.status_code == 400
+    body = r.get_json()
+    assert body['error'] == 'xml_parse_error'
+    assert body['line'] == 3 and body['column'] > 1
+    assert body['excerpt'] == '<NAME>Sans fin</NAM>'
+
+
+def test_import_beerxml_entites_toujours_refusees(client):
+    """La réparation des « & » ne doit pas rouvrir la porte aux entités."""
+    xml = b'<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x "y">]><RECIPES><RECIPE><NAME>&x; & co</NAME></RECIPE></RECIPES>'
+    r = client.post('/api/import/beerxml/drafts', data=xml, content_type='application/xml')
+    assert r.status_code == 400
+    assert r.get_json()['error'] == 'xml_forbidden'

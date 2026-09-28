@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -623,20 +624,53 @@ def export_beerxml():
                     headers={'Content-Disposition': f'attachment; filename="{filename}"'})
 
 
+# Esperluette non échappée : « & » qui n'ouvre ni une entité nommée (&amp;,
+# &lt;…) ni une référence numérique (&#38;, &#x26;). Interdite en XML, mais
+# fréquente dans les BeerXML écrits à la main ou générés par une IA
+# (« Barbe Rouge & Citra »).
+_BARE_AMP = re.compile(rb'&(?!(?:[A-Za-z_][\w.-]*|#[0-9]+|#x[0-9A-Fa-f]+);)')
+
+
+def _parse_beerxml(xml_bytes):
+    """Parse un fichier BeerXML envoyé par l'utilisateur.
+
+    Retourne (racine, None, réparé) ou (None, réponse d'erreur, False).
+
+    defusedxml, pas ET : le fichier vient de l'utilisateur, donc potentiellement
+    malveillant - un DOCTYPE avec entités internes imbriquées ("billion laughs")
+    ferait exploser mémoire/CPU avec le parseur stdlib nu ; defusedxml le refuse
+    (et les entités externes) en levant DefusedXmlException.
+
+    Si le XML est invalide, un second essai remplace les « & » isolés par
+    « &amp; » : seul ce défaut est corrigé, et seulement quand le fichier tel
+    quel ne passe pas. Sinon l'erreur renvoie ligne, colonne et extrait.
+    """
+    try:
+        return DefusedET.fromstring(xml_bytes), None, False
+    except DefusedXmlException as e:
+        return None, api_error('xml_forbidden', 400, detail=str(e)), False
+    except ET.ParseError as first:
+        repaired = _BARE_AMP.sub(b'&amp;', xml_bytes)
+        if repaired != xml_bytes:
+            try:
+                return DefusedET.fromstring(repaired), None, True
+            except (ET.ParseError, DefusedXmlException):
+                pass
+        line, col = first.position
+        lines = xml_bytes.decode('utf-8', errors='replace').splitlines()
+        excerpt = lines[line - 1].strip()[:160] if 0 < line <= len(lines) else ''
+        return None, api_error('xml_parse_error', 400, detail=str(first),
+                               line=line, column=col + 1, excerpt=excerpt), False
+
+
 @bp.route('/api/import/beerxml', methods=['POST'])
 def import_beerxml():
     xml_bytes = request.data
     if not xml_bytes:
         return api_error('no_data', 400)
-    try:
-        # defusedxml.fromstring, pas ET.fromstring : ce fichier BeerXML vient
-        # de l'utilisateur (upload), donc potentiellement malveillant - un
-        # DOCTYPE avec entités internes imbriquées ("billion laughs") ferait
-        # exploser mémoire/CPU avec le parseur stdlib nu. defusedxml bloque
-        # ça (et les entités externes) en levant DefusedXmlException.
-        root = DefusedET.fromstring(xml_bytes)
-    except (ET.ParseError, DefusedXmlException) as e:
-        return api_error('xml_parse_error', 400, detail=str(e))
+    root, err, repaired = _parse_beerxml(xml_bytes)
+    if err:
+        return err
     recipe_els = [root] if root.tag == 'RECIPE' else root.findall('RECIPE')
     imported = 0
     with get_db() as conn:
@@ -649,7 +683,7 @@ def import_beerxml():
                 imported += 1
             except Exception as e:
                 current_app.logger.warning(f'import_beerxml: skipped recipe: {e}')
-    return jsonify({'imported': imported})
+    return jsonify({'imported': imported, 'repaired': repaired})
 
 
 # Libellés des notes générées à l'import d'un brouillon (le reste du texte
@@ -778,10 +812,9 @@ def import_beerxml_drafts():
     xml_bytes = request.data
     if not xml_bytes:
         return api_error('no_data', 400)
-    try:
-        root = DefusedET.fromstring(xml_bytes)
-    except (ET.ParseError, DefusedXmlException) as e:
-        return api_error('xml_parse_error', 400, detail=str(e))
+    root, err, repaired = _parse_beerxml(xml_bytes)
+    if err:
+        return err
     recipe_els = [root] if root.tag == 'RECIPE' else root.findall('RECIPE')
     lang = request.args.get('lang', 'fr')
     created = []
@@ -799,7 +832,7 @@ def import_beerxml_drafts():
                  json.dumps(d['ingredients'], ensure_ascii=False) if d['ingredients'] else None, d['notes']))
             created.append(cur.lastrowid)
         rows = [conn.execute('SELECT * FROM draft_recipes WHERE id=?', (i,)).fetchone() for i in created]
-    return jsonify({'imported': len(rows), 'drafts': [_draft_row_to_dict(r) for r in rows]})
+    return jsonify({'imported': len(rows), 'drafts': [_draft_row_to_dict(r) for r in rows], 'repaired': repaired})
 
 
 @bp.route('/api/import/brewfather', methods=['POST'])

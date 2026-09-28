@@ -4,6 +4,14 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-28] — 29 · version 0.1.26
+
+### Corrigé
+- **Import BeerXML — « & » dans un nom** : un fichier contenant un « & » non échappé (« Barbe Rouge & Citra »), fréquent dans les BeerXML écrits à la main ou générés par une IA, était refusé en bloc avec un message générique. L'import corrige désormais ce seul défaut et le signale ; un fichier valide n'est jamais modifié. Brouillons et recettes.
+- **Import BeerXML — message d'erreur** : un fichier XML invalide indique maintenant où est le problème (« Fichier XML invalide, ligne 3, colonne 21 : … » avec la ligne en cause), et un fichier déclarant des entités XML est refusé avec la raison.
+
+---
+
 ## [2026-09-28] — 28 · version 0.1.25
 
 ### Modifié
