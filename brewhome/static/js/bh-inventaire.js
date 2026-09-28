@@ -1161,6 +1161,105 @@ async function openWrapped(year) {
   }
 }
 
+let _wrLast = null;
+
+// Règles CSS du bilan (.wr-*), recopiées dans l'image et la page d'impression.
+function _wrCss() {
+  const out = [];
+  for (const sheet of document.styleSheets) {
+    let rules;
+    try { rules = sheet.cssRules; } catch(e) { continue; }   // feuille d'une autre origine
+    for (const r of rules || []) if (r.selectorText && r.selectorText.includes('.wr-')) out.push(r.cssText);
+  }
+  return out.join('\n');
+}
+
+function _wrExportHeader() {
+  return `<div class="wr-export-head">🍺 BrewHome · ${esc(_wr('wrap.title', { year: _wrLast.year }))}</div>`;
+}
+function _wrExportFooter() {
+  const until = _wrLast.in_progress ? ' · ' + _wr('wrap.in_progress', { date: _wrDate(_wrLast.until) }) : '';
+  return `<div class="wr-export-foot">${esc(until.replace(/^ · /, ''))}</div>`;
+}
+
+let _h2cLoading = null;
+function _loadHtml2canvas() {
+  if (window.html2canvas) return Promise.resolve();
+  if (!_h2cLoading) _h2cLoading = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = `/static/js/html2canvas.min.js?v=${_BH_STATIC_V}`;
+    sc.onload = resolve;
+    sc.onerror = () => { _h2cLoading = null; reject(new Error('html2canvas')); };
+    document.head.appendChild(sc);
+  });
+  return _h2cLoading;
+}
+
+// Image PNG (1080 px de large) : partage natif quand le navigateur le permet
+// (mobile, HTTPS), téléchargement sinon.
+async function exportWrappedImage() {
+  const slides = document.querySelector('#wrapped-body .wr-slides');
+  if (!slides || !_wrLast) return;
+  const box = document.createElement('div');
+  box.className = 'wr-export-box';
+  box.innerHTML = _wrExportHeader() + slides.outerHTML + _wrExportFooter();
+  document.body.appendChild(box);
+  try {
+    await _loadHtml2canvas();
+    await document.fonts?.ready;
+    const canvas = await html2canvas(box, { scale: 2, backgroundColor: '#0c0a09', logging: false, useCORS: true });
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    const name = `brewhome-wrapped-${_wrLast.year}.png`;
+    const file = new File([blob], name, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: _wr('wrap.title', { year: _wrLast.year }) });
+        return;
+      } catch(e) {
+        if (e.name === 'AbortError') return;          // partage annulé par l'utilisateur
+      }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast(t('wrap.export_done'), 'success');
+  } catch(e) {
+    toast(t('wrap.export_err'), 'error');
+  } finally {
+    box.remove();
+  }
+}
+
+// PDF : page d'impression dédiée (« Enregistrer en PDF » du navigateur),
+// comme la fiche recette.
+function exportWrappedPdf() {
+  const slides = document.querySelector('#wrapped-body .wr-slides');
+  if (!slides || !_wrLast) return;
+  const win = window.open('', '_blank', 'width=640,height=900');
+  if (!win) { toast(t('wrap.export_err'), 'error'); return; }
+  const fonts = [...document.querySelectorAll('link[rel=stylesheet]')].map(l => `<link rel="stylesheet" href="${esc(l.href)}">`).join('');
+  win.document.write(`<!DOCTYPE html><html lang="${esc(_lang || 'fr')}"><head>
+  <meta charset="UTF-8"><title>BrewHome — ${esc(_wr('wrap.title', { year: _wrLast.year }))}</title>
+  ${fonts}
+  <style>
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    html,body{margin:0;background:#0c0a09;color:#fff;font-family:Inter,system-ui,sans-serif}
+    @page{size:A4;margin:0}
+    body{padding:10mm}
+    ${_wrCss()}
+    .wr-export-box{position:static;left:auto;width:auto;max-width:560px;margin:0 auto}
+    .wr-slide{break-inside:avoid;page-break-inside:avoid}
+  </style></head><body>
+  <div class="wr-export-box">${_wrExportHeader()}${slides.outerHTML}${_wrExportFooter()}</div>
+  <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
+</body></html>`);
+  win.document.close();
+}
+
 const _WRAP_PROFILES = {
   brewery:    ['🏭', 'wrap.p_brewery',    'wrap.p_brewery_txt'],
   hophead:    ['🌿', 'wrap.p_hophead',    'wrap.p_hophead_txt'],
@@ -1175,8 +1274,13 @@ function renderWrapped(w) {
   const body = document.getElementById('wrapped-body');
   const years = (w.years || [w.year]).map(y => `<option value="${y}" ${y === w.year ? 'selected' : ''}>${y}</option>`).join('');
   document.getElementById('wrapped-title').textContent = _wr('wrap.title', { year: w.year });
+  _wrLast = w;
   const head = `<div class="wr-bar-top">
       <select onchange="openWrapped(parseInt(this.value))" style="width:auto">${years}</select>
+      ${w.empty ? '' : `<div class="wr-export">
+        <button class="btn btn-ghost btn-sm" onclick="withBtn(this, exportWrappedImage)"><i class="fas fa-image"></i> ${esc(t('wrap.export_image'))}</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportWrappedPdf()"><i class="fas fa-file-pdf"></i> ${esc(t('wrap.export_pdf'))}</button>
+      </div>`}
       ${w.in_progress ? `<span class="wr-note">${esc(_wr('wrap.in_progress', { date: _wrDate(w.until) }))}</span>` : ''}
     </div>`;
   if (w.empty) {

@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-28] — 27 · version 0.1.24
+
+### Ajouté
+- **Wrapped — export image et PDF** : deux boutons dans le bilan annuel. « Image » produit un PNG de 1080 px de large (format téléphone) avec toutes les cartes, prêt à partager ; sur mobile en HTTPS, le menu de partage du téléphone s'ouvre directement, sinon l'image est téléchargée. « PDF » ouvre la page d'impression du navigateur (choisir « Enregistrer en PDF »), une carte n'étant jamais coupée entre deux pages. La génération d'image utilise html2canvas 1.4.1 (MIT), embarqué dans l'application et chargé seulement au premier export : aucun accès Internet nécessaire.
+
+---
+
 ## [2026-09-28] — 26 · version 0.1.23
 
 ### Ajouté
