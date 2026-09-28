@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-09-28] — 26 · version 0.1.23
+
+### Ajouté
+- **Statistiques — bilan annuel « Wrapped »** : un bouton 🎁 Wrapped sur la page Statistiques ouvre le récapitulatif de l'année choisie, en cartes. Litres brassés et nombre de brassins (avec l'évolution par rapport à l'année précédente, à date égale pour l'année en cours), premier et dernier brassin, rythme (mois le plus brassé, jour de brassage préféré, mois consécutifs, volume par mois), style de l'année et recette fétiche, nouvelles recettes, malt et houblon utilisés (à l'échelle du volume réellement brassé) avec le houblon star, ABV moyen, rendement, dépenses, bière la plus forte, bouteilles remplies, litres dégustés, bière la plus bue et la mieux notée, et un profil de brasseur. Les brassins archivés comptent, les brassins planifiés ou supprimés non. En français et en anglais.
+
+---
+
 ## [2026-09-27] — 25 · version 0.1.22
 
 ### Ajouté

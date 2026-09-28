@@ -1131,6 +1131,134 @@ function _destroyStatsCharts() {
   });
 }
 
+// ── Bilan annuel « Wrapped » ─────────────────────────────────────────────────
+function _wr(key, vars = {}) {
+  return Object.entries(vars).reduce((s, [k, v]) => s.split('${' + k + '}').join(v), t(key));
+}
+function _wrNum(v, d = 0) {
+  return v == null ? '—' : Number(v).toLocaleString(_lang || 'fr', { maximumFractionDigits: d });
+}
+function _wrDate(iso) {
+  return new Date(iso + 'T12:00:00').toLocaleDateString(_lang || 'fr', { day: 'numeric', month: 'long' });
+}
+function _wrWeekday(i) {
+  // 2024-01-01 est un lundi (lundi = 0 côté serveur)
+  return new Date(2024, 0, 1 + i).toLocaleDateString(_lang || 'fr', { weekday: 'long' });
+}
+
+async function openWrapped(year) {
+  if (year == null) {
+    const sel = document.getElementById('stats-year-sel')?.value;
+    year = sel && sel !== 'all' ? parseInt(sel) : new Date().getFullYear();
+  }
+  const body = document.getElementById('wrapped-body');
+  body.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i></div>`;
+  openModal('wrapped-modal');
+  try {
+    renderWrapped(await api('GET', `/api/wrapped?year=${year}`));
+  } catch(e) {
+    body.innerHTML = `<p style="padding:20px;color:var(--danger)">${esc(t('wrap.err_load'))}</p>`;
+  }
+}
+
+const _WRAP_PROFILES = {
+  brewery:    ['🏭', 'wrap.p_brewery',    'wrap.p_brewery_txt'],
+  hophead:    ['🌿', 'wrap.p_hophead',    'wrap.p_hophead_txt'],
+  perfection: ['🎯', 'wrap.p_perfection', 'wrap.p_perfection_txt'],
+  explorer:   ['🧭', 'wrap.p_explorer',   'wrap.p_explorer_txt'],
+  strong:     ['💪', 'wrap.p_strong',     'wrap.p_strong_txt'],
+  regular:    ['📅', 'wrap.p_regular',    'wrap.p_regular_txt'],
+  passion:    ['🍺', 'wrap.p_passion',    'wrap.p_passion_txt'],
+};
+
+function renderWrapped(w) {
+  const body = document.getElementById('wrapped-body');
+  const years = (w.years || [w.year]).map(y => `<option value="${y}" ${y === w.year ? 'selected' : ''}>${y}</option>`).join('');
+  document.getElementById('wrapped-title').textContent = _wr('wrap.title', { year: w.year });
+  const head = `<div class="wr-bar-top">
+      <select onchange="openWrapped(parseInt(this.value))" style="width:auto">${years}</select>
+      ${w.in_progress ? `<span class="wr-note">${esc(_wr('wrap.in_progress', { date: _wrDate(w.until) }))}</span>` : ''}
+    </div>`;
+  if (w.empty) {
+    body.innerHTML = head + `<p class="wr-empty">${esc(_wr('wrap.empty', { year: w.year }))}</p>`;
+    return;
+  }
+  const months = t('stat.months'), monthsLong = t('cal.months');
+  const peak = Math.max(1, ...w.by_month);
+  const evo = w.evolution_pct != null
+    ? `<div class="wr-chip">${w.evolution_pct >= 0 ? '▲' : '▼'} ${esc(_wr(w.prev_same_date ? 'wrap.evo_same_date' : 'wrap.evo',
+        { pct: Math.abs(w.evolution_pct), year: w.prev_year, liters: _wrNum(w.prev_liters, 1) }))}</div>` : '';
+  const [pIcon, pName, pTxt] = _WRAP_PROFILES[w.profile] || _WRAP_PROFILES.passion;
+  const slides = [];
+
+  slides.push(`<section class="wr-slide wr-amber">
+    <div class="wr-kicker">${esc(_wr('wrap.k_year', { year: w.year }))}</div>
+    <div class="wr-big">${_wrNum(w.liters, 1)} L</div>
+    <div class="wr-sub">${esc(_wr('wrap.liters_sub', { n: w.brews, pints: _wrNum(w.pints) }))}</div>
+    ${evo}
+    ${w.first_brew ? `<div class="wr-lbl">${esc(_wr('wrap.first_last', { first: w.first_brew.name, fdate: _wrDate(w.first_brew.date), last: w.last_brew.name, ldate: _wrDate(w.last_brew.date) }))}</div>` : ''}
+  </section>`);
+
+  if (w.brews) slides.push(`<section class="wr-slide wr-blue">
+    <div class="wr-kicker">${esc(t('wrap.k_rhythm'))}</div>
+    <div class="wr-row">
+      <div><span class="wr-mid">${esc(monthsLong[w.best_month])}</span><span class="wr-lbl">${esc(t('wrap.best_month'))}</span></div>
+      ${w.fav_weekday != null ? `<div><span class="wr-mid wr-cap">${esc(_wrWeekday(w.fav_weekday))}</span><span class="wr-lbl">${esc(t('wrap.fav_weekday'))}</span></div>` : ''}
+      <div><span class="wr-mid">${w.months_active} / 12</span><span class="wr-lbl">${esc(t('wrap.months_active'))}</span></div>
+      ${w.month_streak > 1 ? `<div><span class="wr-mid">🔥 ${w.month_streak}</span><span class="wr-lbl">${esc(t('wrap.month_streak'))}</span></div>` : ''}
+    </div>
+    <div class="wr-months">${w.by_month.map((v, i) => `<div class="wr-month" title="${_wrNum(v, 1)} L"><i style="height:${Math.round(100 * v / peak)}%"></i><span>${esc(months[i])}</span></div>`).join('')}</div>
+  </section>`);
+
+  if (w.styles.length) slides.push(`<section class="wr-slide wr-green">
+    <div class="wr-kicker">${esc(t('wrap.k_style'))}</div>
+    <div class="wr-big wr-name">${esc(w.styles[0].name)}</div>
+    <div class="wr-sub">${esc(_wr('wrap.style_sub', { n: w.styles[0].count, styles: w.n_styles }))}</div>
+    ${w.styles.length > 1 ? `<ol class="wr-list">${w.styles.slice(1).map((s, i) => `<li><em>${i + 2}</em><span>${esc(s.name)}</span><b>× ${s.count}</b></li>`).join('')}</ol>` : ''}
+    ${w.top_recipe ? `<div class="wr-sub">🎯 ${esc(_wr('wrap.top_recipe', { name: w.top_recipe.name, n: w.top_recipe.count }))}</div>` : ''}
+    ${w.new_recipes ? `<div class="wr-lbl">${esc(_wr('wrap.new_recipes', { n: w.new_recipes }))}</div>` : ''}
+  </section>`);
+
+  if (w.malt_kg || w.hops_g) slides.push(`<section class="wr-slide wr-hop">
+    <div class="wr-kicker">${esc(t('wrap.k_ingredients'))}</div>
+    <div class="wr-row">
+      <div><span class="wr-mid">🌾 ${_wrNum(w.malt_kg, 1)} kg</span><span class="wr-lbl">${esc(t('wrap.malt'))}${w.top_malt ? ' · ' + esc(w.top_malt) : ''}</span></div>
+      <div><span class="wr-mid">🌿 ${_wrNum(w.hops_g)} g</span><span class="wr-lbl">${esc(t('wrap.hops'))}${w.hops_per_liter != null ? ' · ' + esc(_wr('wrap.per_liter', { v: _wrNum(w.hops_per_liter, 1) })) : ''}</span></div>
+    </div>
+    ${w.top_hops.length ? `<div class="wr-sub">${esc(_wr('wrap.top_hop', { name: w.top_hops[0].name, g: _wrNum(w.top_hops[0].grams) }))}</div>` : ''}
+    ${w.top_yeast ? `<div class="wr-lbl">${esc(_wr('wrap.top_yeast', { name: w.top_yeast }))}</div>` : ''}
+  </section>`);
+
+  if (w.avg_abv != null || w.avg_efficiency != null || w.cost != null) slides.push(`<section class="wr-slide wr-red">
+    <div class="wr-kicker">${esc(t('wrap.k_numbers'))}</div>
+    <div class="wr-row">
+      ${w.avg_abv != null ? `<div><span class="wr-mid">${_wrNum(w.avg_abv, 1)} %</span><span class="wr-lbl">${esc(t('wrap.avg_abv'))}</span></div>` : ''}
+      ${w.avg_efficiency != null ? `<div><span class="wr-mid">${_wrNum(w.avg_efficiency, 1)} %</span><span class="wr-lbl">${esc(t('wrap.avg_eff'))}</span></div>` : ''}
+      ${w.cost != null ? `<div><span class="wr-mid">${_wrNum(w.cost)} €</span><span class="wr-lbl">${esc(t('wrap.cost'))}${w.cost_per_liter != null ? ' · ' + _wrNum(w.cost_per_liter, 2) + ' €/L' : ''}</span></div>` : ''}
+    </div>
+    ${w.strongest ? `<div class="wr-sub">💪 ${esc(_wr('wrap.strongest', { name: w.strongest.name, abv: _wrNum(w.strongest.abv, 1) }))}</div>` : ''}
+    ${w.readings ? `<div class="wr-lbl">📈 ${esc(_wr('wrap.readings', { n: _wrNum(w.readings) }))}</div>` : ''}
+  </section>`);
+
+  if (w.bottled_beers || w.drunk_liters) slides.push(`<section class="wr-slide wr-purple">
+    <div class="wr-kicker">${esc(t('wrap.k_cellar'))}</div>
+    <div class="wr-row">
+      ${w.bottled_beers ? `<div><span class="wr-mid">🍾 ${_wrNum(w.bottles)}</span><span class="wr-lbl">${esc(_wr('wrap.bottled', { l: _wrNum(w.bottled_liters, 1) }))}</span></div>` : ''}
+      ${w.drunk_liters ? `<div><span class="wr-mid">🍻 ${_wrNum(w.drunk_liters, 1)} L</span><span class="wr-lbl">${esc(t('wrap.drunk'))}</span></div>` : ''}
+    </div>
+    ${w.fav_beer ? `<div class="wr-sub">${esc(_wr('wrap.fav_beer', { name: w.fav_beer.name, l: _wrNum(w.fav_beer.liters, 1) }))}</div>` : ''}
+    ${w.best_tasted ? `<div class="wr-sub">⭐ ${esc(_wr('wrap.best_tasted', { name: w.best_tasted.name, n: w.best_tasted.rating }))}</div>` : ''}
+  </section>`);
+
+  slides.push(`<section class="wr-slide wr-dark">
+    <div class="wr-kicker">${esc(_wr('wrap.k_profile', { year: w.year }))}</div>
+    <div class="wr-big">${pIcon} ${esc(t(pName))}</div>
+    <div class="wr-sub">${esc(t(pTxt))}</div>
+  </section>`);
+
+  body.innerHTML = head + `<div class="wr-slides">${slides.join('')}</div>`;
+}
+
 function renderStatsPage() {
   _destroyStatsCharts();
   const allCompleted = S.brews.filter(b => !b.archived && b.status === 'completed' && b.brew_date);

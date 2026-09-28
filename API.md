@@ -439,6 +439,7 @@ Query param : `days` (défaut 30)
 | GET | `/api/export/beerxml` | Export recettes au format BeerXML |
 | POST | `/api/import/beerxml` | Import recettes depuis BeerXML |
 | POST | `/api/import/beerxml/drafts?lang=fr` | Crée un brouillon par recette BeerXML (recettes non modifiées) ; renvoie `{imported, drafts}` |
+| GET  | `/api/wrapped?year=2025` | Bilan annuel « Wrapped » (brassins, litres, styles, ingrédients, cave, profil) + années disponibles |
 | POST | `/api/import/brewfather` | Import recettes depuis export Brewfather (JSON) |
 | GET | `/api/export/brews` | Export brassins + lectures fermentation (JSON) |
 | POST | `/api/import/brews` | Import brassins |

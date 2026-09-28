@@ -444,6 +444,37 @@ td{padding:10px 12px;vertical-align:middle}
 .skel-card{height:200px;border-radius:12px}
 input.rec-field-error,select.rec-field-error{border-color:var(--danger)!important;box-shadow:0 0 0 2px rgba(239,68,68,.18)!important;transition:box-shadow .15s,border-color .15s}
 
+/* ── Bilan annuel « Wrapped » ── */
+.wr-bar-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.wr-note{font-size:.78rem;color:var(--muted)}
+.wr-empty{color:var(--muted);text-align:center;padding:24px 0}
+.wr-slides{display:grid;gap:12px}
+.wr-slide{border-radius:14px;padding:18px 16px;color:#fff;overflow:hidden}
+.wr-amber{background:linear-gradient(135deg,#d97706,#b45309)}
+.wr-blue{background:linear-gradient(135deg,#2563eb,#0e7490)}
+.wr-green{background:linear-gradient(135deg,#15803d,#0e7490)}
+.wr-hop{background:linear-gradient(135deg,#65a30d,#15803d)}
+.wr-red{background:linear-gradient(135deg,#b91c1c,#9d174d)}
+.wr-purple{background:linear-gradient(135deg,#7c3aed,#9d174d)}
+.wr-dark{background:linear-gradient(135deg,#27272a,#09090b);border:1px solid var(--border)}
+.wr-kicker{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;opacity:.85}
+.wr-big{font-size:2rem;font-weight:800;line-height:1.15;margin:4px 0;overflow-wrap:anywhere}
+.wr-name{font-size:1.5rem}
+.wr-sub{font-size:.9rem;opacity:.95;margin-top:6px}
+.wr-lbl{display:block;font-size:.75rem;opacity:.85;margin-top:4px}
+.wr-chip{display:inline-block;margin-top:10px;background:rgba(255,255,255,.18);border-radius:999px;padding:3px 10px;font-size:.8rem}
+.wr-row{display:flex;flex-wrap:wrap;gap:10px 22px;margin-top:10px}
+.wr-row>div{min-width:0}
+.wr-mid{display:block;font-size:1.2rem;font-weight:700}
+.wr-cap{text-transform:capitalize}
+.wr-list{list-style:none;padding:0;margin:10px 0 0;display:grid;gap:6px}
+.wr-list li{display:flex;align-items:center;gap:8px;font-size:.88rem}
+.wr-list em{font-style:normal;opacity:.7;width:16px}
+.wr-list span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wr-months{display:flex;align-items:flex-end;gap:4px;height:90px;margin:14px 0 4px}
+.wr-month{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;min-width:0}
+.wr-month i{display:block;width:100%;background:rgba(255,255,255,.85);border-radius:3px 3px 0 0;min-height:2px}
+.wr-month span{font-size:.55rem;opacity:.85;margin-top:3px;white-space:nowrap;overflow:hidden;max-width:100%}
 @media(max-width:900px){
   /* Tablette — grilles larges réduites à 2 colonnes */
   .form-row.cols-4{grid-template-columns:1fr 1fr}
