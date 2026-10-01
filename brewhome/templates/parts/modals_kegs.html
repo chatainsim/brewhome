@@ -176,6 +176,7 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('keg-detail-modal')" data-i18n="common.close">Fermer</button>
       <button class="btn btn-ghost" id="kd-pour-btn" style="display:none"><i class="fas fa-beer-mug-empty" style="color:var(--amber)"></i> <span data-i18n="keg.pour_amount">Débiter</span></button>
+      <button class="btn btn-ghost" onclick="closeModal('keg-detail-modal');openCarbCalc()" title="Pression de carbonatation" data-i18n-title="ot.carb_title"><i class="fas fa-gauge-high" style="color:var(--info)"></i> <span data-i18n="ot.carb_btn">Pression</span></button>
       <button class="btn btn-ghost" id="kd-status-btn"><i class="fas fa-toggle-on"></i> <span data-i18n="keg.status_label">Statut</span></button>
       <button class="btn btn-ghost" id="kd-edit-btn"><i class="fas fa-pen"></i> <span data-i18n="common.edit">Modifier</span></button>
     </div>

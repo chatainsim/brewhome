@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-01] — 31 · version 0.1.28
+
+### Ajouté
+- **Calculateurs — carbonatation forcée (fût)** : pression à régler sur le détendeur selon la température du fût et le CO₂ visé (en bar et en psi), avec les mêmes styles de référence que le calcul de primage et un tableau de la pression nécessaire de 1 à 12 °C. Accessible aussi depuis la fiche d'un soda keg (bouton « Pression »).
+
+---
+
 ## [2026-10-01] — 30 · version 0.1.27
 
 ### Ajouté

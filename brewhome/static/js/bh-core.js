@@ -287,6 +287,7 @@ async function _refreshPage(page) {
       return; // pas de badge à mettre à jour
     } else if (page === 'outils') {
       calcPriming('ot-priming-');
+      calcCarbPressure();
       renderRoDilutionSelectors();
       await ensureRecipesLoaded();
       initRecipeCompare();

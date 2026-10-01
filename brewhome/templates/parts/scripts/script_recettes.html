@@ -3369,6 +3369,70 @@ function calcPriming(pfx = 'priming-') {
 }
 
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── CARBONATATION FORCÉE (FÛT) ───────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Pression manométrique d'équilibre (formule de la table Zahm & Nagel, T en °F,
+// résultat en psi) : le CO₂ dissous atteint le volume cible une fois
+// l'équilibre atteint à cette pression et cette température.
+const PSI_TO_BAR = 0.0689476;
+
+function carbPressurePsi(tempC, vols) {
+  const T = tempC * 9 / 5 + 32;
+  return -16.6999 - 0.0101059 * T + 0.00116512 * T * T
+    + 0.173354 * T * vols + 4.24267 * vols - 0.0684226 * vols * vols;
+}
+
+function carbStylePreset() {
+  const val = document.getElementById('ot-carb-style').value;
+  if (!val) return;
+  document.getElementById('ot-carb-co2').value = val;
+  calcCarbPressure();
+}
+
+function calcCarbPressure() {
+  const block = document.getElementById('ot-carb-result');
+  if (!block) return;
+  const tRaw  = parseFloat(document.getElementById('ot-carb-temp')?.value);
+  const tempC = isNaN(tRaw) ? 4 : tRaw;
+  const vols  = parseFloat(document.getElementById('ot-carb-co2')?.value) || 2.5;
+  const psi   = carbPressurePsi(tempC, vols);
+  const nf    = (v, d) => v.toLocaleString(_lang || 'fr', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+  if (psi <= 0) {
+    block.innerHTML = `<div style="padding:12px 14px;background:rgba(251,191,36,.12);border:1px solid var(--warning);border-radius:8px;font-size:.87rem;color:var(--warning)">
+      <i class="fas fa-triangle-exclamation"></i> ${t('ot.carb_warn_low')}</div>`;
+    return;
+  }
+  // Même CO₂ à d'autres températures : utile si le frigo n'est pas encore froid
+  const rows = [1, 2, 4, 6, 8, 10, 12].map(tc => {
+    const p = carbPressurePsi(tc, vols);
+    const cur = Math.abs(tc - tempC) < 0.01;
+    return `<div style="background:var(--card2);border-radius:8px;padding:8px 4px;text-align:center;${cur ? 'outline:2px solid var(--info)' : ''}">
+      <div style="font-size:.72rem;color:var(--muted)">${tc} °C</div>
+      <div style="font-weight:700;font-size:.9rem">${p > 0 ? nf(p * PSI_TO_BAR, 2) : '—'}</div>
+    </div>`;
+  }).join('');
+
+  block.innerHTML = `
+    <div style="text-align:center;padding:6px 0 12px">
+      <div style="font-size:2.8rem;font-weight:700;color:var(--info);letter-spacing:-.01em">${nf(psi * PSI_TO_BAR, 2)}<span style="font-size:1.1rem;font-weight:500;color:var(--muted);margin-left:4px">bar</span></div>
+      <div style="color:var(--muted);font-size:.85rem;margin-top:2px">${nf(psi, 1)} psi · ${t('ot.carb_result').replace('${t}', nf(tempC, 1)).replace('${v}', nf(vols, 1))}</div>
+    </div>
+    <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">${t('ot.carb_table').replace('${v}', nf(vols, 1))}</div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:12px">${rows}</div>
+    <div style="padding:10px 12px;background:var(--card2);border-radius:8px;border-left:3px solid var(--info);font-size:.82rem;line-height:1.5;color:var(--muted)">
+      <i class="fas fa-circle-info" style="color:var(--info)"></i> ${t('ot.carb_tip')}
+    </div>`;
+}
+
+// Depuis la fiche d'un fût : ouvre le calculateur
+function openCarbCalc() {
+  navigate('outils');
+  setTimeout(() => document.getElementById('ot-carb-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+}
+
+
 // ── Menu actions recette ──────────────────────────────────────────────────────
 function toggleRecActionsMenu(e) {
   e.stopPropagation();

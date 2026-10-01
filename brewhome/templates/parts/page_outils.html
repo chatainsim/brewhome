@@ -237,6 +237,39 @@
       <div id="ot-priming-result-block"></div>
     </div>
 
+    <!-- ── Carbonatation forcée (fût) ──────────────────────────────────────── -->
+    <div class="card" id="ot-carb-card" style="grid-column:1/-1;max-width:560px;justify-self:center;width:100%">
+      <div class="section-label" style="margin-bottom:16px">
+        <i class="fas fa-gauge-high" style="color:var(--info)"></i>
+        <span data-i18n="ot.carb_title">Carbonatation forcée (fût)</span>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label data-i18n="rec.priming_style">Style de référence</label>
+        <select id="ot-carb-style" onchange="carbStylePreset()" style="width:100%">
+          <option value="" data-i18n="rec.priming_style_none">— Choisir un style —</option>
+          <option value="1.7">Ales britanniques (1.5–2.0) → 1.7</option>
+          <option value="2.5">Ales américaines / IPA (2.2–2.8) → 2.5</option>
+          <option value="1.8">Stout / Porter (1.5–2.1) → 1.8</option>
+          <option value="3.5">Weizen / Hefeweizen (3.3–4.5) → 3.5</option>
+          <option value="3.2">Belges (Tripel, Saison) (2.8–3.8) → 3.2</option>
+          <option value="2.5">Lager / Pilsner (2.3–2.7) → 2.5</option>
+          <option value="3.0">Sour / Lambic (3.0–4.0) → 3.0</option>
+          <option value="3.0">Cider (2.5–4.0) → 3.0</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <div class="field" style="margin:0">
+          <label data-i18n="ot.carb_temp">Temp. du fût (°C)</label>
+          <input type="number" id="ot-carb-temp" value="4" min="-2" max="25" step="0.5" oninput="calcCarbPressure()">
+        </div>
+        <div class="field" style="margin:0">
+          <label data-i18n="rec.priming_target">CO₂ cible</label>
+          <input type="number" id="ot-carb-co2" value="2.5" min="1.0" max="4.5" step="0.1" oninput="calcCarbPressure()">
+        </div>
+      </div>
+      <div id="ot-carb-result"></div>
+    </div>
+
     <!-- ── Dilution RO / eau distillée ─────────────────────────────────────── -->
     <div class="card" style="grid-column:1/-1">
       <div class="section-label" style="margin-bottom:8px">
