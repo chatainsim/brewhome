@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-01] — 34 · version 0.1.31
+
+### Corrigé
+- **Modifications depuis l'appli Android** : modifier une fiche ne renvoie que les champs connus de l'appli, et le serveur effaçait les autres. Désormais un champ absent garde sa valeur (un champ vidé, envoyé à `null`, est toujours effacé comme avant depuis le site).
+  - Bière : le stock de 25 et 50 cl était remis à 0 (#23).
+  - Inventaire : date de péremption, % max d'utilisation et données de levure (type, dates, génération remise à 1) étaient effacés (#24).
+  - Catalogue : caractéristiques des levures, arôme, dosage, % max effacés, unité par défaut remise à « g » (#25).
+
+---
+
 ## [2026-10-01] — 33 · version 0.1.30
 
 ### Ajouté

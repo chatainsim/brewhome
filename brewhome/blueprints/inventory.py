@@ -69,11 +69,16 @@ def update_inventory_item(item_id):
     if errors:
         return api_error('validation', 400, fields=errors)
     with get_db() as conn:
-        old_row = conn.execute('SELECT quantity FROM inventory_items WHERE id=?', (item_id,)).fetchone()
+        old_row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (item_id,)).fetchone()
         if not old_row:
             return api_error('not_found', 404)
         old_qty = old_row['quantity']
-        new_qty = d.get('quantity')
+        # Champ absent = valeur actuelle conservée (un champ vidé arrive à null).
+        # L'appli Android n'envoie ni péremption, ni % max, ni données de levure :
+        # avant, son PUT les effaçait (et remettait la génération à 1).
+        def keep(key):
+            return d[key] if key in d else old_row[key]
+        new_qty = keep('quantity')
         cur = conn.execute(
             '''UPDATE inventory_items
                SET name=?,category=?,quantity=?,unit=?,origin=?,ebc=?,alpha=?,notes=?,
@@ -81,12 +86,12 @@ def update_inventory_item(item_id):
                    yeast_type=?,yeast_mfg_date=?,yeast_open_date=?,yeast_generation=?,
                    updated_at=CURRENT_TIMESTAMP
                WHERE id=?''',
-            (d.get('name'), d.get('category'), new_qty, d.get('unit', 'kg'),
-             d.get('origin'), d.get('ebc'), d.get('alpha'), d.get('notes'),
-             d.get('price_per_unit'), d.get('min_stock'), d.get('expiry_date') or None,
-             d.get('max_usage_pct'),
-             d.get('yeast_type'), d.get('yeast_mfg_date') or None, d.get('yeast_open_date') or None,
-             d.get('yeast_generation') if d.get('yeast_generation') is not None else 1, item_id)
+            (keep('name'), keep('category'), new_qty, keep('unit') or 'kg',
+             keep('origin'), keep('ebc'), keep('alpha'), keep('notes'),
+             keep('price_per_unit'), keep('min_stock'), keep('expiry_date') or None,
+             keep('max_usage_pct'),
+             keep('yeast_type'), keep('yeast_mfg_date') or None, keep('yeast_open_date') or None,
+             keep('yeast_generation') if keep('yeast_generation') is not None else 1, item_id)
         )
         if cur.rowcount == 0:
             return api_error('not_found', 404)

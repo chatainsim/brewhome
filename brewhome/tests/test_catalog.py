@@ -147,3 +147,29 @@ def test_catalog_item_max_usage_pct(client):
     })
     assert r.status_code == 201
     assert r.get_json()['max_usage_pct'] == 10.0
+
+
+# ── Modification partielle (appli Android, #25) ──────────────────────────────
+
+def test_put_partiel_garde_les_caracteristiques(client):
+    y = client.post('/api/catalog', json={
+        'name': 'Nottingham', 'category': 'levure', 'yeast_type': 'sec', 'default_unit': 'sachet',
+        'temp_min': 14, 'temp_max': 21, 'attenuation_min': 77, 'attenuation_max': 80,
+        'alcohol_tolerance': 14, 'dosage_per_liter': 0.5,
+    }).get_json()
+    # Requête de l'appli Android (CatalogPost)
+    r = client.put(f'/api/catalog/{y["id"]}', json={
+        'name': 'Nottingham Ale', 'category': 'levure', 'subcategory': None, 'ebc': None, 'gu': None, 'alpha': None,
+    })
+    assert r.status_code == 200
+    c = r.get_json()
+    assert c['name'] == 'Nottingham Ale'
+    assert (c['yeast_type'], c['default_unit'], c['temp_min'], c['temp_max'], c['attenuation_min'],
+            c['attenuation_max'], c['alcohol_tolerance'], c['dosage_per_liter']) == \
+           ('sec', 'sachet', 14, 21, 77, 80, 14, 0.5)
+
+
+def test_put_null_explicite_efface_toujours(client, hop):
+    client.put(f'/api/catalog/{hop["id"]}', json={'name': 'Cascade', 'aroma_spec': 'agrumes'})
+    r = client.put(f'/api/catalog/{hop["id"]}', json={'name': 'Cascade', 'aroma_spec': None})
+    assert r.get_json()['aroma_spec'] is None

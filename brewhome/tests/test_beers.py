@@ -238,3 +238,24 @@ def test_fut_en_bouteilles_pas_compte_comme_bu(client):
     # Les bouteilles bues ensuite sont comptées une seule fois
     client.patch(f'/api/beers/{beer["id"]}/stock', json={'stock_50cl': 18})
     assert _consumed(client, beer['id']) == 1.0
+
+
+# ── Modification partielle (appli Android, #23) ──────────────────────────────
+
+def test_put_sans_25_50cl_garde_leur_stock(client):
+    beer = client.post('/api/beers', json={'name': 'Saison', 'stock_33cl': 6, 'stock_50cl': 12, 'stock_25cl': 4}).get_json()
+    # Requête de l'appli Android : seulement 33 / 75 cl
+    r = client.put(f'/api/beers/{beer["id"]}', json={
+        'name': 'Saison', 'type': None, 'abv': 6.5, 'stock_33cl': 5, 'stock_75cl': 0,
+        'keg_liters': None, 'origin': None, 'description': None, 'photo': None,
+        'brew_date': None, 'bottling_date': None, 'refermentation': 0, 'refermentation_days': None,
+    })
+    assert r.status_code == 200
+    b = r.get_json()
+    assert (b['stock_33cl'], b['stock_50cl'], b['stock_25cl'], b['abv']) == (5, 12, 4, 6.5)
+
+
+def test_put_null_explicite_efface_toujours(client):
+    beer = client.post('/api/beers', json={'name': 'Blanche', 'origin': 'Maison', 'stock_50cl': 3}).get_json()
+    r = client.put(f'/api/beers/{beer["id"]}', json={'name': 'Blanche', 'origin': None, 'stock_50cl': 0})
+    assert (r.get_json()['origin'], r.get_json()['stock_50cl']) == (None, 0)

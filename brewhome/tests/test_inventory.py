@@ -347,3 +347,29 @@ def test_recomptage_ignore_la_corbeille(client, malt_item):
     client.delete(f'/api/inventory/{malt_item["id"]}')
     r = client.post('/api/inventory/recount', json={'items': [{'id': malt_item['id'], 'quantity': 5}]})
     assert r.get_json()['updated'] == 0
+
+
+# ── Modification partielle (appli Android, #24) ──────────────────────────────
+
+def test_put_partiel_garde_peremption_et_levure(client):
+    item = client.post('/api/inventory', json={
+        'name': 'US-05', 'category': 'levure', 'quantity': 3, 'unit': 'sachet',
+        'expiry_date': '2027-05-01', 'yeast_type': 'sec', 'yeast_mfg_date': '2026-05-01',
+        'yeast_open_date': '2026-09-01', 'yeast_generation': 3,
+    }).get_json()
+    # Requête de l'appli Android (InventoryPost)
+    r = client.put(f'/api/inventory/{item["id"]}', json={
+        'name': 'US-05', 'category': 'levure', 'quantity': 2, 'unit': 'sachet',
+        'origin': None, 'ebc': None, 'alpha': None, 'min_stock': 1, 'price_per_unit': 3.5, 'notes': None,
+    })
+    assert r.status_code == 200
+    it = r.get_json()
+    assert (it['quantity'], it['min_stock'], it['expiry_date'], it['yeast_type'],
+            it['yeast_mfg_date'], it['yeast_open_date'], it['yeast_generation']) == \
+           (2, 1, '2027-05-01', 'sec', '2026-05-01', '2026-09-01', 3)
+
+
+def test_put_null_explicite_efface_la_peremption(client, malt_item):
+    client.put(f'/api/inventory/{malt_item["id"]}', json={**malt_item, 'expiry_date': '2027-01-01'})
+    r = client.put(f'/api/inventory/{malt_item["id"]}', json={**malt_item, 'expiry_date': None})
+    assert r.get_json()['expiry_date'] is None

@@ -170,19 +170,28 @@ def update_beer(beer_id):
     if err:
         return err
     with get_db() as conn:
-        initial_cols_sql = ','.join(f'initial_{size}' for size in BottleSize.SIZES_CL)
-        existing = conn.execute(
-            f'SELECT {initial_cols_sql}, keg_initial_liters, photo_file FROM beers WHERE id=?',
-            (beer_id,)
-        ).fetchone()
+        existing = conn.execute('SELECT * FROM beers WHERE id=?', (beer_id,)).fetchone()
         if not existing:
             return api_error('not_found', 404)
-        inits = {
-            size: (d[f'initial_{size}'] if f'initial_{size}' in d else existing[f'initial_{size}'])
-            for size in BottleSize.SIZES_CL
-        }
-        keg_init = d['keg_initial_liters'] if 'keg_initial_liters' in d else existing['keg_initial_liters']
-        photo_db, photo_file = _process_beer_photo(d.get('photo'), existing['photo_file'])
+        # Champ absent = valeur actuelle conservée (un champ vidé arrive à null).
+        # L'appli Android ne connaît pas toutes les colonnes (bouteilles 25/50 cl) :
+        # avant, son PUT les remettait à 0.
+        def keep(key):
+            return d[key] if key in d else existing[key]
+        inits = {size: keep(f'initial_{size}') for size in BottleSize.SIZES_CL}
+        keg_init = keep('keg_initial_liters')
+        if 'photo' in d:
+            photo_db, photo_file = _process_beer_photo(d.get('photo'), existing['photo_file'])
+        else:
+            photo_db, photo_file = existing['photo'], existing['photo_file']
+        if 'refermentation' in d:
+            referm = 1 if d.get('refermentation') else 0
+        else:
+            referm = existing['refermentation'] or 0
+        if 'refermentation_days' in d:
+            referm_days = int(d['refermentation_days']) if d.get('refermentation_days') else None
+        else:
+            referm_days = existing['refermentation_days']
         set_stock_sql   = ','.join(f'stock_{size}=?' for size in BottleSize.SIZES_CL)
         set_initial_sql = ','.join(f'initial_{size}=?' for size in BottleSize.SIZES_CL)
         conn.execute(
@@ -190,15 +199,14 @@ def update_beer(beer_id):
                {set_initial_sql},keg_liters=?,keg_initial_liters=?,origin=?,description=?,
                photo=?,photo_file=?,
                brew_date=?,bottling_date=?,refermentation=?,refermentation_days=? WHERE id=?''',
-            (d.get('name'), d.get('type'), d.get('abv'),
-             *[d.get(f'stock_{size}', 0) for size in BottleSize.SIZES_CL],
+            (keep('name'), keep('type'), keep('abv'),
+             *[keep(f'stock_{size}') or 0 for size in BottleSize.SIZES_CL],
              *inits.values(),
-             d.get('keg_liters'), keg_init,
-             d.get('origin'), d.get('description'),
+             keep('keg_liters'), keg_init,
+             keep('origin'), keep('description'),
              photo_db, photo_file,
-             d.get('brew_date'), d.get('bottling_date'),
-             1 if d.get('refermentation') else 0,
-             int(d['refermentation_days']) if d.get('refermentation_days') else None,
+             keep('brew_date'), keep('bottling_date'),
+             referm, referm_days,
              beer_id)
         )
         row = conn.execute(

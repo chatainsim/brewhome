@@ -81,6 +81,12 @@ def update_catalog_item(item_id):
         if not old:
             return api_error('not_found', 404)
 
+        # Champ absent = valeur actuelle conservée (un champ vidé arrive à null).
+        # L'appli Android n'envoie que nom, catégorie, sous-catégorie, EBC, GU et
+        # alpha : avant, son PUT effaçait le reste (levures, arôme, dosage…).
+        def keep(key):
+            return d[key] if key in d else old[key]
+
         # Record only fields that are present in the request AND have changed value
         changes = [
             {'field': f, 'old': old[f], 'new': d[f]}
@@ -100,11 +106,11 @@ def update_catalog_item(item_id):
                    attenuation_min=?, attenuation_max=?, alcohol_tolerance=?,
                    max_usage_pct=?, aroma_spec=?
                WHERE id=?''',
-            (d.get('name'), d.get('subcategory'), d.get('ebc'), d.get('gu'), d.get('alpha'),
-             d.get('yeast_type'), d.get('default_unit', 'g'),
-             d.get('temp_min'), d.get('temp_max'), d.get('dosage_per_liter'),
-             d.get('attenuation_min'), d.get('attenuation_max'), d.get('alcohol_tolerance'),
-             d.get('max_usage_pct'), d.get('aroma_spec'), item_id)
+            (keep('name'), keep('subcategory'), keep('ebc'), keep('gu'), keep('alpha'),
+             keep('yeast_type'), keep('default_unit') or 'g',
+             keep('temp_min'), keep('temp_max'), keep('dosage_per_liter'),
+             keep('attenuation_min'), keep('attenuation_max'), keep('alcohol_tolerance'),
+             keep('max_usage_pct'), keep('aroma_spec'), item_id)
         )
         row = conn.execute('SELECT * FROM ingredient_catalog WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
