@@ -122,6 +122,52 @@ def delete_inventory_item(item_id):
         return jsonify({'success': True})
 
 
+@bp.route('/api/inventory/recount', methods=['POST'])
+def recount_inventory():
+    """Inventaire de contrôle : quantités réellement comptées.
+
+    Corps : {"items": [{"id": 3, "quantity": 1.25}, ...]} (unité de l'article).
+    Seuls les articles dont la quantité change sont mis à jour, chacun journalisé
+    en « recount » avec l'écart, dans une seule transaction. Pas d'alerte de
+    stock bas : c'est une correction, pas une consommation.
+    """
+    body = request.json or {}
+    entries = body.get('items')
+    if not isinstance(entries, list):
+        return api_error('validation', 400, fields={'items': 'must be a list'})
+    wanted = {}
+    for e in entries:
+        item_id, qty = (e or {}).get('id'), (e or {}).get('quantity')
+        if not isinstance(item_id, int) or isinstance(item_id, bool):
+            return api_error('validation', 400, fields={'id': 'must be an integer'})
+        if not isinstance(qty, (int, float)) or isinstance(qty, bool) or qty < 0:
+            return api_error('validation', 400, fields={'quantity': 'must be a non-negative number'})
+        wanted[item_id] = float(qty)
+    changed = []
+    with get_db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        for item_id, new_qty in wanted.items():
+            row = conn.execute(
+                'SELECT quantity FROM inventory_items WHERE id=? AND deleted_at IS NULL', (item_id,)
+            ).fetchone()
+            if not row:
+                continue
+            old_qty = row['quantity'] or 0.0
+            if abs(new_qty - old_qty) < 1e-9:
+                continue
+            conn.execute(
+                'UPDATE inventory_items SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                (new_qty, item_id)
+            )
+            _log_inv(item_id, new_qty - old_qty, old_qty, new_qty, 'recount', conn=conn)
+            changed.append(item_id)
+        conn.execute('COMMIT')
+        rows = conn.execute(
+            'SELECT * FROM inventory_items WHERE deleted_at IS NULL ORDER BY COALESCE(sort_order, 9999) ASC, category, name'
+        ).fetchall()
+    return jsonify({'updated': len(changed), 'changed_ids': changed, 'items': [dict(r) for r in rows]})
+
+
 @bp.route('/api/inventory/<int:item_id>/restore', methods=['POST'])
 def restore_inventory_item(item_id):
     with get_db() as conn:

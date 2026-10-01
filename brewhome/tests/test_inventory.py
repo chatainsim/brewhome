@@ -317,3 +317,33 @@ def test_export_sans_la_corbeille(client, malt_item, hop_item):
     client.delete(f'/api/inventory/{malt_item["id"]}')
     names = [i['name'] for i in client.get('/api/export/inventory').get_json()]
     assert names == ['Cascade']
+
+
+# ── Inventaire de contrôle ───────────────────────────────────────────────────
+
+def test_recomptage_corrige_et_journalise(client, malt_item, hop_item):
+    r = client.post('/api/inventory/recount', json={'items': [
+        {'id': malt_item['id'], 'quantity': 0.75},      # 1 kg affiché, 750 g comptés
+        {'id': hop_item['id'], 'quantity': 100.0},      # identique : rien à faire
+    ]})
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data['updated'] == 1 and data['changed_ids'] == [malt_item['id']]
+    assert next(i for i in data['items'] if i['id'] == malt_item['id'])['quantity'] == 0.75
+    entries = client.get(f'/api/inventory/{malt_item["id"]}/history').get_json()['entries']
+    recounts = [e for e in entries if e['reason'] == 'recount']
+    assert len(recounts) == 1 and abs(recounts[0]['delta'] + 0.25) < 1e-9
+    hop_entries = client.get(f'/api/inventory/{hop_item["id"]}/history').get_json()['entries']
+    assert not [e for e in hop_entries if e['reason'] == 'recount']
+
+
+def test_recomptage_refuse_une_quantite_invalide(client, malt_item):
+    r = client.post('/api/inventory/recount', json={'items': [{'id': malt_item['id'], 'quantity': -1}]})
+    assert r.status_code == 400
+    assert next(i for i in client.get('/api/inventory').get_json() if i['id'] == malt_item['id'])['quantity'] == 1.0
+
+
+def test_recomptage_ignore_la_corbeille(client, malt_item):
+    client.delete(f'/api/inventory/{malt_item["id"]}')
+    r = client.post('/api/inventory/recount', json={'items': [{'id': malt_item['id'], 'quantity': 5}]})
+    assert r.get_json()['updated'] == 0

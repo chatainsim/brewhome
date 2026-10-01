@@ -6,6 +6,9 @@
     <h2 data-i18n="inv.page_title">Inventaire des matières premières</h2>
     <div class="actions">
       <button class="btn btn-ghost btn-sm" id="inv-arch-btn" onclick="toggleShowArchived('inv')"></button>
+      <button class="btn btn-ghost btn-sm" onclick="openInvRecount()" data-i18n-title="inv.recount_hint" title="Saisir les quantités réellement comptées">
+        <i class="fas fa-clipboard-check"></i> <span data-i18n="inv.recount_btn">Inventaire de contrôle</span>
+      </button>
       <button class="btn btn-primary" onclick="openInvModal()">
         <i class="fas fa-plus"></i> <span data-i18n="common.add">Ajouter</span>
       </button>

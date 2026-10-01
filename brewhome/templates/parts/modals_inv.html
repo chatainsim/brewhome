@@ -1,4 +1,24 @@
 
+<!-- Modal Inventaire de contrôle -->
+<div class="modal-overlay" id="inv-recount-modal" onclick="if(event.target===this)closeModal('inv-recount-modal')">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-head">
+      <h3><i class="fas fa-clipboard-check"></i> <span data-i18n="inv.recount_title">Inventaire de contrôle</span></h3>
+      <button class="modal-close" onclick="closeModal('inv-recount-modal')">✕</button>
+    </div>
+    <div class="modal-body" style="padding-top:8px">
+      <p style="font-size:.82rem;color:var(--muted);margin:0 0 10px" data-i18n="inv.recount_intro">Saisis la quantité réellement présente. Un champ laissé vide ne change rien.</p>
+      <div class="filter-tabs" id="inv-recount-filters" style="margin-bottom:8px"></div>
+      <div id="inv-recount-body" style="max-height:55vh;overflow-y:auto"></div>
+    </div>
+    <div class="modal-foot" style="align-items:center">
+      <span id="inv-recount-summary" style="font-size:.82rem;color:var(--muted);margin-right:auto"></span>
+      <button class="btn btn-ghost" onclick="closeModal('inv-recount-modal')" data-i18n="common.cancel">Annuler</button>
+      <button class="btn btn-primary" id="inv-recount-save" onclick="withBtn(this, saveInvRecount)"><i class="fas fa-check"></i> <span data-i18n="common.save">Enregistrer</span></button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Historique Inventaire -->
 <div class="modal-overlay" id="inv-history-modal" onclick="if(event.target===this)closeModal('inv-history-modal')">
   <div class="modal" style="max-width:560px">

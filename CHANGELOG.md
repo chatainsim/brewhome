@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-01] — 33 · version 0.1.30
+
+### Ajouté
+- **Inventaire de contrôle** : bouton dans l'Inventaire pour saisir les quantités réellement comptées, par catégorie. L'écart avec le stock affiché s'affiche en direct ; seuls les articles modifiés sont enregistrés, chacun noté « Inventaire de contrôle » dans l'historique des mouvements. Utile pour recaler un stock surestimé (voir la correction #18 de la 0.1.29). Route `POST /api/inventory/recount`.
+
+### Corrigé
+- **Historique des mouvements** : le motif « Dry hop » s'affichait sous son nom technique (`dryhop_deduction`).
+
+---
+
 ## [2026-10-01] — 32 · version 0.1.29
 
 ### Corrigé

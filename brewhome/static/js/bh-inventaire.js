@@ -2963,6 +2963,8 @@ async function openInvHistory(itemId) {
       if (r === 'manual_update')  return `<i class="fas fa-pen" style="color:var(--info)"></i> ${t('inv.hist_manual_update')}`;
       if (r === 'created')        return `<i class="fas fa-plus-circle" style="color:var(--success)"></i> ${t('inv.hist_created')}`;
       if (r === 'full_edit')      return `<i class="fas fa-floppy-disk" style="color:var(--muted)"></i> ${t('inv.hist_full_edit')}`;
+      if (r === 'dryhop_deduction') return `<i class="fas fa-leaf" style="color:var(--hop)"></i> ${t('inv.hist_dryhop_deduction')}`;
+      if (r === 'recount')        return `<i class="fas fa-clipboard-check" style="color:var(--info)"></i> ${t('inv.hist_recount')}`;
       return esc(r || '');
     };
     body.innerHTML = `
@@ -3067,3 +3069,106 @@ async function applyInvSelectionStock() {
   toast(t('inv.bulk_stock_applied').replace('${n}', ids.length), 'success');
 }
 
+
+
+// ── Inventaire de contrôle ────────────────────────────────────────────────────
+// Saisie des quantités réellement comptées, article par article : l'écart avec
+// le stock affiché est montré, puis enregistré comme « correction d'inventaire ».
+let _invRecount = {};          // id -> quantité saisie (texte), conservée en changeant de filtre
+let _invRecountCat = 'all';
+
+function openInvRecount() {
+  _invRecount = {};
+  _invRecountCat = 'all';
+  _renderInvRecount();
+  openModal('inv-recount-modal');
+}
+
+function _invRecountItems() {
+  return (S.inventory || []).filter(i => !i.archived);
+}
+
+function _fmtInvQty(q) {
+  return (+q || 0).toLocaleString(_lang || 'fr', { maximumFractionDigits: 3 });
+}
+
+function _invRecountDiff(item) {
+  const raw = _invRecount[item.id];
+  if (raw === undefined || String(raw).trim() === '') return null;
+  const v = parseFloat(String(raw).replace(',', '.'));
+  if (isNaN(v) || v < 0) return NaN;
+  return v - (item.quantity || 0);
+}
+
+function _renderInvRecount() {
+  const items = _invRecountItems();
+  const cats  = ['all', ...['malt', 'houblon', 'levure', 'autre'].filter(c => items.some(i => i.category === c))];
+  document.getElementById('inv-recount-filters').innerHTML = cats.map(c =>
+    `<button class="filter-tab ${c === _invRecountCat ? 'active' : ''}" onclick="_invRecountCat='${c}';_renderInvRecount()">${c === 'all' ? t('cat.all') : catLabel(c)}</button>`
+  ).join('');
+  const shown = items.filter(i => _invRecountCat === 'all' || i.category === _invRecountCat);
+  const body  = document.getElementById('inv-recount-body');
+  if (!shown.length) {
+    body.innerHTML = `<p style="text-align:center;color:var(--muted);padding:20px">${t('inv.recount_empty')}</p>`;
+  } else {
+    body.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.85rem">
+      <thead><tr style="position:sticky;top:0;background:var(--card);z-index:1">
+        <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">${t('inv.recount_col_item')}</th>
+        <th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">${t('inv.recount_col_expected')}</th>
+        <th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">${t('inv.recount_col_counted')}</th>
+        <th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">${t('inv.recount_col_diff')}</th>
+      </tr></thead><tbody>${shown.map(i => `
+        <tr style="border-top:1px solid var(--border)">
+          <td style="padding:6px 8px"><strong>${esc(i.name)}</strong>
+            <div><span class="badge badge-${i.category}" style="font-size:.65rem">${catLabel(i.category)}</span></div></td>
+          <td style="padding:6px 8px;text-align:right;white-space:nowrap">${_fmtInvQty(i.quantity)} ${esc(i.unit)}</td>
+          <td style="padding:6px 8px;text-align:right;white-space:nowrap">
+            <input type="number" min="0" step="0.001" inputmode="decimal" data-recount-id="${i.id}"
+              value="${esc(_invRecount[i.id] ?? '')}" placeholder="${_fmtInvQty(i.quantity)}"
+              oninput="_invRecount[${i.id}]=this.value;_updInvRecountRow(${i.id})"
+              style="width:90px;padding:4px 6px;text-align:right"> <span style="color:var(--muted);font-size:.78rem">${esc(i.unit)}</span></td>
+          <td style="padding:6px 8px;text-align:right;white-space:nowrap" id="inv-recount-diff-${i.id}"></td>
+        </tr>`).join('')}</tbody></table>`;
+    shown.forEach(i => _updInvRecountRow(i.id));
+  }
+  _updInvRecountSummary();
+}
+
+function _updInvRecountRow(id) {
+  const item = _invRecountItems().find(i => i.id === id);
+  const cell = document.getElementById(`inv-recount-diff-${id}`);
+  if (!item || !cell) return;
+  const d = _invRecountDiff(item);
+  if (d === null)       cell.innerHTML = '';
+  else if (isNaN(d))    cell.innerHTML = `<span style="color:var(--danger)">?</span>`;
+  else if (Math.abs(d) < 1e-9) cell.innerHTML = `<span style="color:var(--success)"><i class="fas fa-check"></i></span>`;
+  else cell.innerHTML = `<span style="font-weight:700;color:${d < 0 ? 'var(--danger)' : 'var(--success)'}">${d > 0 ? '+' : '−'}${_fmtInvQty(Math.abs(d))} ${esc(item.unit)}</span>`;
+  _updInvRecountSummary();
+}
+
+function _updInvRecountSummary() {
+  const items = _invRecountItems();
+  const diffs = items.map(_invRecountDiff);
+  const invalid = diffs.some(d => d !== null && isNaN(d));
+  const n = diffs.filter(d => d !== null && !isNaN(d) && Math.abs(d) >= 1e-9).length;
+  const counted = diffs.filter(d => d !== null && !isNaN(d)).length;
+  document.getElementById('inv-recount-summary').textContent = invalid
+    ? t('inv.recount_invalid')
+    : t('inv.recount_summary').replace('${counted}', counted).replace('${n}', n);
+  document.getElementById('inv-recount-save').disabled = invalid || !n;
+}
+
+async function saveInvRecount() {
+  const items = _invRecountItems()
+    .filter(i => { const d = _invRecountDiff(i); return d !== null && !isNaN(d) && Math.abs(d) >= 1e-9; })
+    .map(i => ({ id: i.id, quantity: parseFloat(String(_invRecount[i.id]).replace(',', '.')) }));
+  if (!items.length) return;
+  try {
+    const r = await api('POST', '/api/inventory/recount', { items });
+    S.inventory = r.items;
+    closeModal('inv-recount-modal');
+    renderInventaire();
+    syncNavBadges();
+    toast(t('inv.recount_done').replace('${n}', r.updated), 'success');
+  } catch(e) { toast(t('inv.err_save'), 'error'); }
+}
