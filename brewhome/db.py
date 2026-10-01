@@ -715,6 +715,10 @@ _MIGRATIONS = [
     #        importé comptait dans l'amertume. Alignement sur son vocabulaire.
     "UPDATE recipe_ingredients SET hop_type='ebullition' WHERE category='houblon' AND hop_type IN ('boil','first_wort')",
     "UPDATE recipe_ingredients SET hop_type='dryhop' WHERE category='houblon' AND hop_type='dry_hop'",
+    # 143 — archivage des brouillons (masqués de la liste, de l'appli et du
+    #        calendrier, conservés et restaurables)
+    "ALTER TABLE draft_recipes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE draft_recipes ADD COLUMN archived_at TIMESTAMP",
     # ── Ajouter les nouvelles migrations ci-dessous ───────────────────────────
 ]
 

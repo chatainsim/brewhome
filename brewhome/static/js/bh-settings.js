@@ -727,6 +727,7 @@ async function importDrafts(input) {
     const r = await api('POST', '/api/import/drafts', items);
     toast(t('settings.import.imported_drafts').replace('${n}', r.imported), 'success');
     S.drafts = await api('GET', '/api/drafts');
+    S.draftsArchived = null;   // rechargés à la prochaine ouverture du filtre Archivés
     renderBrouillons();
   } catch(e) { toast(t('settings.import.err_import_drafts'), 'error'); }
   input.value = '';
@@ -914,7 +915,7 @@ async function restoreFromGit() {
     if (results.cave       && !results.cave.error)       reloads.push(api('GET', '/api/beers').then(d => { S.beers = d; renderCave(); }));
     if (results.brassins   && !results.brassins.error)   reloads.push(api('GET', '/api/brews').then(d => { S.brews = d; renderBrassins(); }));
     if (results.catalogue  && !results.catalogue.error)  reloads.push(api('GET', '/api/catalog').then(d => { S.catalog = d; }));
-    if (results.brouillons && !results.brouillons.error) reloads.push(api('GET', '/api/drafts').then(d => { S.drafts = d; renderBrouillons(); }));
+    if (results.brouillons && !results.brouillons.error) reloads.push(api('GET', '/api/drafts').then(d => { S.drafts = d; S.draftsArchived = null; renderBrouillons(); }));
     if (results.calendrier && !results.calendrier.error) reloads.push(api('GET', '/api/custom_events').then(d => { S.customEvents = d; renderCalendar(); }));
     if (results.densimetres && !results.densimetres.error) reloads.push(api('GET', '/api/spindles').then(d => { S.spindles = d; renderSpindles(); }));
     await Promise.allSettled(reloads);

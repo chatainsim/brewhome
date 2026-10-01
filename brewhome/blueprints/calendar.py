@@ -418,16 +418,42 @@ def restore_draft_images():
 # Drafts
 # ---------------------------------------------------------------------------
 
+# Ordre des brouillons : position choisie (glisser-déposer), puis les plus
+# récemment créés d'abord. Surtout pas la date de modification : elle change à
+# chaque enregistrement, et les brouillons jamais déplacés (même position 0)
+# changeaient de place dès qu'on passait de l'un à l'autre.
+_DRAFT_ORDER = 'ORDER BY sort_order ASC, id DESC'
+
+
 @bp.route('/api/drafts', methods=['GET'])
 def get_drafts():
+    """Brouillons actifs. ?archived=1 : les archivés seulement ; ?archived=all : tous."""
+    which = request.args.get('archived', '0')
+    where = {'1': 'WHERE archived = 1', 'all': ''}.get(which, 'WHERE archived = 0')
     with get_db() as conn:
         rows = conn.execute(
-            '''SELECT id, title, style, volume, ingredients, notes, color,
+            f'''SELECT id, title, style, volume, ingredients, notes, color,
                       target_date, event_label, sort_order, status, created_at, updated_at,
-                      images_files
-               FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC'''
+                      images_files, archived, archived_at
+               FROM draft_recipes {where} {_DRAFT_ORDER}'''
         ).fetchall()
     return jsonify([_draft_row_to_dict(r) for r in rows])
+
+
+@bp.route('/api/drafts/<int:draft_id>/archive', methods=['PUT'])
+def archive_draft(draft_id):
+    """Archive ({"archived": true}) ou restaure un brouillon, sans toucher à son
+    contenu ni à sa date de modification."""
+    archived = bool((request.json or {}).get('archived', True))
+    with get_db() as conn:
+        cur = conn.execute(
+            'UPDATE draft_recipes SET archived=?, archived_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=?',
+            (1 if archived else 0, 1 if archived else 0, draft_id),
+        )
+        if cur.rowcount == 0:
+            return api_error('not_found', 404)
+        row = conn.execute('SELECT * FROM draft_recipes WHERE id=?', (draft_id,)).fetchone()
+    return jsonify(_draft_row_to_dict(row))
 
 
 @bp.route('/api/drafts/<int:draft_id>', methods=['GET'])
@@ -630,6 +656,14 @@ Règles :
 # Drafts export / import
 # ---------------------------------------------------------------------------
 
+def _archived_flag(d):
+    """État archivé d'un brouillon importé : 1/0, ou None s'il n'est pas indiqué
+    (fichier antérieur à l'archivage) pour garder l'état actuel."""
+    if 'archived' not in d or d.get('archived') is None:
+        return None
+    return 1 if d.get('archived') in (1, True, '1', 'true') else 0
+
+
 def _draft_row_to_export_dict(row):
     """Convert a draft row to export dict, reading image files back to base64."""
     import base64
@@ -656,7 +690,7 @@ def _draft_row_to_export_dict(row):
 @bp.route('/api/export/drafts')
 def export_drafts():
     with get_db() as conn:
-        rows = conn.execute('SELECT * FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC').fetchall()
+        rows = conn.execute(f'SELECT * FROM draft_recipes {_DRAFT_ORDER}').fetchall()
     return jsonify([_draft_row_to_export_dict(r) for r in rows])
 
 
@@ -691,21 +725,24 @@ def import_drafts():
                 if existing:
                     conn.execute(
                         '''UPDATE draft_recipes SET style=?,volume=?,ingredients=?,notes=?,color=?,
-                           target_date=?,event_label=?,status=?,images_files=? WHERE id=?''',
+                           target_date=?,event_label=?,status=?,images_files=?,
+                           archived=COALESCE(?, archived) WHERE id=?''',
                         (d.get('style'), d.get('volume'), d.get('ingredients'), d.get('notes'),
                          d.get('color', '#ff9500'), d.get('target_date'), d.get('event_label'),
-                         d.get('status', 'idea'), imgs_files_json, existing['id'])
+                         d.get('status', 'idea'), imgs_files_json,
+                         _archived_flag(d), existing['id'])
                     )
                 else:
                     conn.execute(
                         '''INSERT INTO draft_recipes
                            (title, style, volume, ingredients, notes, color,
-                            target_date, event_label, sort_order, status, images_files)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                            target_date, event_label, sort_order, status, images_files, archived)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
                         (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
                          d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
                          d.get('target_date'), d.get('event_label'),
-                         d.get('sort_order', 0), d.get('status', 'idea'), imgs_files_json)
+                         d.get('sort_order', 0), d.get('status', 'idea'), imgs_files_json,
+                         _archived_flag(d) or 0)
                     )
                 imported += 1
             except Exception as e:
@@ -1317,21 +1354,23 @@ def _import_section_direct(section, items, mode='merge'):
                     if existing:
                         conn.execute(
                             '''UPDATE draft_recipes SET style=?,volume=?,ingredients=?,notes=?,color=?,
-                               target_date=?,event_label=?,status=?,images_files=? WHERE id=?''',
+                               target_date=?,event_label=?,status=?,images_files=?,
+                               archived=COALESCE(?, archived) WHERE id=?''',
                             (d.get('style'), d.get('volume'), d.get('ingredients'), d.get('notes'),
                              d.get('color', '#ff9500'), d.get('target_date'), d.get('event_label'),
-                             d.get('status', 'idea'), imgs_files_json, existing['id'])
+                             d.get('status', 'idea'), imgs_files_json,
+                             _archived_flag(d), existing['id'])
                         )
                     else:
                         conn.execute(
                             '''INSERT INTO draft_recipes
                                (title, style, volume, ingredients, notes, color,
-                                target_date, event_label, sort_order, status, images_files)
-                               VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                                target_date, event_label, sort_order, status, images_files, archived)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
                             (d.get('title', 'Brouillon'), d.get('style'), d.get('volume'),
                              d.get('ingredients'), d.get('notes'), d.get('color', '#ff9500'),
                              d.get('target_date'), d.get('event_label'), d.get('sort_order', 0),
-                             d.get('status', 'idea'), imgs_files_json)
+                             d.get('status', 'idea'), imgs_files_json, _archived_flag(d) or 0)
                         )
                     imported += 1
                 except Exception as e:

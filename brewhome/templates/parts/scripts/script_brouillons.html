@@ -15,6 +15,13 @@ let _draftIngSugItems      = [];   // cache for suggest clicks
 let _draftIngRowId         = 0;
 let _pendingDraftId        = null; // draft_id à lier à la prochaine recette créée
 let _draftMode             = 'view';
+let _draftSavedPayload     = null; // dernier contenu enregistré (JSON) : pas d'enregistrement inutile
+let _draftArchivedLoading  = false;
+
+// Brouillon courant, qu'il soit actif (S.drafts) ou archivé (S.draftsArchived)
+function _draftById(id) {
+  return S.drafts.find(x => x.id === id) || (S.draftsArchived || []).find(x => x.id === id) || null;
+}
 
 // ── Mode vue / édition ────────────────────────────────────────────────────────
 function setDraftMode(mode) {
@@ -42,7 +49,8 @@ function setDraftMode(mode) {
           ${localStorage.getItem('draft-ai-use-stock')==='true'?'checked':''}>
         ${t('draft.ai_use_stock')}
       </label>
-      <button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--danger)"
+      ${_draftArchiveBtn()}
+      <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
         onclick="deleteDraft(_currentDraftId)"><i class="fas fa-trash"></i> ${t('common.delete')}</button>`;
   } else {
     formPanel.style.display = '';
@@ -60,14 +68,23 @@ function setDraftMode(mode) {
           ${localStorage.getItem('draft-ai-use-stock')==='true'?'checked':''}>
         ${t('draft.ai_use_stock')}
       </label>
-      <button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--danger)"
+      ${_draftArchiveBtn()}
+      <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
         onclick="deleteDraft(_currentDraftId)"><i class="fas fa-trash"></i> ${t('common.delete')}</button>`;
   }
 }
 
+function _draftArchiveBtn() {
+  const archived = !!_draftById(_currentDraftId)?.archived;
+  return `<button class="btn btn-ghost btn-sm" style="margin-left:auto"
+    onclick="withBtn(this, () => archiveDraft(_currentDraftId, ${!archived}))"
+    title="${t(archived ? 'draft.unarchive_hint' : 'draft.archive_hint')}">
+    <i class="fas ${archived ? 'fa-box-open' : 'fa-box-archive'}"></i> ${t(archived ? 'draft.unarchive' : 'draft.archive')}</button>`;
+}
+
 function renderDraftView() {
   const panel = document.getElementById('draft-view-panel');
-  const d = S.drafts.find(x => x.id === _currentDraftId);
+  const d = _draftById(_currentDraftId);
   if (!panel || !d) return;
 
   const color = d.color || '#ff9500';
@@ -188,16 +205,19 @@ function _draftStatusLabel(s) {
 function _renderDraftStatusFilter() {
   const bar = document.getElementById('draft-status-filter');
   if (!bar) return;
-  const all = ['all', ..._DRAFT_STATUSES];
+  const all = ['all', ..._DRAFT_STATUSES, 'archived'];
+  const ICON = { ..._DRAFT_STATUS_ICON, archived: 'fa-box-archive' };
   bar.innerHTML = all.map(s => {
     const active = s === _draftStatusFilter;
-    const label  = s === 'all' ? t('draft.filter_all') : _draftStatusLabel(s);
-    const color  = s === 'all' ? 'var(--text)' : _DRAFT_STATUS_COLOR[s];
+    const label  = s === 'all' ? t('draft.filter_all')
+                 : s === 'archived' ? t('draft.filter_archived') + (S.draftsArchived ? ` (${S.draftsArchived.length})` : '')
+                 : _draftStatusLabel(s);
+    const color  = s === 'all' ? 'var(--text)' : s === 'archived' ? 'var(--muted)' : _DRAFT_STATUS_COLOR[s];
     return `<button onclick="_draftStatusFilter='${s}';_renderDraftStatusFilter();renderBrouillons()"
       style="font-size:.72rem;padding:3px 9px;border-radius:20px;border:1px solid ${active ? color : 'var(--border)'};
         background:${active ? `color-mix(in srgb,${color} 15%,transparent)` : 'transparent'};
         color:${active ? color : 'var(--muted)'};cursor:pointer;white-space:nowrap;transition:.15s">
-      ${s !== 'all' ? `<i class="fas ${_DRAFT_STATUS_ICON[s]}" style="font-size:.65rem"></i> ` : ''}${esc(label)}
+      ${s !== 'all' ? `<i class="fas ${ICON[s]}" style="font-size:.65rem"></i> ` : ''}${esc(label)}
     </button>`;
   }).join('');
 }
@@ -208,17 +228,30 @@ function renderBrouillons() {
   const empty = document.getElementById('draft-list-empty');
   if (!list) return;
 
+  // Archivés : chargés à la première ouverture du filtre (absents de la liste normale)
+  const archivedView = _draftStatusFilter === 'archived';
+  if (archivedView && !S.draftsArchived) {
+    if (!_draftArchivedLoading) {
+      _draftArchivedLoading = true;
+      api('GET', '/api/drafts?archived=1')
+        .then(d => { S.draftsArchived = d; })
+        .catch(() => { S.draftsArchived = []; toast(t('common.error'), 'error'); })
+        .finally(() => { _draftArchivedLoading = false; renderBrouillons(); });
+    }
+    return;
+  }
   _renderDraftStatusFilter();
   const q = (document.getElementById('draft-search')?.value || '').toLowerCase();
-  const total = S.drafts.length;
-  let shown = S.drafts.filter(d => {
-    if (_draftStatusFilter !== 'all' && (d.status || 'idea') !== _draftStatusFilter) return false;
+  const source = archivedView ? S.draftsArchived : S.drafts;
+  const total = source.length;
+  let shown = source.filter(d => {
+    if (!archivedView && _draftStatusFilter !== 'all' && (d.status || 'idea') !== _draftStatusFilter) return false;
     if (q && !(d.title || '').toLowerCase().includes(q) && !(d.style || '').toLowerCase().includes(q)) return false;
     return true;
   });
 
   _draftSort = document.getElementById('draft-sort')?.value || _draftSort;
-  const isManual = _draftSort === 'manual';
+  const isManual = _draftSort === 'manual' && !archivedView;  // pas de glisser-déposer dans les archivés
   if (_draftSort === 'recent') {
     shown.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
   } else if (_draftSort === 'alpha') {
@@ -242,6 +275,8 @@ function renderBrouillons() {
     empty.style.display = 'block';
     empty.innerHTML = q
       ? `<i class="fas fa-magnifying-glass" style="font-size:2rem;display:block;margin-bottom:8px;opacity:.4"></i><p style="margin:0">${t('common.no_results')}</p>`
+      : archivedView
+      ? `<i class="fas fa-box-archive" style="font-size:2rem;display:block;margin-bottom:8px;opacity:.4"></i><p style="margin:0">${t('draft.archived_empty')}</p>`
       : `<i class="fas fa-book-open" style="font-size:2rem;display:block;margin-bottom:8px;opacity:.4"></i><p data-i18n="draft.empty" style="margin:0">${t('draft.empty')}</p>`;
   } else {
     empty.style.display = 'none';
@@ -289,7 +324,7 @@ function renderBrouillons() {
       }
 
       const sub = [d.style ? `<em>${esc(d.style)}</em>` : '', ingCount ? `${ingCount} ing.` : '', !d.target_date ? modDate : ''].filter(Boolean).join(' · ');
-      return `<div class="card draft-list-item" draggable="true" data-id="${d.id}"
+      return `<div class="card draft-list-item" draggable="${isManual}" data-id="${d.id}"
                 style="padding:10px 14px;cursor:pointer;border:2px solid transparent;${active}"
                 onclick="openDraft(${d.id})">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
@@ -314,6 +349,7 @@ function renderBrouillons() {
   // ── Drag & drop reorder ──────────────────────────────────────────────────
   let _draftDragSrcIdx = null;
   document.querySelectorAll('.draft-list-item').forEach((item, idx) => {
+    if (!isManual) return;
     item.addEventListener('dragstart', e => {
       _draftDragSrcIdx = idx;
       item.classList.add('dragging');
@@ -347,7 +383,7 @@ function renderBrouillons() {
     });
   });
 
-  if (_currentDraftId && S.drafts.find(d => d.id === _currentDraftId)) {
+  if (_currentDraftId && _draftById(_currentDraftId)) {
     _showEditor(true);
   } else {
     _showEditor(false);
@@ -381,7 +417,7 @@ async function openDraft(id) {
     await saveDraft();
   }
   _currentDraftId = id;
-  const d = S.drafts.find(x => x.id === id);
+  const d = _draftById(id);
   if (!d) return;
   document.getElementById('draft-title').value  = d.title  || '';
   document.getElementById('draft-style').value  = d.style  || '';
@@ -405,6 +441,9 @@ async function openDraft(id) {
   try { _draftIngredients = JSON.parse(d.ingredients || '[]'); } catch(e) { _draftIngredients = []; }
   _draftIngredients.forEach((ing, i) => { ing._rid = ing._rid || ++_draftIngRowId; });
   renderDraftIngRows();
+  // Contenu de référence : passer à un autre brouillon sans rien modifier
+  // n'enregistre plus (l'enregistrement changeait la date de modification).
+  _draftSavedPayload = JSON.stringify(_draftPayload());
   _showEditor(true);
   setDraftMode('view');
   renderBrouillons(); // highlight selected card
@@ -468,9 +507,8 @@ function scheduleDraftSave() {
   _draftSaveTimer = setTimeout(saveDraft, 1000);
 }
 
-async function saveDraft() {
-  if (!_currentDraftId) return;
-  const payload = {
+function _draftPayload() {
+  return {
     title:       document.getElementById('draft-title').value.trim() || t('draft.new'),
     style:       document.getElementById('draft-style').value.trim() || null,
     volume:      parseFloat(document.getElementById('draft-volume').value) || null,
@@ -484,11 +522,27 @@ async function saveDraft() {
     images:      JSON.stringify(_draftImages),
     status:      document.getElementById('draft-status').value || 'idea',
   };
+}
+
+async function saveDraft() {
+  if (!_currentDraftId) return;
+  const payload = _draftPayload();
+  const json = JSON.stringify(payload);
+  if (json === _draftSavedPayload) {
+    // Rien de modifié : pas d'écriture (date de modification et ordre intacts)
+    const el = document.getElementById('draft-save-status');
+    if (el && el.textContent === '…') el.textContent = '';
+    return;
+  }
+  const savedId = _currentDraftId;
   try {
-    const updated = await api('PUT', `/api/drafts/${_currentDraftId}`, payload);
-    const idx = S.drafts.findIndex(d => d.id === _currentDraftId);
-    if (idx !== -1) S.drafts[idx] = updated;
-    S.drafts.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    const updated = await api('PUT', `/api/drafts/${savedId}`, payload);
+    // Mise à jour en place, sans re-trier : la place dans la liste ne bouge pas
+    for (const list of [S.drafts, S.draftsArchived || []]) {
+      const idx = list.findIndex(d => d.id === savedId);
+      if (idx !== -1) list[idx] = updated;
+    }
+    if (_currentDraftId !== savedId) { renderBrouillons(); return; }
     // Sync _draftImages with server URLs (replaces any base64 blobs with /api/draft-images/ URLs)
     try {
       const serverImgs = JSON.parse(updated.images || '[]');
@@ -497,6 +551,7 @@ async function saveDraft() {
         renderDraftImageGallery();
       }
     } catch(_) {}
+    _draftSavedPayload = JSON.stringify(_draftPayload());
     const el = document.getElementById('draft-save-status');
     if (el) el.textContent = t('draft.auto_saved') + ' ✓';
     setTimeout(() => { const e = document.getElementById('draft-save-status'); if (e) e.textContent = ''; }, 2000);
@@ -514,10 +569,40 @@ async function deleteDraft(id) {
   try {
     await api('DELETE', `/api/drafts/${id}`);
     S.drafts = S.drafts.filter(d => d.id !== id);
+    if (S.draftsArchived) S.draftsArchived = S.draftsArchived.filter(d => d.id !== id);
     if (_currentDraftId === id) { _currentDraftId = null; _currentDraftTargetDate = null; _currentDraftEventLabel = null; _draftIngredients = []; _showEditor(false); }
     renderBrouillons();
     toast(t('draft.deleted'), 'success');
   } catch(e) { toast(t('draft.err_delete'), 'error'); }
+}
+
+// Archiver : le brouillon quitte la liste (et le calendrier, l'appli Android)
+// sans être supprimé ; il reste consultable et restaurable via le filtre Archivés.
+async function archiveDraft(id, archived) {
+  if (!id) return;
+  if (archived && _currentDraftId === id) {
+    clearTimeout(_draftSaveTimer);
+    await saveDraft();
+  }
+  try {
+    const updated = await api('PUT', `/api/drafts/${id}/archive`, { archived });
+    S.drafts = S.drafts.filter(d => d.id !== id);
+    if (S.draftsArchived) S.draftsArchived = S.draftsArchived.filter(d => d.id !== id);
+    if (archived) {
+      if (S.draftsArchived) S.draftsArchived.unshift(updated);
+    } else {
+      // Retour à sa place d'origine (même ordre que le serveur)
+      S.drafts.push(updated);
+      S.drafts.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || b.id - a.id);
+    }
+    if (_currentDraftId === id) {
+      _currentDraftId = null; _currentDraftTargetDate = null; _currentDraftEventLabel = null;
+      _draftIngredients = []; _draftSavedPayload = null; _showEditor(false);
+    }
+    renderBrouillons();
+    renderCalendar();   // la date cible d'un brouillon archivé disparaît du calendrier
+    toast(t(archived ? 'draft.archived_toast' : 'draft.unarchived_toast'), 'success');
+  } catch(e) { toast(t('common.error'), 'error'); }
 }
 
 // ── Événement cible ───────────────────────────────────────────────────────────

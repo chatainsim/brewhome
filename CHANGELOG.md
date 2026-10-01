@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-01] — 30 · version 0.1.27
+
+### Ajouté
+- **Brouillons — archivage** : bouton « Archiver » dans un brouillon (lecture et édition). Un brouillon archivé quitte la liste, le calendrier et l'application Android sans être supprimé ; le filtre « Archivés » les affiche (avec leur nombre), et « Désarchiver » remet le brouillon à sa place. L'état archivé suit l'export/import et la sauvegarde GitHub ; un fichier exporté avant cette version garde l'état actuel. Nouvelle route `PUT /api/drafts/<id>/archive`, et `GET /api/drafts?archived=1` (ou `all`).
+
+### Corrigé
+- **Brouillons — la liste changeait d'ordre** en passant d'un brouillon à l'autre, surtout en haut de liste et même en « Ordre manuel » : le brouillon quitté était enregistré même sans modification (nouvelle date de modification) puis la liste était re-triée par date. Désormais un brouillon n'est enregistré que s'il a réellement changé, la liste n'est plus re-triée après un enregistrement, et deux brouillons à la même position sont rangés par date de création plutôt que de modification (#17).
+
+---
+
 ## [2026-09-28] — 29 · version 0.1.26
 
 ### Corrigé

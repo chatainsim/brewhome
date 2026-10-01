@@ -1245,7 +1245,7 @@ def _github_data_backup():
             catalog = [dict(r) for r in conn.execute(
                 'SELECT * FROM ingredient_catalog ORDER BY category, name').fetchall()]
             drafts = [dict(r) for r in conn.execute(
-                'SELECT * FROM draft_recipes ORDER BY sort_order ASC, updated_at DESC').fetchall()]
+                'SELECT * FROM draft_recipes ORDER BY sort_order ASC, id DESC').fetchall()]
             calendar = [dict(r) for r in conn.execute(
                 'SELECT * FROM custom_calendar_events ORDER BY event_date').fetchall()]
             settings_rows = conn.execute('SELECT key, value FROM app_settings').fetchall()

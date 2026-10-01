@@ -648,11 +648,12 @@ Champs : `title`, `emoji`, `event_date` (YYYY-MM-DD), `color`, `notes`, `brew_re
 
 | Méthode | Route | Description |
 |---------|-------|-------------|
-| GET | `/api/drafts` | Liste tous les brouillons (sans image base64) |
+| GET | `/api/drafts` | Liste les brouillons actifs (sans image base64), ordre : position manuelle puis plus récemment créés ; `?archived=1` : archivés seulement, `?archived=all` : tous |
 | GET | `/api/drafts/<id>` | Détail complet d'un brouillon (avec image) |
 | POST | `/api/drafts` | Crée un brouillon |
 | PUT | `/api/drafts/<id>` | Met à jour un brouillon |
 | PUT | `/api/drafts/reorder` | Réordonne les brouillons |
+| PUT | `/api/drafts/<id>/archive` | Archive (`{"archived": true}`) ou désarchive (`false`) un brouillon, sans changer sa date de modification |
 | DELETE | `/api/drafts/<id>` | Supprime un brouillon |
 
 ### POST / PUT `/api/drafts`
