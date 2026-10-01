@@ -1381,6 +1381,28 @@ function saveWaterSettings() {
 const _dirtyModals = new Set();
 
 // Track any input/change inside a modal overlay (capture phase)
+// Champs de saisie dans une ligne glissable (ingrédients d'une recette,
+// inventaire, cartes réordonnables…) : tant qu'on appuie dans le champ, la
+// ligne n'est plus glissable. Sous Firefox, un champ dans un élément
+// draggable ne peut pas être sélectionné à la souris : seules les flèches
+// restaient utilisables. La poignée de déplacement n'est pas concernée.
+function _releaseDraggableForField(e) {
+  const field = e.target.closest?.('input, textarea, select, [contenteditable="true"]');
+  if (!field) return;
+  const row = field.closest('[draggable="true"]');
+  if (!row) return;
+  row.setAttribute('draggable', 'false');
+  const restore = () => {
+    row.setAttribute('draggable', 'true');
+    document.removeEventListener('mouseup', restore, true);
+    document.removeEventListener('touchend', restore, true);
+  };
+  document.addEventListener('mouseup', restore, true);
+  document.addEventListener('touchend', restore, true);
+}
+document.addEventListener('mousedown', _releaseDraggableForField, true);
+document.addEventListener('touchstart', _releaseDraggableForField, { capture: true, passive: true });
+
 document.addEventListener('input', e => {
   if (e.target.matches('[data-no-dirty]')) return;
   const ov = e.target.closest('.modal-overlay');

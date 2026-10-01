@@ -4,6 +4,13 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-01] — 35 · version 0.1.32
+
+### Corrigé
+- **Firefox — champs dans les listes réordonnables** : dans l'éditeur de recette, la quantité d'un ingrédient ne pouvait pas être sélectionnée à la souris (la frappe s'ajoutait au lieu de remplacer), seules les flèches du champ fonctionnaient. Firefox bloque la sélection dans un champ placé dans un élément glissable ; la ligne n'est plus glissable pendant qu'on appuie dans un de ses champs. Même correction pour les autres listes réordonnables (inventaire…). La poignée réordonne toujours (#26).
+
+---
+
 ## [2026-10-01] — 34 · version 0.1.31
 
 ### Corrigé
