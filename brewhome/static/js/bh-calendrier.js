@@ -243,7 +243,7 @@ function renderAgendaView() {
     html += `<div class="agenda-row">
       <div class="agenda-date">${ds}</div>
       <div class="agenda-dot" style="background:${dot}"></div>
-      <div class="agenda-label">${ico} ${ev.label}</div>
+      <div class="agenda-label">${esc(ico)} ${esc(ev.label)}</div>
       ${edit}
     </div>`;
   });

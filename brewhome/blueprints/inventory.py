@@ -113,7 +113,9 @@ def reorder_inventory():
 def delete_inventory_item(item_id):
     with get_db() as conn:
         cur = conn.execute(
-            'UPDATE inventory_items SET archived=1, deleted_at=CURRENT_TIMESTAMP, quantity=0 WHERE id=? AND deleted_at IS NULL',
+            # La quantité est conservée : une restauration depuis la corbeille rend
+            # l'article tel qu'il était (listes et totaux filtrent déjà la corbeille).
+            'UPDATE inventory_items SET archived=1, deleted_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL',
             (item_id,))
         if cur.rowcount == 0:
             return api_error('not_found', 404)

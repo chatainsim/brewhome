@@ -75,3 +75,21 @@ def test_import_ancien_fichier_garde_l_etat_actuel(client):
     client.post('/api/import/drafts', json=[{'title': 'A', 'notes': 'importé'}, {'title': 'N'}])
     assert _titles(client, '?archived=1') == ['A']
     assert _titles(client) == ['N']
+
+
+def test_image_etrangere_jamais_rattachee(client, app):
+    """#22 : seule une image de brouillon générée par le serveur peut être rattachée."""
+    import os
+    import db as db_module
+    os.makedirs(db_module.PHOTOS_DIR, exist_ok=True)
+    foreign = os.path.join(db_module.PHOTOS_DIR, 'beer_photo_test.jpg')
+    open(foreign, 'wb').write(b'x')
+    try:
+        a = _new(client, 'A')
+        r = client.put(f"/api/drafts/{a['id']}", json={
+            'title': 'A', 'images': '["/api/draft-images/beer_photo_test.jpg"]'})
+        assert r.get_json()['images'] == '[]'
+        client.delete(f"/api/drafts/{a['id']}")
+        assert os.path.exists(foreign)
+    finally:
+        os.remove(foreign)

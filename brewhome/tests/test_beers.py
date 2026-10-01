@@ -216,3 +216,25 @@ def test_disabled_size_stock_stays_readable(client, beer):
     r = client.get('/api/beers')
     updated = next(b for b in r.get_json() if b['id'] == beer['id'])
     assert updated['stock_50cl'] == 6
+
+
+# ── Fût transvasé en bouteilles (#19) ────────────────────────────────────────
+
+def _consumed(client, beer_id):
+    rows = [b for b in client.get('/api/consumption').get_json()['by_beer'] if b['beer_id'] == beer_id]
+    return rows[0]['total_liters'] if rows else 0
+
+
+def test_fut_en_bouteilles_pas_compte_comme_bu(client):
+    beer = client.post('/api/beers', json={'name': 'Blonde', 'keg_liters': 19}).get_json()
+    # 10 L passés en 20 × 50 cL : rien de bu
+    r = client.patch(f'/api/beers/{beer["id"]}/stock', json={'keg_liters': 9, 'stock_50cl': 20})
+    assert r.status_code == 200
+    assert _consumed(client, beer['id']) == 0
+    # 12 L retirés dont 10 L en bouteilles : 2 L bus (pertes, dégustation)
+    beer2 = client.post('/api/beers', json={'name': 'Ambrée', 'keg_liters': 19}).get_json()
+    client.patch(f'/api/beers/{beer2["id"]}/stock', json={'keg_liters': 7, 'stock_50cl': 20})
+    assert _consumed(client, beer2['id']) == 2.0
+    # Les bouteilles bues ensuite sont comptées une seule fois
+    client.patch(f'/api/beers/{beer["id"]}/stock', json={'stock_50cl': 18})
+    assert _consumed(client, beer['id']) == 1.0

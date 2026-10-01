@@ -131,6 +131,35 @@ def reorder_brews():
     return jsonify({'success': True})
 
 
+def _needs_by_item(ings):
+    """Besoins de la recette additionnés par article d'inventaire (en unité de base)."""
+    needs = {}
+    for ing in ings:
+        item_id = ing['inventory_item_id']
+        # Article absent ou en corbeille : rien à déduire (il garde sa quantité
+        # en corbeille pour une éventuelle restauration)
+        if not item_id or ing['inv_deleted_at']:
+            continue
+        need = needs.setdefault(item_id, {
+            'name': ing['name'], 'unit': ing['unit'], 'category': ing['category'],
+            'inv_unit': ing['inv_unit'] or ing['unit'], 'stock_qty': ing['stock_qty'],
+            'needed_base': 0.0,
+        })
+        need['needed_base'] += _to_base(ing['quantity'], ing['unit'])
+    return needs
+
+
+def _insufficient_entry(need, stock_base):
+    """Ligne de la réponse « stock insuffisant » : besoin total de l'article."""
+    return {
+        'name':      need['name'],
+        'needed':    round(_from_base(need['needed_base'], need['unit']), 6),
+        'available': round(_from_base(stock_base, need['unit']), 6),
+        'unit':      need['unit'],
+        'category':  need['category'],
+    }
+
+
 @bp.route('/api/brews', methods=['POST'])
 def create_brew():
     return _do_create_brew()
@@ -154,7 +183,8 @@ def _do_create_brew():
             # au moment où l'utilisateur valide le dry hop pendant la fermentation
             # (voir mark_dryhop_done), pas le jour du brassage.
             ings = conn.execute(
-                '''SELECT ri.*, ii.quantity as stock_qty, ii.unit as inv_unit
+                '''SELECT ri.*, ii.quantity as stock_qty, ii.unit as inv_unit,
+                          ii.deleted_at as inv_deleted_at
                    FROM recipe_ingredients ri
                    LEFT JOIN inventory_items ii ON ri.inventory_item_id=ii.id
                    WHERE ri.recipe_id=?
@@ -163,21 +193,10 @@ def _do_create_brew():
             ).fetchall()
 
             insufficient = []
-            for i in ings:
-                if not i['inventory_item_id']:
-                    continue
-                inv_unit    = i['inv_unit'] or i['unit']
-                needed_base = _to_base(i['quantity'], i['unit'])
-                stock_base  = _to_base(i['stock_qty'] or 0, inv_unit)
-                if stock_base < needed_base:
-                    available_disp = round(_from_base(stock_base, i['unit']), 6)
-                    insufficient.append({
-                        'name': i['name'],
-                        'needed': i['quantity'],
-                        'available': available_disp,
-                        'unit': i['unit'],
-                        'category': i['category'],
-                    })
+            for need in _needs_by_item(ings).values():
+                stock_base = _to_base(need['stock_qty'] or 0, need['inv_unit'])
+                if stock_base < need['needed_base']:
+                    insufficient.append(_insufficient_entry(need, stock_base))
 
             if insufficient and not d.get('force', False):
                 return api_error('stock_insuffisant', 409, items=insufficient)
@@ -197,48 +216,39 @@ def _do_create_brew():
         # stock check above and the UPDATE below, and no partial state on error.
         conn.execute("BEGIN IMMEDIATE")
         try:
-            # Re-read all stocks under the write lock before any deduction (TOCTOU fix)
+            # Re-read all stocks under the write lock before any deduction (TOCTOU fix).
+            # Un même article peut figurer sur plusieurs lignes (houblon à 60 et
+            # à 10 min…) : besoins additionnés par article, une seule déduction
+            # chacun. Avant, chaque ligne repartait du stock initial et seule la
+            # dernière était réellement déduite.
+            needs = _needs_by_item(ings)
             locked_insufficient = []
-            locked_stocks = {}  # inventory_item_id -> (stock_base, inv_unit)
-            for ing in ings:
-                if not ing['inventory_item_id']:
-                    continue
-                inv_unit    = ing['inv_unit'] or ing['unit']
-                needed_base = _to_base(ing['quantity'], ing['unit'])
+            locked_stocks = {}  # inventory_item_id -> stock_base
+            for item_id, need in needs.items():
                 fresh = conn.execute(
-                    'SELECT quantity FROM inventory_items WHERE id=?',
-                    (ing['inventory_item_id'],)
+                    'SELECT quantity FROM inventory_items WHERE id=?', (item_id,)
                 ).fetchone()
-                stock_base = _to_base(fresh['quantity'] if fresh else 0, inv_unit)
-                locked_stocks[ing['inventory_item_id']] = (stock_base, inv_unit)
-                if stock_base < needed_base:
-                    locked_insufficient.append({
-                        'name':      ing['name'],
-                        'needed':    ing['quantity'],
-                        'available': round(_from_base(stock_base, ing['unit']), 6),
-                        'unit':      ing['unit'],
-                        'category':  ing['category'],
-                    })
+                stock_base = _to_base(fresh['quantity'] if fresh else 0, need['inv_unit'])
+                locked_stocks[item_id] = stock_base
+                if stock_base < need['needed_base']:
+                    locked_insufficient.append(_insufficient_entry(need, stock_base))
 
             if locked_insufficient and not d.get('force', False):
                 conn.execute("ROLLBACK")
                 return api_error('stock_insuffisant', 409, items=locked_insufficient)
 
             _inv_log_pending = []
-            for ing in ings:
-                if not ing['inventory_item_id']:
-                    continue
-                inv_unit    = ing['inv_unit'] or ing['unit']
-                needed_base = _to_base(ing['quantity'], ing['unit'])
-                stock_base, _ = locked_stocks[ing['inventory_item_id']]
-                new_base = max(0.0, stock_base - needed_base)
+            for item_id, need in needs.items():
+                inv_unit   = need['inv_unit']
+                stock_base = locked_stocks[item_id]
+                new_base = max(0.0, stock_base - need['needed_base'])
                 new_qty  = round(_from_base(new_base, inv_unit), 6)
                 old_qty  = round(_from_base(stock_base, inv_unit), 6)
                 conn.execute(
                     'UPDATE inventory_items SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                    (new_qty, ing['inventory_item_id'])
+                    (new_qty, item_id)
                 )
-                _inv_log_pending.append((ing['inventory_item_id'], new_qty - old_qty, old_qty, new_qty))
+                _inv_log_pending.append((item_id, new_qty - old_qty, old_qty, new_qty))
 
             actual_eff = _compute_efficiency(conn, recipe_id, d.get('og'), d.get('volume_brewed'))
             if not d.get('name'):
@@ -439,7 +449,7 @@ def _deduct_dryhops_for_date(conn, brew, date_str):
         if (start_d + _td(days=offset)).isoformat() != date_str:
             continue
         inv = conn.execute(
-            'SELECT quantity, unit FROM inventory_items WHERE id=?',
+            'SELECT quantity, unit FROM inventory_items WHERE id=? AND deleted_at IS NULL',
             (dh['inventory_item_id'],)
         ).fetchone()
         if not inv:

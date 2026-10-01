@@ -4,6 +4,17 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-01] — 32 · version 0.1.29
+
+### Corrigé
+- **Brassin — déduction du stock** : un ingrédient présent sur plusieurs lignes de la recette (houblon à 60 et à 10 min, malt en deux fois…) n'était déduit qu'une fois, avec la quantité de la dernière ligne : 100 g de Citra pour 20 g + 30 g donnaient 70 g au lieu de 50 g. Les besoins sont maintenant additionnés par article, y compris pour l'alerte « stock insuffisant » (#18).
+- **Cave — fût transvasé en bouteilles** : les litres mis en bouteilles étaient comptés comme bus, puis une seconde fois en buvant les bouteilles. Seul ce qui n'a pas été embouteillé compte désormais comme consommé (statistiques, Wrapped, estimation d'épuisement) (#19).
+- **Inventaire — corbeille** : supprimer un ingrédient remettait sa quantité à zéro, perdue à la restauration. Elle est maintenant conservée. Un brassin ne déduit plus rien d'un article en corbeille, et l'export de l'inventaire comme la sauvegarde GitHub n'incluent plus la corbeille (un réimport la rendait active) (#20).
+- **Calendrier — vue Agenda** : les noms (brassins, brouillons, événements) sont échappés comme dans la vue grille ; un « < » dans un nom cassait l'affichage (#21).
+- **Brouillons — images** : seule une image de brouillon créée par le serveur peut être rattachée à un brouillon ; une requête modifiée pouvait y rattacher une autre photo (bière, brassin), effacée ensuite avec le brouillon (#22).
+
+---
+
 ## [2026-10-01] — 31 · version 0.1.28
 
 ### Ajouté

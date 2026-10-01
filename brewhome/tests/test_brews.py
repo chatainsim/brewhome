@@ -313,3 +313,52 @@ def test_dryhop_wrong_date_no_deduction(client, dryhop_recipe):
 def test_dryhop_done_invalid_date(client, brew):
     r = client.post(f'/api/brews/{brew["id"]}/dryhop_done', json={'date': 'pas-une-date'})
     assert r.status_code == 400
+
+
+# ── Déduction : article sur plusieurs lignes (#18) ───────────────────────────
+
+@pytest.fixture()
+def two_additions_recipe(client):
+    """Citra 100 g en stock, recette 20 g à 60 min + 30 g à 10 min."""
+    hop = client.post('/api/inventory', json={
+        'name': 'Citra', 'category': 'houblon', 'quantity': 100.0, 'unit': 'g',
+    }).get_json()
+    recipe = client.post('/api/recipes', json={'name': 'IPA', 'volume': 20, 'ingredients': [
+        {'inventory_item_id': hop['id'], 'name': 'Citra', 'category': 'houblon',
+         'quantity': 20, 'unit': 'g', 'hop_type': 'ebullition', 'hop_time': 60},
+        {'inventory_item_id': hop['id'], 'name': 'Citra', 'category': 'houblon',
+         'quantity': 30, 'unit': 'g', 'hop_type': 'ebullition', 'hop_time': 10},
+    ]}).get_json()
+    return {'hop_id': hop['id'], 'recipe': recipe}
+
+
+def test_meme_houblon_deux_ajouts_deduit_en_entier(client, two_additions_recipe):
+    r = client.post('/api/brews', json={
+        'recipe_id': two_additions_recipe['recipe']['id'], 'name': 'B', 'deduct_stock': True,
+    })
+    assert r.status_code == 201
+    assert _inv_qty(client, two_additions_recipe['hop_id']) == 50.0
+
+
+def test_meme_houblon_deux_ajouts_stock_insuffisant_sur_le_total(client, two_additions_recipe):
+    hop_id = two_additions_recipe['hop_id']
+    client.put(f'/api/inventory/{hop_id}', json={'name': 'Citra', 'category': 'houblon', 'quantity': 40.0, 'unit': 'g'})
+    assert _inv_qty(client, hop_id) == 40.0
+    r = client.post('/api/brews', json={
+        'recipe_id': two_additions_recipe['recipe']['id'], 'name': 'B', 'deduct_stock': True,
+    })
+    assert r.status_code == 409
+    items = r.get_json()['items']
+    assert [(i['name'], i['needed'], i['available']) for i in items] == [('Citra', 50.0, 40.0)]
+    assert _inv_qty(client, hop_id) == 40.0
+
+
+def test_article_en_corbeille_non_deduit(client, two_additions_recipe):
+    hop_id = two_additions_recipe['hop_id']
+    client.delete(f'/api/inventory/{hop_id}')
+    r = client.post('/api/brews', json={
+        'recipe_id': two_additions_recipe['recipe']['id'], 'name': 'B', 'deduct_stock': True,
+    })
+    assert r.status_code == 201
+    client.post(f'/api/inventory/{hop_id}/restore')
+    assert _inv_qty(client, hop_id) == 100.0

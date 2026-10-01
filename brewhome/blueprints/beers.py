@@ -322,7 +322,12 @@ def patch_beer_stock(beer_id):
             (*new.values(), new_keg, beer_id)
         )
         delta = {size: max(0, old[size] - new[size]) for size in BottleSize.SIZES_CL}
-        dkeg = max(0.0, round(old_keg - new_keg, 3))
+        # Fût transvasé en bouteilles (même requête) : les litres mis en bouteilles
+        # ne sont pas bus, ils le seront plus tard en bouteilles. Seul le reste de
+        # la baisse du fût compte comme consommé (sinon compté deux fois).
+        bottled_liters = sum(max(0, new[size] - old[size]) * liters
+                             for size, liters in BottleSize.SIZES_CL.items())
+        dkeg = max(0.0, round(old_keg - new_keg - bottled_liters, 3))
         if any(delta.values()) or dkeg > 0:
             today_local = date.today().isoformat()
             qty_cols_sql = ', '.join(f'qty_{size}' for size in BottleSize.SIZES_CL)

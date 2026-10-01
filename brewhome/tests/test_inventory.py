@@ -302,3 +302,18 @@ def test_brew_forced_despite_insufficient_stock(client):
     updated = client.get('/api/inventory').get_json()
     malt = next(i for i in updated if i['id'] == item['id'])
     assert malt['quantity'] == 0.0
+
+
+# ── Corbeille (#20) ──────────────────────────────────────────────────────────
+
+def test_restauration_garde_la_quantite(client, malt_item):
+    client.delete(f'/api/inventory/{malt_item["id"]}')
+    client.post(f'/api/inventory/{malt_item["id"]}/restore')
+    item = next(i for i in client.get('/api/inventory').get_json() if i['id'] == malt_item['id'])
+    assert item['quantity'] == 1.0
+
+
+def test_export_sans_la_corbeille(client, malt_item, hop_item):
+    client.delete(f'/api/inventory/{malt_item["id"]}')
+    names = [i['name'] for i in client.get('/api/export/inventory').get_json()]
+    assert names == ['Cascade']

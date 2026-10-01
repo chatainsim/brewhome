@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import urllib.request
 import urllib.error
@@ -23,6 +24,10 @@ from constants import BrewStatus, BottleSize
 
 
 _DRAFT_IMG_PREFIX = '/api/draft-images/'
+
+
+# Nom des images de brouillon créées par _save_b64_to_draft_file
+_DRAFT_FILE_RE = re.compile(r'draft_[0-9a-f]{32}\.jpg')
 
 
 def _draft_image_url(filename):
@@ -79,7 +84,11 @@ def _process_draft_images(images_raw, old_files_json='[]'):
                 current_app.logger.warning('draft_images: failed to save image: %s', e)
         elif img.startswith(_DRAFT_IMG_PREFIX):
             fname = os.path.basename(img)
-            new_files.append(fname)
+            # Uniquement une image de brouillon générée par le serveur : un autre
+            # fichier du dossier (photo de bière, de brassin…) rattaché ici serait
+            # supprimé avec le brouillon.
+            if _DRAFT_FILE_RE.fullmatch(fname) or fname in old_files:
+                new_files.append(fname)
 
     # Delete orphaned files (were on disk, no longer referenced)
     for orphan in old_files - set(new_files):

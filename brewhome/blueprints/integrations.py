@@ -1225,7 +1225,7 @@ def _github_data_backup():
     try:
         with get_db() as conn:
             inventory = [dict(r) for r in conn.execute(
-                'SELECT * FROM inventory_items ORDER BY category, name').fetchall()]
+                'SELECT * FROM inventory_items WHERE deleted_at IS NULL ORDER BY category, name').fetchall()]  # corbeille exclue
             recipes_raw = conn.execute('SELECT * FROM recipes ORDER BY name').fetchall()
             recipes = []
             for r in recipes_raw:

@@ -93,7 +93,8 @@ def import_catalog():
 @bp.route('/api/export/inventory')
 def export_inventory():
     with get_db() as conn:
-        rows = conn.execute('SELECT * FROM inventory_items ORDER BY category, name').fetchall()
+        # Articles en corbeille exclus : réimportés, ils redeviendraient actifs
+        rows = conn.execute('SELECT * FROM inventory_items WHERE deleted_at IS NULL ORDER BY category, name').fetchall()
     return jsonify([dict(r) for r in rows])
 
 
