@@ -286,6 +286,9 @@ function _loadSettingsFromServer(srv) {
   }
   // Sanitize : si le placeholder '***' a déjà été stocké en localStorage par erreur, l'effacer
   if (appSettings.telegram?.token === '***') appSettings.telegram.token = '';
+  // Jeton enregistré sur le serveur mais pas sur cet appareil : le champ l'indique
+  // (au lieu de paraître vide) et le test de connexion utilise celui du serveur.
+  if (appSettings.telegram) appSettings.telegram.tokenOnServer = srv.telegram_token === '***';
   if (srv.tg_brewing_events != null) {
     try { appSettings.brewEvents = JSON.parse(srv.tg_brewing_events); } catch(e) {}
   }

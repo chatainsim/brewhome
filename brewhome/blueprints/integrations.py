@@ -31,8 +31,16 @@ _reschedule_lock = threading.Lock()
 # Telegram helpers
 # ---------------------------------------------------------------------------
 
-def _tg_get_settings():
-    """Récupère la config Telegram depuis la base de données."""
+class _SettingsUnavailable(Exception):
+    """Réglages illisibles (base verrouillée…) : à distinguer de « pas configuré »."""
+
+
+def _tg_get_settings(strict=False):
+    """Récupère la config Telegram depuis la base de données.
+
+    strict=True : lève _SettingsUnavailable sur erreur de base au lieu de
+    renvoyer une config vide (sinon un « database is locked » passager au
+    redémarrage ferait croire que Telegram n'est pas configuré)."""
     try:
         with get_db() as conn:
             rows = conn.execute(
@@ -41,6 +49,8 @@ def _tg_get_settings():
             ).fetchall()
     except Exception as e:
         current_app.logger.warning(f"_tg_get_settings: DB error: {e}")
+        if strict:
+            raise _SettingsUnavailable(str(e)) from e
         return None, None, {}, 'UTC'
     s = {r['key']: r['value'] for r in rows}
     notifs = {}
@@ -764,13 +774,29 @@ def reschedule_telegram():
 
 
 def _reschedule_telegram_locked():
-    token, chat_id, notifs, tz_str = _tg_get_settings()
+    try:
+        token, chat_id, notifs, tz_str = _tg_get_settings(strict=True)
+    except _SettingsUnavailable:
+        # Base momentanément illisible : on garde ce qui est déjà planifié (au
+        # lieu de tout retirer) et on réessaie dans une minute - au démarrage,
+        # sans ça, aucune notification ne serait planifiée jusqu'au prochain
+        # enregistrement des réglages.
+        current_app.logger.error("reschedule_telegram: réglages illisibles, nouvel essai dans 60 s")
+        try:
+            _scheduler.add_job(reschedule_telegram, 'date', run_date=datetime.now(timezone.utc) + timedelta(seconds=60),
+                               id='tg_reschedule_retry', replace_existing=True)
+        except Exception as e:
+            current_app.logger.warning(f"reschedule_telegram: nouvel essai impossible à planifier: {e}")
+        return
     for jid in ('tg_brews', 'tg_cave', 'tg_inventory', 'tg_brew_events', 'tg_ferm', 'tg_spindle_stable', 'tg_brew_steps'):
         try:
             _scheduler.remove_job(jid)
         except JobLookupError:
             pass
     if not token or not chat_id:
+        current_app.logger.warning(
+            "reschedule_telegram: %s absent — aucune notification Telegram planifiée",
+            " et ".join(n for n, v in (("jeton", token), ("chat_id", chat_id)) if not v))
         return
     try:
         tz = ZoneInfo(tz_str or 'UTC')
@@ -843,6 +869,9 @@ def telegram_test():
     d = request.json or {}
     token   = (d.get('token')   or '').strip()
     chat_id = (d.get('chat_id') or '').strip()
+    if not token:
+        # Appareil sans le jeton en local (le serveur ne le renvoie jamais) : celui enregistré
+        token = _tg_get_settings()[0] or ''
     if not token or not chat_id:
         return api_error('missing_field', 400, detail='Token et Chat ID requis')
     try:

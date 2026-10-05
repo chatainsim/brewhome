@@ -4,6 +4,17 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-05] — 36 · version 0.1.33
+
+### Corrigé
+- **Notifications Telegram qui cessaient en silence** : quand les réglages étaient synchronisés depuis un appareil où le jeton du bot n'avait pas été saisi (autre navigateur, téléphone, import d'un fichier de réglages), le serveur effaçait le jeton (il n'en renvoie qu'un masque `***`, que le navigateur ne garde pas). Toutes les notifications planifiées étaient alors retirées, sans rien signaler ; sur l'appareil d'origine, le champ affichait toujours le jeton et le test fonctionnait. La synchronisation n'efface plus jamais un secret (jeton Telegram, PAT GitHub, clé IA) (#27).
+  - Sur un appareil sans le jeton, le champ indique « enregistré sur le serveur » et le bouton Test utilise celui du serveur.
+  - Une erreur passagère de la base à la lecture des réglages ne retire plus les notifications déjà planifiées ; nouvel essai une minute plus tard.
+  - Une notification en retard (serveur occupé, réveil tardif) est envoyée jusqu'à une heure après au lieu d'être abandonnée au-delà d'une seconde.
+  - Le journal signale quand aucune notification n'est planifiée faute de jeton ou de chat.
+
+---
+
 ## [2026-10-01] — 35 · version 0.1.32
 
 ### Corrigé

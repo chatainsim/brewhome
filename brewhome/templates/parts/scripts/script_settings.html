@@ -1966,6 +1966,8 @@ function renderSettingsNotif() {
   const tg = appSettings.telegram || {};
   const n  = tg.notifs || {};
   document.getElementById('tg-token').value   = tg.token  || '';
+  document.getElementById('tg-token').placeholder = (!tg.token && tg.tokenOnServer)
+    ? t('settings.notif.tg_token_on_server') : '123456789:AAF…';
   document.getElementById('tg-chat-id').value = tg.chatId || '';
   document.getElementById('tg-tz').value      = tg.tz     || 'Europe/Paris';
   // Brassins
@@ -2016,6 +2018,7 @@ function saveTelegramSettings() {
   const g = id => document.getElementById(id);
   appSettings.telegram = {
     token:  g('tg-token').value.trim(),
+    tokenOnServer: !!(appSettings.telegram?.tokenOnServer || g('tg-token').value.trim()),
     chatId: g('tg-chat-id').value.trim(),
     tz:     g('tg-tz').value.trim() || 'Europe/Paris',
     notifs: {
@@ -2065,7 +2068,8 @@ async function testTelegramConnection() {
   const token   = document.getElementById('tg-token').value.trim();
   const chat_id = document.getElementById('tg-chat-id').value.trim();
   const res = document.getElementById('tg-test-result');
-  if (!token || !chat_id) { res.style.color='var(--danger)'; res.textContent=t('settings.notif.tg_required'); return; }
+  // Pas de jeton sur cet appareil mais un sur le serveur : le serveur utilise le sien
+  if (!(token || appSettings.telegram?.tokenOnServer) || !chat_id) { res.style.color='var(--danger)'; res.textContent=t('settings.notif.tg_required'); return; }
   res.style.color = 'var(--muted)'; res.textContent = t('settings.notif.tg_sending');
   try {
     const r = await api('POST', '/api/telegram/test', { token, chat_id });

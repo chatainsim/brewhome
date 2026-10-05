@@ -14,7 +14,7 @@ from helpers import api_error, strip_secret_settings
 
 bp = Blueprint('admin', __name__)
 
-APP_VERSION = "0.1.32"
+APP_VERSION = "0.1.33"
 
 # Token généré à chaque démarrage du serveur — requis pour télécharger l'export SQL.
 # Injecté dans le HTML de la page principale (variable JS _BH_EXPORT_TOKEN).
@@ -219,7 +219,13 @@ def save_app_settings():
     data = request.json or {}
     with get_db() as conn:
         for key, value in data.items():
-            if key in _SECRET_KEYS and value == '***':
+            # Secrets : jamais effacés par cette synchro globale. Le serveur ne
+            # renvoie que '***' et le navigateur l'efface : un appareil où le
+            # secret n'a pas été saisi (autre navigateur, téléphone, import de
+            # réglages) renvoyait null → DELETE du jeton Telegram, puis
+            # reschedule_telegram() retirait toutes les notifications planifiées,
+            # sans rien signaler.
+            if key in _SECRET_KEYS and value in (None, '', '***'):
                 continue
             if value is None or value == '':
                 conn.execute('DELETE FROM app_settings WHERE key=?', (key,))
