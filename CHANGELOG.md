@@ -4,6 +4,11 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-06] — 37 · version 0.1.34
+
+### Ajouté
+- **Ouvrir la recette depuis la liste des brassins** : le nom de la recette affiché sur chaque brassin est désormais un lien ; un clic ouvre directement la page Recettes sur cette recette (sans ouvrir le brassin). Si la recette a été supprimée depuis, un message le signale.
+
 ## [2026-10-05] — 36 · version 0.1.33
 
 ### Corrigé

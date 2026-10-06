@@ -1351,7 +1351,9 @@ function renderBrassins() {
         <div class="brew-card-info">
           <div class="brew-card-name">${esc(b.name)}</div>
           <div class="brew-card-meta">
-            ${b.recipe_name ? `<i class="fas fa-scroll"></i> ${esc(b.recipe_name)} · ` : ''}
+            ${b.recipe_name ? (b.recipe_id
+              ? `<a href="#recettes" class="brew-recipe-link" onclick="event.preventDefault();event.stopPropagation();openRecipeFromBrew(${b.recipe_id})" title="${t('brew.open_recipe')}"><i class="fas fa-scroll"></i> ${esc(b.recipe_name)}</a> · `
+              : `<i class="fas fa-scroll"></i> ${esc(b.recipe_name)} · `) : ''}
             ${b.brew_date ? `<i class="fas fa-calendar"></i> ${b.brew_date} · ` : ''}
             ${b.volume_brewed ? (() => {
               const _yRecipe = b.recipe_id ? recById.get(b.recipe_id) : null;
@@ -1547,6 +1549,15 @@ async function saveBrewOrder() {
     await api('PUT', '/api/brews/reorder',
       S.brews.map((b, i) => ({ id: b.id, sort_order: i })));
   } catch(e) { toast(t('brew.err_save_order'), 'error'); }
+}
+
+// Clic sur le nom de la recette d'un brassin : ouvre la page Recettes sur cette recette. navigate() est attendu car
+// bh-recettes.js (loadRecipeForm) n'est chargé qu'à l'ouverture de cette page.
+async function openRecipeFromBrew(recipeId) {
+  await navigate('recettes');
+  if (!S.recipes.some(r => r.id === recipeId)) { toast(t('brew.recipe_gone'), 'error'); return; }
+  loadRecipeForm(recipeId);
+  window.scrollTo({ top: 0 });
 }
 
 function openBrewModal(recipeId = null) {
