@@ -1366,6 +1366,7 @@ function renderWrapped(w) {
 
 function renderStatsPage() {
   _destroyStatsCharts();
+  renderStatsInsights();
   const allCompleted = S.brews.filter(b => !b.archived && b.status === 'completed' && b.brew_date);
   const recById = new Map(S.recipes.map(r => [r.id, r]));
 
@@ -3172,6 +3173,336 @@ async function saveInvRecount() {
     syncNavBadges();
     toast(t('inv.recount_done').replace('${n}', r.updated), 'success');
   } catch(e) { toast(t('inv.err_save'), 'error'); }
+}
+
+// ══ Statistiques : section « Analyses » (/api/stats/insights) ═══════════════════
+// Rendue dans #stats-insights, indépendamment de renderStatsPage (elle a aussi du sens sans brassin terminé :
+// cave, stock, fûts). Graphiques dans _insCharts, détruits à chaque rendu ; une réponse arrivée après un
+// changement d'année plus récent est ignorée (_insToken).
+let _insCharts = {}, _insToken = 0, _insData = null;
+const _INS_GRID = '#2a2a2a', _INS_TICK = '#888';
+
+function _insT(key, vars = {}) {
+  let s = t('ins.' + key);
+  for (const [k, v] of Object.entries(vars)) s = s.split('${' + k + '}').join(v);
+  return s;
+}
+function _insDate(iso, opts = { day: 'numeric', month: 'short', year: 'numeric' }) {
+  return iso ? new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString(_lang || 'fr', opts) : '—';
+}
+function _insNum(v, d = 1) { return v == null ? '—' : (+v).toLocaleString(_lang || 'fr', { maximumFractionDigits: d, minimumFractionDigits: 0 }); }
+function _insCard(title, body, extra = '') {
+  return `<div class="card" ${extra}><div class="section-label" style="margin-bottom:12px">${title}</div>${body}</div>`;
+}
+function _insEmpty(msg) { return `<div style="text-align:center;padding:28px 0;font-size:.82rem;color:var(--muted)">${esc(msg)}</div>`; }
+function _insTable(head, rows) {
+  if (!rows.length) return '';
+  return `<div style="overflow-x:auto"><table style="font-size:.82rem"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${r.map(c => `<td style="padding:7px 10px">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+function _insCanvas(id, h = 220) { return `<div style="height:${h}px;position:relative"><canvas id="${id}"></canvas></div>`; }
+function _insChart(id, cfg) {
+  const el = document.getElementById(id);
+  if (!el || typeof Chart === 'undefined') return;
+  _insCharts[id] = new Chart(el.getContext('2d'), cfg);
+}
+function _insOpts(extra = {}) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, ...(extra.plugins || {}) },
+    scales: {
+      x: { ticks: { color: _INS_TICK, font: { size: 11 } }, grid: { color: _INS_GRID }, ...(extra.x || {}) },
+      y: { ticks: { color: _INS_TICK, font: { size: 11 } }, grid: { color: _INS_GRID }, beginAtZero: true, ...(extra.y || {}) },
+    },
+  };
+}
+function _insKpi(val, label, sub = '', color = 'var(--amber)') {
+  return `<div class="stat"><div class="stat-val" style="color:${color}">${val}</div><div class="stat-lbl">${label}</div>${sub ? `<div style="font-size:.7rem;color:var(--muted);margin-top:4px">${sub}</div>` : ''}</div>`;
+}
+
+async function renderStatsInsights() {
+  const box = document.getElementById('stats-insights');
+  if (!box) return;
+  const token = ++_insToken;
+  const year = document.getElementById('stats-year-sel')?.value || 'all';
+  let d;
+  try { d = await api('GET', '/api/stats/insights?year=' + encodeURIComponent(year)); }
+  catch (e) { return; }
+  if (token !== _insToken) return;                 // un rendu plus récent est en cours
+  _insData = d;
+  Object.values(_insCharts).forEach(c => { try { c.destroy(); } catch (e) {} });
+  _insCharts = {};
+
+  const r = d.runway, st = d.stock, cel = d.cellar;
+  const kpis = [
+    _insKpi(r.weeks_left != null ? `${_insNum(r.weeks_left, 0)} ${_insT('runway_unit')}` : '—', _insT('runway'),
+      r.weeks_left != null ? _insT('runway_until', { d: _insDate(r.depletion_date) }) : _insT('runway_none'), 'var(--info)'),
+    _insKpi(r.brew_before ? _insDate(r.brew_before, r.brew_before.slice(0, 4) === String(new Date().getFullYear())
+        ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' }) : '—', _insT('brew_before'),
+      r.pipeline_days != null ? _insT('brew_before_hint', { n: r.pipeline_days }) : ''),
+    _insKpi(d.losses.avg_loss_pct != null ? _insNum(d.losses.avg_loss_pct) + ' %' : '—', _insT('kpi_loss'), _insT('kpi_loss_hint'), 'var(--danger)'),
+    _insKpi(d.brew_days.avg_hours != null ? _insNum(d.brew_days.avg_hours) + ' ' + _insT('unit_hours') : '—', _insT('kpi_brewday'), _insT('kpi_brewday_hint')),
+    _insKpi(d.pipeline.avg_to_bottle != null ? _insNum(d.pipeline.avg_to_bottle, 0) + ' ' + _insT('unit_days') : '—', _insT('kpi_to_bottle'),
+      d.pipeline.avg_to_taste != null ? `${_insT('kpi_to_taste')} : ${_insNum(d.pipeline.avg_to_taste, 0)} ${_insT('unit_days')}` : ''),
+    _insKpi(cel.avg_age_days != null ? _insNum(cel.avg_age_days, 0) + ' ' + _insT('unit_days') : '—', _insT('kpi_age'), '', 'var(--info)'),
+    _insKpi(st.dormant_value ? _insNum(st.dormant_value, 0) + ' €' : '—', _insT('kpi_dormant'), _insT('kpi_dormant_hint', { n: 180 })),
+    _insKpi(st.expiring_value ? _insNum(st.expiring_value, 0) + ' €' : '—', _insT('kpi_expiring'),
+      st.expired_value ? _insT('kpi_expired', { v: _insNum(st.expired_value, 0) + ' €' }) : '', 'var(--danger)'),
+  ].join('');
+  const runwayLine = `<div style="font-size:.8rem;color:var(--muted);margin:-8px 0 16px">${
+    _insT('runway_detail', { l: _insNum(r.stock_liters), w: _insNum(r.weekly_liters, 2), n: r.window_days })}${
+    r.active_brews ? ' · ' + _insT('active_brews', { n: r.active_brews, l: _insNum(r.active_liters, 0) }) : ''}</div>`;
+
+  // Atténuation par levure
+  const yeastRows = d.yeasts.map(y => [esc(y.yeast), y.n, `<b>${_insNum(y.avg)} %</b>`, `${_insNum(y.min)} – ${_insNum(y.max)} %`,
+    y.catalog_min != null ? `${_insNum(y.catalog_min, 0)} – ${_insNum(y.catalog_max, 0)} %` : '—']);
+  const yeastsCard = _insCard(_insT('yeasts_title'), d.yeasts.length
+    ? _insTable([_insT('col_yeast'), _insT('col_n'), _insT('col_avg'), _insT('col_range'), _insT('col_catalog')], yeastRows)
+    : _insEmpty(_insT('yeasts_empty')));
+
+  // Courbes de fermentation
+  const curvesSel = d.curves.length > 1 ? `<select id="ins-curve-sel" onchange="_insRenderCurves()" style="width:auto;margin-bottom:10px">${
+    d.curves.map((c, i) => `<option value="${i}">${esc(c.brew)} · ${_insDate(c.start_date)}</option>`).join('')}</select>` : '';
+  const curvesCard = _insCard(_insT('curves_title'), d.curves.length
+    ? `${curvesSel}<div id="ins-curve-info" style="font-size:.78rem;color:var(--muted);margin-bottom:8px"></div>${_insCanvas('ins-curves-chart', 260)}`
+    : _insEmpty(_insT('curves_empty')));
+
+  // Prévu vs réel (DF / ABV) — calcul côté client depuis la recette
+  const pva = _insPlannedVsActual(year);
+  const pvaCard = _insCard(_insT('pva_title'), pva.length
+    ? `${_insCanvas('ins-pva-chart')}<details style="margin-top:10px"><summary style="cursor:pointer;font-size:.78rem;color:var(--muted)">${_insT('see_table')}</summary>${
+      _insTable([t('stat.tbl_name'), 'DF ' + _insT('pva_actual') + ' / ' + _insT('pva_planned'), 'ABV ' + _insT('pva_actual') + ' / ' + _insT('pva_planned')],
+        pva.map(p => [esc(p.name), `${p.fg != null ? p.fg.toFixed(3) : '–'} / ${p.fgTheo.toFixed(3)}`, `${p.abv != null ? _insNum(p.abv) + ' %' : '–'} / ${_insNum(p.abvTheo)} %`]))}</details>`
+    : _insEmpty(_insT('pva_empty')));
+  const lossesCard = _insCard(_insT('losses_title'), d.losses.brews.length ? _insCanvas('ins-losses-chart') : _insEmpty(_insT('losses_empty')));
+
+  // Dégustation
+  const tb = d.tasting.beers;
+  const radarCard = _insCard(_insT('radar_title'), tb.length
+    ? `<select id="ins-radar-sel" onchange="_insRenderRadar()" style="width:auto;margin-bottom:10px">${
+      tb.map((b, i) => `<option value="${i}">${esc(b.beer)}</option>`).join('')}</select>${_insCanvas('ins-radar-chart', 300)}`
+    : _insEmpty(_insT('radar_empty')));
+  const scorePts = _insScorePoints();
+  const scoreCard = _insCard(_insT('score_title'), scorePts.length
+    ? `<select id="ins-score-sel" onchange="_insRenderScore()" style="width:auto;margin-bottom:10px">
+        <option value="cpl">${_insT('score_vs_cpl')}</option><option value="abv">${_insT('score_vs_abv')}</option><option value="ibu">${_insT('score_vs_ibu')}</option></select>${_insCanvas('ins-score-chart', 260)}`
+    : _insEmpty(_insT('score_empty')));
+
+  // Consommation
+  const hasConso = d.consumption.weekday_liters.some(v => v > 0);
+  const consoWdCard = _insCard(_insT('conso_weekday'), hasConso ? _insCanvas('ins-wd-chart', 200) : _insEmpty(_insT('conso_empty')));
+  const consoMoCard = _insCard(_insT('conso_month'), hasConso ? _insCanvas('ins-mo-chart', 200) : _insEmpty(_insT('conso_empty')));
+
+  // Cave
+  const agesCard = _insCard(_insT('ages_title'), cel.ages.length
+    ? _insTable([_insT('col_beer'), _insT('col_age'), _insT('col_liters'), t('stat.tbl_date')],
+        cel.ages.slice(0, 10).map(a => [esc(a.beer), `<b>${a.age_days} ${_insT('unit_days')}</b>`, _insNum(a.liters, 2), _insDate(a.bottling_date)]))
+    : _insEmpty(_insT('ages_empty')));
+  const turnoverCard = _insCard(_insT('turnover_title'), cel.turnover.length
+    ? `<div style="font-size:.72rem;color:var(--muted);margin:-6px 0 8px">${_insT('turnover_hint')}</div>` +
+      _insTable([_insT('col_style'), _insT('col_n'), _insT('col_days')],
+        cel.turnover.map(x => [esc(x.style), x.n, `${_insNum(x.avg_days, 0)}${x.projected ? ' *' : ''}`]))
+    : _insEmpty(_insT('turnover_empty')));
+  const pipelineCard = _insCard(_insT('pipeline_title'), d.pipeline.by_style.length
+    ? _insTable([_insT('col_style'), _insT('col_n'), _insT('col_to_bottle'), _insT('col_to_taste')],
+        d.pipeline.by_style.map(x => [esc(x.style), x.n, x.to_bottle != null ? `${_insNum(x.to_bottle, 0)} ${_insT('unit_days')}` : '—',
+          x.to_taste != null ? `${_insNum(x.to_taste, 0)} ${_insT('unit_days')}` : '—']))
+    : _insEmpty(t('stat.no_data')));
+
+  // Recettes
+  const rc = d.recipes;
+  const recipesCard = _insCard(_insT('recipes_title'), (rc.rebrewed.length
+    ? _insTable([_insT('col_recipe'), _insT('col_n'), _insT('col_last')], rc.rebrewed.map(x => [esc(x.recipe), `<b>${x.brews}</b>`, _insDate(x.last)]))
+    : _insEmpty(_insT('recipes_empty'))) + (rc.brewed_once ? `<div style="font-size:.75rem;color:var(--muted);margin-top:8px">${_insT('recipes_once', { n: rc.brewed_once })}</div>` : ''));
+  const neverCard = _insCard(`${_insT('never_title')} (${rc.never_brewed})`, rc.never_brewed
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${rc.never_brewed_list.map(x => `<span class="badge" style="background:rgba(255,255,255,.05);border:1px solid var(--border)">${esc(x.recipe)}</span>`).join('')}</div>`
+    : _insEmpty(_insT('never_none')));
+
+  // Stock et prix
+  const stockValCard = _insCard(_insT('stockval_title'), `${_insCanvas('ins-stockval-chart', 200)}<div style="font-size:.72rem;color:var(--muted);margin-top:6px">${_insT('stockval_hint')}</div>`);
+  const pr = d.prices;
+  const pricesCard = _insCard(_insT('prices_title'), pr.changes.length
+    ? `<div style="font-size:.72rem;color:var(--muted);margin:-6px 0 8px">${_insT('prices_since', { d: _insDate(pr.since) })}</div>` +
+      _insTable([_insT('col_item'), t('stat.tbl_date'), _insT('col_change')], pr.changes.map(x => [esc(x.item),
+        `${_insNum(x.first, 2)} → ${_insNum(x.last, 2)} €`,
+        `<b style="color:${x.change_pct > 0 ? 'var(--danger)' : 'var(--success)'}">${x.change_pct > 0 ? '+' : ''}${_insNum(x.change_pct)} %</b>`]))
+    : _insEmpty(_insT('prices_empty', { d: _insDate(pr.since || new Date().toISOString()) })));
+  const dormantCard = _insCard(`${_insT('dormant_title')}${st.dormant.length ? ` · ${_insNum(st.dormant_value, 0)} €` : ''}`, st.dormant.length
+    ? _insTable([_insT('col_item'), _insT('col_value'), _insT('col_idle')], st.dormant.slice(0, 10).map(x => [esc(x.item),
+        x.value != null ? _insNum(x.value, 2) + ' €' : '—', `${x.idle_days} ${_insT('unit_days')}`]))
+    : _insEmpty(_insT('dormant_none', { n: 180 })));
+  const expRows = [...st.expired.map(x => [esc(x.item), x.value != null ? _insNum(x.value, 2) + ' €' : '—', `<span style="color:var(--danger)">${_insT('expired_label')}</span>`]),
+                   ...st.expiring.map(x => [esc(x.item), x.value != null ? _insNum(x.value, 2) + ' €' : '—', _insDate(x.expiry_date)])];
+  const expiryCard = _insCard(_insT('expiry_title'), expRows.length
+    ? _insTable([_insT('col_item'), _insT('col_value'), _insT('col_expiry')], expRows) : _insEmpty(_insT('expiry_none')));
+
+  // Journée de brassage, fûts
+  const bd = d.brew_days;
+  const brewDayCard = _insCard(_insT('brewdays_title'), bd.brews.length
+    ? (bd.brews.length > 1 ? _insCanvas('ins-brewday-chart', 180) : '') +
+      _insTable([t('stat.tbl_name'), t('stat.tbl_date'), '', ''], bd.brews.slice(-8).reverse().map(x => [esc(x.brew), _insDate(x.brew_date),
+        `${x.start} → ${x.end}`, `<b>${_insNum(x.hours)} ${_insT('unit_hours')}</b>`]))
+    : _insEmpty(_insT('brewdays_empty')));
+  const k = d.kegs;
+  const kegsCard = _insCard(_insT('kegs_title'), k.count
+    ? `<div class="grid-4" style="margin-bottom:12px">
+        ${_insKpi(k.occupancy_pct != null ? k.occupancy_pct + ' %' : '—', _insT('kegs_occupancy'), Object.entries(k.by_status).map(([s, n]) => `${t('ins.status_' + s) !== 'ins.status_' + s ? t('ins.status_' + s) : esc(s)} ${n}`).join(' · '), 'var(--info)')}
+        ${_insKpi(k.fill_pct != null ? k.fill_pct + ' %' : '—', _insT('kegs_fill'))}</div>
+       <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">${_insT('kegs_revisions')}</div>` +
+      (k.revisions.length ? _insTable(['', '', ''], k.revisions.map(x => [esc(x.keg), _insDate(x.date),
+        x.days < 0 ? `<span style="color:var(--danger)">${_insT('kegs_overdue', { n: -x.days })}</span>` : _insT('kegs_in', { n: x.days })]))
+        : _insEmpty(_insT('kegs_no_revision')))
+    : _insEmpty(_insT('kegs_none')));
+
+  box.innerHTML = `
+    <div class="section-head" style="margin-top:8px"><h2>${_insT('title')}</h2></div>
+    <div style="font-size:.78rem;color:var(--muted);margin:-6px 0 14px">${_insT('hint')}</div>
+    <div class="grid-4" style="margin-bottom:16px">${kpis}</div>${runwayLine}
+    <div class="grid-2" style="margin-bottom:16px">${yeastsCard}${curvesCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${pvaCard}${lossesCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${radarCard}${scoreCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${consoWdCard}${consoMoCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${agesCard}${turnoverCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${pipelineCard}${recipesCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${neverCard}${stockValCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${pricesCard}${dormantCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${expiryCard}${brewDayCard}</div>
+    <div class="grid-2" style="margin-bottom:16px">${kegsCard}</div>`;
+
+  _insRenderCurves();
+  _insRenderRadar();
+  _insRenderScore();
+  if (pva.length) _insChart('ins-pva-chart', {
+    type: 'bar',
+    data: { labels: pva.map(p => p.name), datasets: [
+      { label: 'ABV ' + _insT('pva_planned'), data: pva.map(p => +p.abvTheo.toFixed(2)), backgroundColor: '#6b728080', borderColor: '#6b7280', borderWidth: 1 },
+      { label: 'ABV ' + _insT('pva_actual'), data: pva.map(p => p.abv), backgroundColor: '#3b82f6aa', borderColor: '#3b82f6', borderWidth: 1 }] },
+    options: _insOpts({ plugins: { legend: { display: true, labels: { color: '#ccc', boxWidth: 12 } } }, y: { ticks: { color: _INS_TICK, callback: v => v + ' %' } } }),
+  });
+  if (d.losses.brews.length) _insChart('ins-losses-chart', {
+    type: 'bar',
+    data: { labels: d.losses.brews.map(x => x.brew), datasets: [{ data: d.losses.brews.map(x => x.loss_pct),
+      backgroundColor: '#ef444480', borderColor: '#ef4444', borderWidth: 1 }] },
+    options: _insOpts({ plugins: { tooltip: { callbacks: { afterLabel: c => _insT('losses_tip', { b: d.losses.brews[c.dataIndex].brewed, p: d.losses.brews[c.dataIndex].packaged }) } } },
+                        y: { ticks: { color: _INS_TICK, callback: v => v + ' %' } } }),
+  });
+  if (hasConso) {
+    _insChart('ins-wd-chart', { type: 'bar', data: { labels: t('ins.weekdays'), datasets: [{ data: d.consumption.weekday_liters,
+      backgroundColor: '#f59e0b80', borderColor: '#f59e0b', borderWidth: 1 }] }, options: _insOpts() });
+    _insChart('ins-mo-chart', { type: 'bar', data: { labels: t('stat.months'), datasets: [{ data: d.consumption.month_liters,
+      backgroundColor: '#f59e0b80', borderColor: '#f59e0b', borderWidth: 1 }] }, options: _insOpts() });
+  }
+  // la courbe commence au premier mois où le stock a une valeur (avant : inventaire pas encore saisi)
+  const firstVal = st.value_series.findIndex(p => p.value > 0);
+  const valSeries = firstVal > 0 ? st.value_series.slice(firstVal) : st.value_series;
+  _insChart('ins-stockval-chart', {
+    type: 'line',
+    data: { labels: valSeries.map(p => _insDate(p.month + '-01', { month: 'short', year: '2-digit' })),
+            datasets: [{ data: valSeries.map(p => p.value), borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', fill: true, tension: .3, pointRadius: 3 }] },
+    options: _insOpts({ y: { ticks: { color: _INS_TICK, callback: v => v + ' €' } } }),
+  });
+  if (bd.brews.length > 1) _insChart('ins-brewday-chart', {
+    type: 'bar', data: { labels: bd.brews.map(x => _insDate(x.brew_date, { day: 'numeric', month: 'short', year: '2-digit' })),
+      datasets: [{ data: bd.brews.map(x => x.hours), backgroundColor: '#3b82f680', borderColor: '#3b82f6', borderWidth: 1 }] },
+    options: _insOpts({ y: { ticks: { color: _INS_TICK, callback: v => v + ' h' } } }),
+  });
+}
+
+function _insRenderCurves() {
+  const d = _insData;
+  if (!d || !d.curves.length) return;
+  const sel = document.getElementById('ins-curve-sel');
+  const focus = sel ? +sel.value : 0;
+  const c = d.curves[focus];
+  const info = document.getElementById('ins-curve-info');
+  if (info) info.textContent = [c.style, c.days_to_90 != null ? _insT('curves_90', { n: _insNum(c.days_to_90) }) : null,
+    `${c.points[0][1].toFixed(3)} → ${c.points[c.points.length - 1][1].toFixed(3)}`].filter(Boolean).join(' · ');
+  _insCharts['ins-curves-chart']?.destroy();
+  // Mise en avant : le brassin choisi en ambre, les autres en gris fin (contexte, sans une couleur par brassin)
+  const datasets = d.curves.map((cv, i) => ({
+    label: i === focus ? cv.brew : _insT('curves_others'),
+    data: cv.points.map(p => ({ x: p[0], y: p[1] })),
+    borderColor: i === focus ? '#f59e0b' : 'rgba(150,150,150,.35)', borderWidth: i === focus ? 2.5 : 1,
+    pointRadius: 0, tension: .25, order: i === focus ? 0 : 1, _brew: cv.brew,
+  }));
+  _insChart('ins-curves-chart', {
+    type: 'line', data: { datasets },
+    options: { ..._insOpts({ x: { type: 'linear', title: { display: true, text: _insT('curves_x'), color: _INS_TICK } },
+                             y: { beginAtZero: false, ticks: { color: _INS_TICK, callback: v => v.toFixed(3) } } }),
+               interaction: { mode: 'nearest', intersect: false },
+               plugins: { legend: { display: false }, tooltip: { callbacks: {
+                 title: items => items.length ? items[0].dataset._brew : '',
+                 label: c2 => `J${_insNum(c2.parsed.x)} · ${c2.parsed.y.toFixed(3)}` } } } },
+  });
+}
+
+function _insRenderRadar() {
+  const d = _insData;
+  if (!d || !d.tasting.beers.length) return;
+  const sel = document.getElementById('ins-radar-sel');
+  const b = d.tasting.beers[sel ? +sel.value : 0];
+  const crit = d.tasting.criteria;
+  const styleAvg = d.tasting.by_style.find(s => s.style === b.style);
+  const max = Math.max(5, ...d.tasting.beers.flatMap(x => Object.values(x.scores)));
+  _insCharts['ins-radar-chart']?.destroy();
+  const datasets = [{ label: b.beer, data: crit.map(c => b.scores[c] ?? null), borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.18)', pointRadius: 3 }];
+  if (styleAvg && styleAvg.n > 1) datasets.push({ label: `${_insT('radar_style_avg')} · ${b.style}`, data: crit.map(c => styleAvg.scores[c] ?? null),
+    borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.10)', borderDash: [4, 3], pointRadius: 2 });
+  _insChart('ins-radar-chart', {
+    type: 'radar', data: { labels: crit.map(c => _insT('crit_' + c)), datasets },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: datasets.length > 1, labels: { color: '#ccc', boxWidth: 12 } } },
+      scales: { r: { min: 0, max: max > 5 ? 10 : 5, ticks: { color: _INS_TICK, backdropColor: 'transparent', stepSize: max > 5 ? 2 : 1 },
+                     grid: { color: _INS_GRID }, angleLines: { color: _INS_GRID }, pointLabels: { color: '#ccc', font: { size: 11 } } } } },
+  });
+}
+
+// Points (bière notée liée à un brassin) : note + coût/L, ABV, IBU (théorie de la recette)
+function _insScorePoints() {
+  const brews = new Map(S.brews.map(b => [b.id, b]));
+  const recipes = new Map(S.recipes.map(r => [r.id, r]));
+  return (S.beers || []).filter(be => be.taste_rating && be.brew_id && brews.has(be.brew_id)).map(be => {
+    const b = brews.get(be.brew_id), r = recipes.get(b.recipe_id);
+    const cost = typeof brewCost === 'function' ? brewCost(b) : null;
+    const st = r && typeof _recipeStats === 'function' ? _recipeStats(r) : null;
+    return { name: be.name, score: be.taste_rating, cpl: cost?.total && b.volume_brewed ? cost.total / b.volume_brewed : null,
+             abv: b.abv ?? be.abv ?? st?.abv ?? null, ibu: st?.ibu ?? null };
+  });
+}
+
+function _insRenderScore() {
+  const pts = _insScorePoints();
+  if (!pts.length) return;
+  const metric = document.getElementById('ins-score-sel')?.value || 'cpl';
+  const data = pts.filter(p => p[metric] != null).map(p => ({ x: +p[metric].toFixed(2), y: p.score, _n: p.name }));
+  _insCharts['ins-score-chart']?.destroy();
+  _insChart('ins-score-chart', {
+    type: 'scatter',
+    data: { datasets: [{ data, backgroundColor: '#f59e0bcc', borderColor: '#1a1a1a', borderWidth: 2, pointRadius: 6, pointHoverRadius: 8 }] },
+    options: _insOpts({
+      plugins: { tooltip: { callbacks: { label: c => `${c.raw._n} · ${_insT('score_axis')} ${c.raw.y} · ${c.raw.x}` } } },
+      x: { type: 'linear', title: { display: true, text: _insT('score_vs_' + metric), color: _INS_TICK } },
+      y: { min: 0, suggestedMax: 5, title: { display: true, text: _insT('score_axis'), color: _INS_TICK } },
+    }),
+  });
+}
+
+// DF et ABV prévus (théorie de la recette ; atténuation de la levure du catalogue si connue, sinon 75 %) vs mesurés
+function _insPlannedVsActual(year) {
+  const recipes = new Map(S.recipes.map(r => [r.id, r]));
+  return S.brews.filter(b => !b.archived && b.status === 'completed' && b.og && b.brew_date && (year === 'all' || b.brew_date.startsWith(year)))
+    .sort((a, b) => a.brew_date.localeCompare(b.brew_date))
+    .map(b => {
+      const r = recipes.get(b.recipe_id);
+      const theo = r && typeof _recTheoretical === 'function' ? _recTheoretical(r) : null;
+      if (!theo) return null;
+      const yeast = (r.ingredients || []).find(i => i.category === 'levure');
+      const cat = yeast ? (S.catalog || []).find(c => c.category === 'levure' && c.name.toLowerCase() === yeast.name.toLowerCase()) : null;
+      const att = cat?.attenuation_min != null && cat?.attenuation_max != null ? (cat.attenuation_min + cat.attenuation_max) / 200 : 0.75;
+      const fgTheo = 1 + (theo.og - 1) * (1 - att);
+      return { name: b.name, fg: b.fg ?? null, fgTheo, abv: b.abv ?? (b.fg ? (b.og - b.fg) * 131.25 : null), abvTheo: (theo.og - fgTheo) * 131.25 };
+    })
+    .filter(Boolean);
 }
 
 </script>

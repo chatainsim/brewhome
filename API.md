@@ -488,6 +488,7 @@ Query param : `q` — recherche dans le nom et la catégorie.
 | Méthode | Route | Description |
 |---------|-------|-------------|
 | GET | `/api/stats` | Statistiques globales |
+| GET | `/api/stats/insights?year=2026` | Analyses de la page Statistiques : autonomie de la cave, atténuation par levure, courbes de fermentation, pertes, délais, profil de dégustation, recettes rebrassées, consommation par jour/mois, âge et rotation de la cave, valeur du stock, prix, stock dormant, péremptions, journées de brassage, fûts (`year` absent = toutes les années) |
 
 Retourne :
 ```json

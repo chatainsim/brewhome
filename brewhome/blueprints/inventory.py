@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, current_app
-from db import get_db, _log_inv
+from db import get_db, _log_inv, _log_price
 from helpers import validate, api_error, VALID_UNITS
 
 bp = Blueprint('inventory', __name__)
@@ -58,6 +58,8 @@ def create_inventory_item():
         item_id = cur.lastrowid
         if initial_qty > 0:
             _log_inv(item_id, initial_qty, 0.0, initial_qty, 'created', conn=conn)
+        if d.get('price_per_unit') is not None:
+            _log_price(conn, item_id, d.get('name'), d.get('category'), None, d.get('price_per_unit'))
         row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row)), 201
 
@@ -97,6 +99,8 @@ def update_inventory_item(item_id):
             return api_error('not_found', 404)
         if new_qty is not None and old_qty != new_qty:
             _log_inv(item_id, new_qty - old_qty, old_qty, new_qty, 'full_edit', conn=conn)
+        if keep('price_per_unit') is not None:
+            _log_price(conn, item_id, keep('name'), keep('category'), old_row['price_per_unit'], keep('price_per_unit'))
         row = conn.execute('SELECT * FROM inventory_items WHERE id=?', (item_id,)).fetchone()
         return jsonify(dict(row))
 

@@ -145,6 +145,7 @@ from blueprints.admin        import bp as admin_bp
 from blueprints.calendar     import bp as calendar_bp
 from blueprints.shopping     import bp as shopping_bp
 from blueprints.wrapped      import bp as wrapped_bp
+from blueprints.insights     import bp as insights_bp
 
 app.register_blueprint(catalog_bp)
 app.register_blueprint(inventory_bp)
@@ -158,6 +159,7 @@ app.register_blueprint(admin_bp)
 app.register_blueprint(calendar_bp)
 app.register_blueprint(shopping_bp)
 app.register_blueprint(wrapped_bp)
+app.register_blueprint(insights_bp)
 
 
 # ── DB teardown ───────────────────────────────────────────────────────────────

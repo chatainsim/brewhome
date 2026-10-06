@@ -4,6 +4,19 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-06] — 38 · version 0.1.35
+
+### Ajouté
+- **Statistiques : nouvelle section « 🔎 Analyses »**, filtrée par l'année choisie (cave, stock et fûts : état actuel).
+  - **Autonomie de la cave** : semaines restantes au rythme des 8 dernières semaines, date d'épuisement, et date « brasser avant le » d'après le délai médian brassage → dégustation.
+  - **Atténuation par levure** (moyenne, min – max, plage du fabricant) et **courbes de fermentation iSpindel** superposées, un brassin mis en avant, temps pour atteindre 90 % de la densité finale.
+  - **Prévu vs réel** (DF et ABV, atténuation de la levure du catalogue quand elle est connue) et **pertes par brassin** (brassé → conditionné).
+  - **Profil de dégustation** (radar des critères, comparé à la moyenne du style) et **note selon** le coût/litre, l'ABV ou l'IBU.
+  - **Consommation par jour de la semaine et par mois**, **âge des bières en cave**, **rotation par style** (projetée pour les lots entamés), **délais par style**.
+  - **Recettes les plus rebrassées** (versions comptées avec leur recette d'origine) et **jamais brassées**.
+  - **Valeur du stock sur 12 mois**, **stock dormant** (inutilisé depuis 180 jours), **péremptions à venir** en €, **durée des journées de brassage**, **fûts** (occupation, remplissage, prochaines révisions).
+- **Historique des prix d'inventaire** : chaque changement de prix est désormais noté (avec un point de départ pour les prix déjà saisis) ; l'évolution des prix apparaît dans les Analyses au fil des changements.
+
 ## [2026-10-06] — 37 · version 0.1.34
 
 ### Ajouté

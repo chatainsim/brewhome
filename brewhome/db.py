@@ -719,6 +719,21 @@ _MIGRATIONS = [
     #        calendrier, conservés et restaurables)
     "ALTER TABLE draft_recipes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE draft_recipes ADD COLUMN archived_at TIMESTAMP",
+    # 144 — historique des prix d'inventaire (page Statistiques, « Évolution des prix ») : une ligne à chaque
+    #        changement de prix_per_unit, plus un point de départ pour les prix déjà saisis
+    '''CREATE TABLE IF NOT EXISTS inventory_price_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inventory_item_id INTEGER,
+        item_name TEXT,
+        category TEXT,
+        old_price REAL,
+        new_price REAL,
+        ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''',
+    "CREATE INDEX IF NOT EXISTS idx_ipl_item ON inventory_price_log(inventory_item_id, ts)",
+    "INSERT INTO inventory_price_log (inventory_item_id, item_name, category, old_price, new_price) "
+    "SELECT id, name, category, NULL, price_per_unit FROM inventory_items "
+    "WHERE price_per_unit IS NOT NULL AND deleted_at IS NULL",
     # ── Ajouter les nouvelles migrations ci-dessous ───────────────────────────
 ]
 
@@ -803,6 +818,17 @@ def _log(category, action, label, entity_id=None, conn=None):
                 c.execute(sql, args)
     except Exception as e:
         _db_logger.warning(f'activity_log error: {e}')
+
+
+def _log_price(conn, item_id, name, category, old_price, new_price):
+    """Note un changement de prix d'inventaire (inventory_price_log). Fails silently — never blocks business logic."""
+    if new_price == old_price:
+        return
+    try:
+        conn.execute('INSERT INTO inventory_price_log (inventory_item_id, item_name, category, old_price, new_price) '
+                     'VALUES (?,?,?,?,?)', (item_id, name, category, old_price, new_price))
+    except Exception as e:
+        _db_logger.warning('inventory_price_log error: %s', e)
 
 
 def _log_inv(item_id, delta, old_qty, new_qty, reason,
