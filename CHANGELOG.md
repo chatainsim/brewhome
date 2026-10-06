@@ -4,6 +4,14 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-06] — 39 · version 0.1.36
+
+### Corrigé
+- **Statistiques sur mobile : la barre de navigation disparaissait pendant le défilement** (Firefox Android). La page compte une trentaine de graphiques ; leur mémoire graphique était trop lourde. La section « Analyses » est désormais repliée par défaut (état mémorisé), ses graphiques ne sont construits qu'à l'ouverture et libérés à la fermeture, et la résolution des graphiques est plafonnée à 2× : environ trois fois moins de mémoire par défaut sur un téléphone.
+
+### Modifié
+- **Durée des journées de brassage** : mesurée désormais du passage du brassin « en cours » à son passage « en fermentation » (dates conservées, même après la fin de la fermentation). À défaut, l'ancien calcul sur le journal du brassin est utilisé ; le tableau indique la source de chaque durée. Les sauvegardes exportent et restaurent ces dates.
+
 ## [2026-10-06] — 38 · version 0.1.35
 
 ### Ajouté

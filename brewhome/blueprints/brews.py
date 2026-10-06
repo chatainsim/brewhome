@@ -256,15 +256,20 @@ def _do_create_brew():
                 brew_name_val = rec_row['name'] if rec_row else ''
             else:
                 brew_name_val = d['name']
+            _now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            _st  = d.get('status', BrewStatus.COMPLETED)
             cur = conn.execute(
-                '''INSERT INTO brews (recipe_id,name,batch_number,brew_date,volume_brewed,og,fg,abv,notes,status,actual_efficiency,cost_snapshot,cost_per_liter_snapshot)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                '''INSERT INTO brews (recipe_id,name,batch_number,brew_date,volume_brewed,og,fg,abv,notes,status,actual_efficiency,cost_snapshot,cost_per_liter_snapshot,
+                                      brewing_started_at,fermentation_started_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (recipe_id, brew_name_val,
                  d.get('batch_number') if d.get('batch_number') else None,
                  d.get('brew_date'), d.get('volume_brewed'),
                  d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
                  d.get('status', BrewStatus.COMPLETED), actual_eff,
-                 d.get('cost_snapshot'), d.get('cost_per_liter_snapshot'))
+                 d.get('cost_snapshot'), d.get('cost_per_liter_snapshot'),
+                 _now if _st == BrewStatus.IN_PROGRESS else None,
+                 _now if _st == BrewStatus.FERMENTING else None)
             )
             brew_id = cur.lastrowid
             brew_name = d.get('name', '')
@@ -291,7 +296,8 @@ def update_brew(brew_id):
     if errors:
         return api_error('validation', 400, fields=errors)
     with get_db() as conn:
-        brew_row = conn.execute('SELECT status, recipe_id, fermenting_since, name FROM brews WHERE id=?', (brew_id,)).fetchone()
+        brew_row = conn.execute('SELECT status, recipe_id, fermenting_since, name, brewing_started_at, fermentation_started_at '
+                                'FROM brews WHERE id=?', (brew_id,)).fetchone()
         if not brew_row:
             return api_error('not_found', 404)
         old_status = brew_row['status']
@@ -313,8 +319,21 @@ def update_brew(brew_id):
             fermenting_since = None
         else:
             fermenting_since = brew_row['fermenting_since']
+        # Dates conservées de la journée de brassage (Statistiques) : début du brassage au passage en cours depuis
+        # « planifié » ; début de fermentation au passage en fermentation depuis le brassage (un retour
+        # terminé → fermentation pour corriger ne déplace pas la date d'origine).
+        _now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        brewing_started = brew_row['brewing_started_at']
+        ferm_started = brew_row['fermentation_started_at']
+        if new_status == BrewStatus.IN_PROGRESS and old_status != BrewStatus.IN_PROGRESS \
+                and (old_status == BrewStatus.PLANNED or not brewing_started):
+            brewing_started, ferm_started = _now, None
+        if new_status == BrewStatus.FERMENTING and old_status != BrewStatus.FERMENTING \
+                and (old_status in (BrewStatus.PLANNED, BrewStatus.IN_PROGRESS) or not ferm_started):
+            ferm_started = _now
         cur = conn.execute(
-            'UPDATE brews SET name=?,brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,notes=?,status=?,ferm_time=?,photos_url=?,actual_efficiency=?,cost_snapshot=?,cost_per_liter_snapshot=?,fermenting_since=?,batch_number=? WHERE id=?',
+            'UPDATE brews SET name=?,brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,notes=?,status=?,ferm_time=?,photos_url=?,actual_efficiency=?,cost_snapshot=?,cost_per_liter_snapshot=?,fermenting_since=?,batch_number=?,'
+            'brewing_started_at=?,fermentation_started_at=? WHERE id=?',
             (d.get('name') or brew_row['name'], d.get('brew_date'), d.get('volume_brewed'),
              d.get('og'), d.get('fg'), d.get('abv'), d.get('notes'),
              new_status,
@@ -324,6 +343,7 @@ def update_brew(brew_id):
              d.get('cost_snapshot'), d.get('cost_per_liter_snapshot'),
              fermenting_since,
              batch_num,
+             brewing_started, ferm_started,
              brew_id)
         )
         if cur.rowcount == 0:

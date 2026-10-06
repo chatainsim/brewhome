@@ -406,24 +406,40 @@ def _prices(conn):
 
 
 def _brew_days(conn, brews, year):
+    """Durée de la journée de brassage, par brassin. Source préférée : passage « en cours » → « fermentation »
+    (brewing_started_at → fermentation_started_at, notés depuis la migration 145), retenu s'il fait moins de 24 h.
+    À défaut : première → dernière étape du journal du brassin notées le jour du brassage (les dry-hops des jours
+    suivants n'allongent pas la journée) — sous-estimée si la fin de journée n'est pas notée."""
     names = {b['id']: (b['name'], b['brew_date']) for b in brews}
+    status_ts = {r['id']: (_dt(r['brewing_started_at']), _dt(r['fermentation_started_at'])) for r in conn.execute(
+        'SELECT id, brewing_started_at, fermentation_started_at FROM brews WHERE brewing_started_at IS NOT NULL '
+        'AND fermentation_started_at IS NOT NULL AND deleted_at IS NULL')}
     per = defaultdict(list)
     for r in conn.execute('SELECT brew_id, ts FROM brew_log'):
         t = _dt(r['ts'])
         if t and r['brew_id'] in names:
             per[r['brew_id']].append(t)
     out = []
-    for bid, ts in per.items():
+    for bid in set(per) | set(status_ts):
+        if bid not in names:
+            continue
         name, brew_date = names[bid]
-        day = _d(brew_date) or min(ts).date()
+        start, end = status_ts.get(bid, (None, None))
+        if start and end and timedelta(0) < end - start <= timedelta(hours=24):
+            day, source, steps = start.date(), 'status', None
+        else:
+            ts = per.get(bid, [])
+            if not ts:
+                continue
+            day = _d(brew_date) or min(ts).date()
+            same_day = sorted(t for t in ts if t.date() == day)
+            if len(same_day) < 2:
+                continue
+            start, end, source, steps = same_day[0], same_day[-1], 'log', len(same_day)
         if not _in_year(day, year):
             continue
-        same_day = sorted(t for t in ts if t.date() == day)    # le jour de brassage seulement (pas les dry-hops)
-        if len(same_day) < 2:
-            continue
-        out.append({'brew': name, 'brew_date': day.isoformat(), 'start': same_day[0].strftime('%H:%M'),
-                    'end': same_day[-1].strftime('%H:%M'), 'steps': len(same_day),
-                    'hours': round((same_day[-1] - same_day[0]).total_seconds() / 3600, 2)})
+        out.append({'brew': name, 'brew_date': day.isoformat(), 'start': start.strftime('%H:%M'), 'end': end.strftime('%H:%M'),
+                    'steps': steps, 'source': source, 'hours': round((end - start).total_seconds() / 3600, 2)})
     out.sort(key=lambda x: x['brew_date'])
     return {'brews': out, 'avg_hours': _round(_avg([x['hours'] for x in out]), 2)}
 

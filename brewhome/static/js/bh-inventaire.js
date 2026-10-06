@@ -1365,6 +1365,9 @@ function renderWrapped(w) {
 
 function renderStatsPage() {
   _destroyStatsCharts();
+  // Résolution des graphiques plafonnée à 2× : au-delà (≈ 3× sur les téléphones récents) la mémoire graphique de la
+  // page explose sans gain visible.
+  if (typeof Chart !== 'undefined') Chart.defaults.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   renderStatsInsights();
   const allCompleted = S.brews.filter(b => !b.archived && b.status === 'completed' && b.brew_date);
   const recById = new Map(S.recipes.map(r => [r.id, r]));
@@ -3219,18 +3222,51 @@ function _insKpi(val, label, sub = '', color = 'var(--amber)') {
   return `<div class="stat"><div class="stat-val" style="color:${color}">${val}</div><div class="stat-lbl">${label}</div>${sub ? `<div style="font-size:.7rem;color:var(--muted);margin-top:4px">${sub}</div>` : ''}</div>`;
 }
 
-async function renderStatsInsights() {
+// Section repliée par défaut (état mémorisé dans ce navigateur) : ses graphiques ne sont construits qu'à l'ouverture
+// et détruits à la fermeture. La page Statistiques compte une trentaine de graphiques ; sur mobile (Firefox Android
+// notamment), leur mémoire graphique faisait disparaître la barre de navigation fixe pendant le défilement.
+function _insEnsureShell() {
   const box = document.getElementById('stats-insights');
-  if (!box) return;
+  if (!box) return null;
+  if (!document.getElementById('ins-details')) {
+    let open = false;
+    try { open = localStorage.getItem('bh-stats-insights-open') === '1'; } catch (e) {}
+    box.innerHTML = `<details id="ins-details" ${open ? 'open' : ''}>
+      <summary class="section-head" style="cursor:pointer;margin-top:8px;list-style:none;justify-content:flex-start;gap:10px">
+        <i class="fas fa-chevron-right ins-chev" style="color:var(--muted);font-size:.9rem;transition:transform .2s"></i>
+        <h2 style="margin:0">${_insT('title')}</h2></summary>
+      <div id="ins-body"></div></details>`;
+    const det = document.getElementById('ins-details');
+    const chev = () => { const c = det.querySelector('.ins-chev'); if (c) c.style.transform = det.open ? 'rotate(90deg)' : ''; };
+    chev();
+    det.addEventListener('toggle', () => {
+      chev();
+      try { localStorage.setItem('bh-stats-insights-open', det.open ? '1' : '0'); } catch (e) {}
+      if (det.open) renderStatsInsights();
+      else { _insToken++; _insDestroy(); document.getElementById('ins-body').innerHTML = ''; }
+    });
+  }
+  return document.getElementById('ins-details');
+}
+function _insDestroy() {
+  Object.values(_insCharts).forEach(c => { try { c.destroy(); } catch (e) {} });
+  _insCharts = {};
+}
+
+async function renderStatsInsights() {
+  const det = _insEnsureShell();
+  if (!det) return;
+  if (!det.open) return;                            // construite seulement section ouverte
+  const box = document.getElementById('ins-body');
   const token = ++_insToken;
   const year = document.getElementById('stats-year-sel')?.value || 'all';
   let d;
   try { d = await api('GET', '/api/stats/insights?year=' + encodeURIComponent(year)); }
   catch (e) { return; }
   if (token !== _insToken) return;                 // un rendu plus récent est en cours
+  if (!det.open) return;
   _insData = d;
-  Object.values(_insCharts).forEach(c => { try { c.destroy(); } catch (e) {} });
-  _insCharts = {};
+  _insDestroy();
 
   const r = d.runway, st = d.stock, cel = d.cellar;
   const kpis = [
@@ -3340,7 +3376,9 @@ async function renderStatsInsights() {
   const brewDayCard = _insCard(_insT('brewdays_title'), bd.brews.length
     ? (bd.brews.length > 1 ? _insCanvas('ins-brewday-chart', 180) : '') +
       _insTable([t('stat.tbl_name'), t('stat.tbl_date'), '', ''], bd.brews.slice(-8).reverse().map(x => [esc(x.brew), _insDate(x.brew_date),
-        `${x.start} → ${x.end}`, `<b>${_insNum(x.hours)} ${_insT('unit_hours')}</b>`]))
+        `${x.start} → ${x.end} <i class="fas ${x.source === 'status' ? 'fa-flag-checkered' : 'fa-list'}" style="color:var(--muted);font-size:.7rem" title="${esc(_insT('brewdays_src_' + x.source))}"></i>`,
+        `<b>${_insNum(x.hours)} ${_insT('unit_hours')}</b>`])) +
+      `<div style="font-size:.7rem;color:var(--muted);margin-top:6px"><i class="fas fa-flag-checkered"></i> ${_insT('brewdays_src_status')} · <i class="fas fa-list"></i> ${_insT('brewdays_src_log')}</div>`
     : _insEmpty(_insT('brewdays_empty')));
   const k = d.kegs;
   const kegsCard = _insCard(_insT('kegs_title'), k.count
@@ -3354,7 +3392,6 @@ async function renderStatsInsights() {
     : _insEmpty(_insT('kegs_none')));
 
   box.innerHTML = `
-    <div class="section-head" style="margin-top:8px"><h2>${_insT('title')}</h2></div>
     <div style="font-size:.78rem;color:var(--muted);margin:-6px 0 14px">${_insT('hint')}</div>
     <div class="grid-4" style="margin-bottom:16px">${kpis}</div>${runwayLine}
     <div class="grid-2" style="margin-bottom:16px">${yeastsCard}${curvesCard}</div>

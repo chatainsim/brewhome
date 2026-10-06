@@ -134,7 +134,54 @@ def test_cave_stock_futs(donnees):
 
 def test_journee_de_brassage(donnees):
     b = _ins(donnees)['brew_days']
-    assert b['brews'] == [{'brew': 'IPA #2', 'brew_date': '2026-03-01', 'start': '08:00', 'end': '13:30', 'steps': 2, 'hours': 5.5}]
+    assert b['brews'] == [{'brew': 'IPA #2', 'brew_date': '2026-03-01', 'start': '08:00', 'end': '13:30', 'steps': 2,
+                           'source': 'log', 'hours': 5.5}]
+
+
+def _put(client, bid, **kw):
+    body = {'name': 'Pils', 'brew_date': '2026-06-01', 'volume_brewed': 20, **kw}
+    assert client.put(f'/api/brews/{bid}', json=body).status_code == 200
+
+
+def test_journee_de_brassage_par_statuts(client, app, monkeypatch):
+    """en cours → fermentation : dates notées et conservées ; prioritaires sur le journal du brassin."""
+    import blueprints.brews as brews_mod
+    from datetime import datetime as real_dt
+    horloge = {'t': real_dt(2026, 6, 1, 9, 0, 0)}
+
+    class FakeDT(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return horloge['t']
+    monkeypatch.setattr(brews_mod, 'datetime', FakeDT)
+    rid = client.post('/api/recipes', json={'name': 'Pils', 'volume': 20}).get_json()['id']
+    bid = client.post('/api/brews', json={'name': 'Pils', 'recipe_id': rid, 'brew_date': '2026-06-01', 'status': 'planned'}).get_json()['id']
+    _put(client, bid, status='in_progress')
+    horloge['t'] = real_dt(2026, 6, 1, 14, 45, 0)
+    _put(client, bid, status='fermenting')
+    horloge['t'] = real_dt(2026, 6, 20, 10, 0, 0)
+    _put(client, bid, status='completed')
+    horloge['t'] = real_dt(2026, 6, 21, 10, 0, 0)
+    _put(client, bid, status='fermenting')            # retour pour corriger : la date d'origine ne bouge pas
+    _put(client, bid, status='completed')
+    with app.app_context(), get_db() as conn:
+        row = conn.execute('SELECT brewing_started_at, fermentation_started_at, fermenting_since FROM brews WHERE id=?', (bid,)).fetchone()
+        assert (row['brewing_started_at'], row['fermentation_started_at']) == ('2026-06-01 09:00:00', '2026-06-01 14:45:00')
+        assert row['fermenting_since'] is None
+        conn.execute("INSERT INTO brew_log (brew_id, ts, step, note) VALUES (?, '2026-06-01T09:10', 'empatage', 'x'), (?, '2026-06-01T10:00', 'ebullition', 'x')", (bid, bid))
+    from blueprints.insights import insights
+    with app.app_context():
+        b = insights()['brew_days']['brews']
+    assert b == [{'brew': 'Pils', 'brew_date': '2026-06-01', 'start': '09:00', 'end': '14:45', 'steps': None,
+                  'source': 'status', 'hours': 5.75}]
+
+
+def test_creation_directe_en_cours(client, app):
+    rid = client.post('/api/recipes', json={'name': 'Stout', 'volume': 10}).get_json()['id']
+    bid = client.post('/api/brews', json={'name': 'Stout', 'recipe_id': rid, 'brew_date': '2026-06-01', 'status': 'in_progress'}).get_json()['id']
+    with app.app_context(), get_db() as conn:
+        row = conn.execute('SELECT brewing_started_at, fermentation_started_at FROM brews WHERE id=?', (bid,)).fetchone()
+    assert row['brewing_started_at'] is not None and row['fermentation_started_at'] is None
 
 
 def test_historique_des_prix(client):

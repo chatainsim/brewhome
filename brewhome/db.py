@@ -734,6 +734,11 @@ _MIGRATIONS = [
     "INSERT INTO inventory_price_log (inventory_item_id, item_name, category, old_price, new_price) "
     "SELECT id, name, category, NULL, price_per_unit FROM inventory_items "
     "WHERE price_per_unit IS NOT NULL AND deleted_at IS NULL",
+    # 145 — dates de passage « en cours » et « fermentation », conservées (fermenting_since est effacé à la sortie de
+    #        fermentation) : durée réelle de la journée de brassage (page Statistiques)
+    "ALTER TABLE brews ADD COLUMN brewing_started_at TIMESTAMP",
+    "ALTER TABLE brews ADD COLUMN fermentation_started_at TIMESTAMP",
+    "UPDATE brews SET fermentation_started_at = fermenting_since WHERE fermentation_started_at IS NULL AND fermenting_since IS NOT NULL",
     # ── Ajouter les nouvelles migrations ci-dessous ───────────────────────────
 ]
 

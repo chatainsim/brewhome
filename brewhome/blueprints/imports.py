@@ -915,11 +915,13 @@ def import_brews():
                     brew_id = existing['id']
                     conn.execute(
                         '''UPDATE brews SET brew_date=?,volume_brewed=?,og=?,fg=?,abv=?,
-                           notes=?,status=?,archived=? WHERE id=?''',
+                           notes=?,status=?,archived=?,
+                               brewing_started_at=COALESCE(?, brewing_started_at),
+                               fermentation_started_at=COALESCE(?, fermentation_started_at) WHERE id=?''',
                         (brew.get('brew_date'), brew.get('volume_brewed'),
                          brew.get('og'), brew.get('fg'), brew.get('abv'),
                          brew.get('notes'), brew.get('status', BrewStatus.COMPLETED),
-                         brew.get('archived', 0), brew_id)
+                         brew.get('archived', 0), brew.get('brewing_started_at'), brew.get('fermentation_started_at'), brew_id)
                     )
                 else:
                     if not recipe_id:
@@ -930,11 +932,13 @@ def import_brews():
                         recipe_id = cur.lastrowid
                     cur = conn.execute(
                         '''INSERT INTO brews
-                           (recipe_id, name, brew_date, volume_brewed, og, fg, abv, notes, status, archived)
-                           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                           (recipe_id, name, brew_date, volume_brewed, og, fg, abv, notes, status, archived,
+                                brewing_started_at, fermentation_started_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
                         (recipe_id, brew['name'], brew.get('brew_date'),
                          brew.get('volume_brewed'), brew.get('og'), brew.get('fg'), brew.get('abv'),
-                         brew.get('notes'), brew.get('status', BrewStatus.COMPLETED), brew.get('archived', 0))
+                         brew.get('notes'), brew.get('status', BrewStatus.COMPLETED), brew.get('archived', 0),
+                             brew.get('brewing_started_at'), brew.get('fermentation_started_at'))
                     )
                     brew_id = cur.lastrowid
                     for reading in brew.get('fermentation', []):
