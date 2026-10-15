@@ -7,6 +7,7 @@ from flask import Blueprint, current_app, jsonify, make_response, request, send_
 from db import get_db, _log, _log_inv, PHOTOS_DIR
 from helpers import _to_base, _from_base, _to_kg, _make_thumb, _image_too_large, _shrink_image_b64, _b64_to_jpeg_file, _make_thumb_file, validate, api_error
 from constants import BrewStatus, BottleSize
+from timeutil import app_timezone, to_utc_timestamp
 
 bp = Blueprint('brews', __name__)
 
@@ -600,6 +601,10 @@ def add_brew_fermentation(brew_id):
         brew = conn.execute('SELECT id FROM brews WHERE id=?', (brew_id,)).fetchone()
         if not brew:
             return api_error('not_found', 404)
+        # Stocké en UTC comme les relevés des densimètres (sinon décalage d'1 à 2 h entre les deux)
+        recorded_at = to_utc_timestamp(recorded_at, app_timezone(conn))
+        if recorded_at is None:
+            return api_error('invalid_input', 400, detail='recorded_at: invalid date')
         cur = conn.execute(
             '''INSERT INTO brew_fermentation_readings
                (brew_id, recorded_at, gravity, temperature, battery, angle, source, notes)

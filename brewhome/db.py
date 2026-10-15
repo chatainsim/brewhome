@@ -807,8 +807,26 @@ def migrate_db():
             conn.execute('DROP TABLE IF EXISTS main.spindle_readings')
         except sqlite3.OperationalError:
             pass  # table absente = déjà migrée ou installation neuve
+        _manual_readings_to_utc(conn)
     with get_readings_db() as rconn:
         _apply_versioned_migrations(rconn, _READINGS_MIGRATIONS, label='readings')
+
+
+def _manual_readings_to_utc(conn):
+    """Une seule fois : les relevés manuels étaient stockés à l'heure locale, les autres en UTC.
+    Conversion dans le fuseau de l'appli, marquée dans app_settings (manual_readings_utc)."""
+    if conn.execute("SELECT 1 FROM app_settings WHERE key='manual_readings_utc'").fetchone():
+        return
+    from timeutil import app_timezone, to_utc_timestamp
+    tz = app_timezone(conn)
+    rows = conn.execute("SELECT id, recorded_at FROM brew_fermentation_readings WHERE source='manual'").fetchall()
+    for r in rows:
+        utc = to_utc_timestamp(r['recorded_at'], tz)
+        if utc:
+            conn.execute('UPDATE brew_fermentation_readings SET recorded_at=? WHERE id=?', (utc, r['id']))
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('manual_readings_utc', '1')")
+    if rows:
+        current_app.logger.info(f"{len(rows)} relevé(s) manuel(s) convertis en UTC ({tz})")
 
 
 def _log(category, action, label, entity_id=None, conn=None):

@@ -2585,7 +2585,7 @@ function _bflRenderList(brewId, rows) {
     </thead>
     <tbody>
       ${sorted.map(r => `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:5px 6px;white-space:nowrap">${r.recorded_at.replace('T', ' ').slice(0, 16)}</td>
+        <td style="padding:5px 6px;white-space:nowrap">${fmtReadingDate(r.recorded_at)}</td>
         <td style="text-align:center;padding:5px 6px;font-weight:600;color:var(--accent)">${r.gravity ? r.gravity.toFixed(3) : '—'}</td>
         <td style="text-align:center;padding:5px 6px">${r.temperature != null ? r.temperature + '°' : '—'}</td>
         <td style="padding:5px 6px;color:var(--muted)">${esc(r.notes || '')}</td>
@@ -2626,7 +2626,8 @@ async function saveFermEntry() {
 
   try {
     await api('POST', `/api/brews/${brewId}/fermentation`, {
-      recorded_at: dateVal,
+      // heure locale du navigateur → UTC (le serveur stocke tous les relevés en UTC)
+      recorded_at: new Date(dateVal).toISOString(),
       gravity: parseFloat(gravityVal),
       temperature: tempVal ? parseFloat(tempVal) : null,
       notes: notesVal || null,
@@ -2637,7 +2638,7 @@ async function saveFermEntry() {
     // Advance date by 1 day for convenience
     const d = new Date(dateVal);
     d.setDate(d.getDate() + 1);
-    document.getElementById('bfl-f-date').value = d.toISOString().slice(0, 16);
+    document.getElementById('bfl-f-date').value = new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     toast(t('brew.ferm_log_saved'), 'success');
     await _bflRefresh(brewId);
     // Refresh fermentation count in brew card
@@ -3054,7 +3055,6 @@ function _bflPickRender(rows) {
     return;
   }
   const fin = Math.min(st.offset + st.limit, st.total);
-  const dt = d => d ? d.slice(8,10) + '/' + d.slice(5,7) + ' ' + d.slice(11,16) : '';
   el.innerHTML = `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
       <span style="font-size:.78rem;color:var(--muted)">${st.offset + 1}–${fin} / ${st.total}</span>
@@ -3072,7 +3072,7 @@ function _bflPickRender(rows) {
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:4px 2px;width:26px"><input type="checkbox" data-rid="${r.id}"
             ${st.coches.has(r.id) ? 'checked' : ''} onchange="_bflPickCheck(${r.id}, this.checked)"></td>
-        <td style="padding:4px 2px;white-space:nowrap">${dt(r.recorded_at)}</td>
+        <td style="padding:4px 2px;white-space:nowrap">${fmtReadingDate(r.recorded_at)}</td>
         <td style="padding:4px 2px;color:var(--muted)">${r.gravity != null ? (+r.gravity).toFixed(3) : '–'}</td>
         <td style="padding:4px 2px;color:var(--muted)">${r.temperature != null ? (+r.temperature).toFixed(1) + '°' : '–'}</td>
         <td style="padding:4px 2px;color:var(--muted);font-size:.72rem">${esc(r.source)}</td>

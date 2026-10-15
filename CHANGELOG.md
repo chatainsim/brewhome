@@ -4,6 +4,11 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-13] — 40 · version 0.1.37
+
+### Corrigé
+- **Heure des relevés de fermentation manuels décalée de 1 à 2 h** (#28). Les relevés des densimètres et des sondes sont enregistrés en UTC, les relevés manuels l'étaient à l'heure locale : mélangés sur la courbe du brassin, ils apparaissaient décalés, et l'appli Android ne pouvait pas savoir quel est le dernier relevé. Tous les relevés sont désormais en UTC : une heure saisie sans fuseau est lue dans le fuseau réglé (Paramètres → Telegram), le site envoie l'heure en UTC, et les relevés manuels existants sont convertis une fois au démarrage. Le journal des relevés et la liste paginée affichent l'heure locale.
+
 ## [2026-10-06] — 39 · version 0.1.36
 
 ### Corrigé
