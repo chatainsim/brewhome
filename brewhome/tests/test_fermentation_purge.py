@@ -171,3 +171,83 @@ def test_limite_de_pagination_bornee(client):
     r = client.get(f'/api/brews/{b}/fermentation/readings?limit=99999').get_json()
     assert r['total'] == 2
     assert client.get(f'/api/brews/{b}/fermentation/readings?limit=abc').status_code == 400
+
+
+# ── Fermentation en cours : relevés en direct du densimètre relié ─────────
+
+def _densimetre_relie(client, brew_id, n=4, jour='2026-10-10'):
+    """Un densimètre relié au brassin, avec n relevés en direct (pas encore copiés dans le brassin)."""
+    sp = client.post('/api/spindles', json={'name': 'iSpindel cuve'}).get_json()
+    assert client.patch(f'/api/spindles/{sp["id"]}', json={'brew_id': brew_id}).status_code == 200
+    with db_module.get_db() as conn:
+        conn.executemany(
+            'INSERT INTO rdb.spindle_readings (spindle_id, recorded_at, gravity, temperature) VALUES (?,?,?,?)',
+            [(sp['id'], f'{jour} {h:02d}:00:00', 1.060 - h * 0.001 if h else 1.000, 19.0) for h in range(n)])
+    return sp['id']
+
+
+def _live(spindle_id):
+    with db_module.get_db() as conn:
+        return [r[0] for r in conn.execute(
+            'SELECT recorded_at FROM rdb.spindle_readings WHERE spindle_id=? ORDER BY recorded_at', (spindle_id,))]
+
+
+def test_releves_en_direct_listes_et_supprimables_pendant_la_fermentation(client):
+    b = _brassin(client, 'fermenting')
+    sp = _densimetre_relie(client, b)
+    rows = client.get(f'/api/brews/{b}/fermentation/readings').get_json()
+    assert rows['total'] == 4 and all(r['key'].startswith('s') and r['source'] == 'spindle' for r in rows['rows'])
+    premier = min(rows['rows'], key=lambda r: r['recorded_at'])          # mesure prise hors de la cuve (1.000)
+    assert premier['gravity'] == 1.000
+    r = client.delete(f'/api/brews/{b}/fermentation', json={'keys': [premier['key']]})
+    assert r.get_json() == {'deleted': 1, 'deleted_stored': 0}
+    assert _live(sp) == ['2026-10-10 01:00:00', '2026-10-10 02:00:00', '2026-10-10 03:00:00']
+    courbe = client.get(f'/api/brews/{b}/fermentation').get_json()
+    assert [p['gravity'] for p in courbe] == [pytest.approx(1.059), pytest.approx(1.058), pytest.approx(1.057)]
+
+
+def test_sources_comptent_les_releves_en_direct(client):
+    b = _brassin(client, 'fermenting')
+    _densimetre_relie(client, b, n=3)
+    _releves(b, 'manual', 2)
+    src = {s['source']: s['count'] for s in client.get(f'/api/brews/{b}/fermentation/sources').get_json()}
+    assert src == {'spindle': 3, 'manual': 2}
+
+
+def test_double_enregistre_et_en_direct_supprime_ensemble(client):
+    """Relié à nouveau, un densimètre reçoit une copie des relevés enregistrés : le relevé existe en double,
+    le graphe n'en montre qu'un — le supprimer doit faire disparaître les deux."""
+    b = _brassin(client, 'fermenting')
+    with db_module.get_db() as conn:
+        conn.execute("INSERT INTO brew_fermentation_readings (brew_id, recorded_at, gravity, source) "
+                     "VALUES (?, '2026-10-10 00:00:00', 1.000, 'spindle')", (b,))
+    sp = _densimetre_relie(client, b, n=2)            # recopie + relevé en direct au même horodatage
+    rows = client.get(f'/api/brews/{b}/fermentation/readings').get_json()['rows']
+    assert sorted(r['recorded_at'] for r in rows) == ['2026-10-10 00:00:00', '2026-10-10 01:00:00']     # pas de doublon
+    double = next(r for r in rows if r['recorded_at'] == '2026-10-10 00:00:00')
+    assert double['key'].startswith('f')
+    client.delete(f'/api/brews/{b}/fermentation', json={'keys': [double['key']]})
+    assert '2026-10-10 00:00:00' not in _live(sp)
+    assert [p['recorded_at'] for p in client.get(f'/api/brews/{b}/fermentation').get_json()] == ['2026-10-10 01:00:00']
+
+
+def test_periode_et_autre_densimetre(client):
+    b = _brassin(client, 'fermenting')
+    autre = _brassin(client, 'fermenting', 'Autre')
+    sp = _densimetre_relie(client, b, n=4)
+    sp2 = _densimetre_relie(client, autre, n=4)
+    r = client.delete(f'/api/brews/{b}/fermentation',
+                      json={'from': '2026-10-10 00:00:00', 'to': '2026-10-10 01:30:00'})
+    assert r.get_json()['deleted'] == 2
+    assert len(_live(sp)) == 2 and len(_live(sp2)) == 4        # l'autre brassin n'est pas touché
+    # une clé d'un relevé de l'autre densimètre ne supprime rien ici
+    with db_module.get_db() as conn:
+        rid = conn.execute('SELECT id FROM rdb.spindle_readings WHERE spindle_id=? LIMIT 1', (sp2,)).fetchone()[0]
+    assert client.delete(f'/api/brews/{b}/fermentation', json={'keys': [f's{rid}']}).get_json()['deleted'] == 0
+    assert len(_live(sp2)) == 4
+
+
+def test_cles_invalides_refusees(client):
+    b = _brassin(client, 'fermenting')
+    for keys in (['x1'], ['s'], [12], ['s1; DROP TABLE brews']):
+        assert client.delete(f'/api/brews/{b}/fermentation', json={'keys': keys}).status_code == 400

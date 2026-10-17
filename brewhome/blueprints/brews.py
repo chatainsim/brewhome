@@ -614,111 +614,177 @@ def add_brew_fermentation(brew_id):
         return jsonify({'id': cur.lastrowid}), 201
 
 
+# Relevés « en direct » : tant qu'un densimètre ou une sonde est relié au brassin, ses relevés restent dans
+# brewhome_readings.db (rdb.*) et ne sont copiés dans brew_fermentation_readings qu'à la fin de la fermentation
+# (ou quand on le détache). Le nettoyage doit donc les voir aussi, sinon rien n'est supprimable pendant la
+# fermentation. Préfixe de clé : f = brew_fermentation_readings, s = densimètre, t = sonde de température.
+_LIVE = (
+    # (préfixe, table, colonne appareil, table des appareils, source, colonne densité)
+    ('s', 'rdb.spindle_readings', 'spindle_id', 'spindles', 'spindle', 'gravity'),
+    ('t', 'rdb.temperature_readings', 'sensor_id', 'temperature_sensors', 'temp_sensor', 'NULL'),
+)
+
+
+def _live_devices(conn, brew_id):
+    """[(préfixe, table, colonne, ids des appareils reliés, source, colonne densité)] pour ce brassin."""
+    out = []
+    for prefix, table, col, devices, source, grav in _LIVE:
+        ids = [r[0] for r in conn.execute(f'SELECT id FROM {devices} WHERE brew_id=?', (brew_id,))]
+        if ids:
+            out.append((prefix, table, col, ids, source, grav))
+    return out
+
+
+def _date_bounds(depuis, jusqua):
+    """Conditions de période sur recorded_at (une date seule va jusqu'à la fin de la journée)."""
+    conds, params = [], []
+    if depuis:
+        conds.append('recorded_at >= ?')
+        params.append(depuis)
+    if jusqua:
+        borne = jusqua.strip()
+        conds.append('recorded_at <= ?')
+        params.append(borne + ' 23:59:59' if len(borne) == 10 else borne)
+    return conds, params
+
+
+def _readings_union(conn, brew_id, source=None, depuis=None, jusqua=None):
+    """SQL (sans ORDER BY) et paramètres de tous les relevés du brassin : enregistrés + en direct. Un relevé en
+    direct qui a déjà son double enregistré (même horodatage, recopié au rattachement) n'est pas listé deux fois,
+    comme sur le graphe."""
+    dconds, dparams = _date_bounds(depuis, jusqua)
+    parts, params = [], []
+    conds = ['brew_id=?'] + dconds
+    p = [brew_id] + dparams
+    if source:
+        conds.append("COALESCE(source,'spindle')=?")
+        p.append(source)
+    parts.append(f"""SELECT 'f' || id AS key, id, recorded_at, gravity, temperature, COALESCE(source,'spindle') AS source
+                     FROM brew_fermentation_readings WHERE {' AND '.join(conds)}""")
+    params += p
+    for prefix, table, col, ids, src, grav in _live_devices(conn, brew_id):
+        if source and source != src:
+            continue
+        ph = ','.join('?' * len(ids))
+        parts.append(f"""SELECT '{prefix}' || id AS key, NULL AS id, recorded_at, {grav} AS gravity, temperature,
+                                '{src}' AS source
+                         FROM {table} WHERE {col} IN ({ph}) {''.join(' AND ' + c for c in dconds)}
+                           AND recorded_at NOT IN (SELECT recorded_at FROM brew_fermentation_readings
+                                                   WHERE brew_id=? AND COALESCE(source,'spindle')=?)""")
+        params += [*ids, *dparams, brew_id, src]
+    return ' UNION ALL '.join(parts), params
+
+
 @bp.route('/api/brews/<int:brew_id>/fermentation', methods=['DELETE'])
 def purge_brew_fermentation(brew_id):
-    """Supprime des relevés de fermentation d'un brassin.
+    """Supprime des relevés de fermentation d'un brassin, enregistrés ou en direct (densimètre / sonde encore
+    reliés : fermentation en cours).
 
-    Une sonde reliée par erreur à un brassin terminé y laisse des relevés qui
-    faussent la courbe : il faut pouvoir les retirer sans toucher au reste.
+    Une sonde reliée par erreur à un brassin terminé y laisse des relevés qui faussent la courbe, et un
+    densimètre peut envoyer ses premières mesures avant d'être dans la cuve : il faut pouvoir les retirer sans
+    toucher au reste.
 
-    Au moins un filtre est exigé — `ids`, `source`, `from`/`to` — ou `all`
-    explicitement, pour qu'une requête incomplète ne vide pas l'historique.
+    Au moins un filtre est exigé — `keys` (« f12 », « s34 »… renvoyées par /fermentation/readings), `ids`
+    (relevés enregistrés), `source`, `from`/`to` — ou `all` explicitement, pour qu'une requête incomplète ne
+    vide pas l'historique.
     """
     d = request.get_json(silent=True) or {}
-    conditions, params = ['brew_id=?'], [brew_id]
-
-    ids = d.get('ids')
-    if ids:
-        if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
-            return api_error('validation', 400, detail='ids doit être une liste d\'entiers')
-        conditions.append(f'id IN ({",".join("?" * len(ids))})')
-        params.extend(ids)
-    if d.get('source'):
-        conditions.append('source=?')
-        params.append(d['source'])
-    if d.get('from'):
-        conditions.append('recorded_at >= ?')
-        params.append(d['from'])
-    if d.get('to'):
-        # Une date sans heure exclurait la journée qu'elle désigne : les
-        # horodatages stockés portent l'heure, et « 2026-08-28 16:00:00 » est
-        # postérieur à « 2026-08-28 » en comparaison de chaînes.
-        borne = d['to']
-        if len(borne.strip()) == 10:
-            borne = borne.strip() + ' 23:59:59'
-        conditions.append('recorded_at <= ?')
-        params.append(borne)
-
-    if len(conditions) == 1 and not d.get('all'):
+    ids, keys = d.get('ids') or [], d.get('keys') or []
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        return api_error('validation', 400, detail='ids doit être une liste d\'entiers')
+    if not isinstance(keys, list) or not all(isinstance(k, str) and len(k) > 1 and k[0] in 'fst' and k[1:].isdigit()
+                                             for k in keys):
+        return api_error('validation', 400, detail='keys : « f », « s » ou « t » suivi d\'un numéro')
+    par_table = {'f': set(ids)}
+    for k in keys:
+        par_table.setdefault(k[0], set()).add(int(k[1:]))
+    source = d.get('source') or None
+    dconds, dparams = _date_bounds(d.get('from'), d.get('to'))
+    selection = any(par_table.values())
+    if not selection and not source and not dconds and not d.get('all'):
         return api_error('validation', 400,
-                         detail='Préciser ids, source, from/to, ou all pour tout supprimer')
+                         detail='Préciser keys, ids, source, from/to, ou all pour tout supprimer')
 
+    supprimes = enregistres = 0
     with get_db() as conn:
         if not conn.execute('SELECT 1 FROM brews WHERE id=?', (brew_id,)).fetchone():
             return api_error('not_found', 404)
-        cur = conn.execute(
-            'DELETE FROM brew_fermentation_readings WHERE ' + ' AND '.join(conditions), params)
-        supprimes = cur.rowcount
+        live = _live_devices(conn, brew_id)
+
+        # 1. relevés enregistrés
+        conds, params = ['brew_id=?'] + dconds, [brew_id] + dparams
+        if source:
+            conds.append("COALESCE(source,'spindle')=?")
+            params.append(source)
+        if selection:
+            f_ids = sorted(par_table.get('f', ()))
+            conds.append(f'id IN ({",".join("?" * len(f_ids))})' if f_ids else '0')
+            params.extend(f_ids)
+        where = ' AND '.join(conds)
+        # leurs doubles en direct (recopiés au rattachement) disparaissent avec eux, sinon le graphe les remontre
+        doubles = conn.execute(
+            f"SELECT recorded_at, COALESCE(source,'spindle') FROM brew_fermentation_readings WHERE {where}",
+            params).fetchall()
+        enregistres = conn.execute(f'DELETE FROM brew_fermentation_readings WHERE {where}', params).rowcount
+        supprimes += enregistres
+
+        # 2. relevés en direct des appareils reliés à ce brassin
+        for prefix, table, col, dev_ids, src, _ in live:
+            if source and source != src:
+                continue
+            ph = ','.join('?' * len(dev_ids))
+            lconds, lparams = [f'{col} IN ({ph})'] + dconds, [*dev_ids, *dparams]
+            if selection:
+                chosen = sorted(par_table.get(prefix, ()))
+                lconds.append(f'id IN ({",".join("?" * len(chosen))})' if chosen else '0')
+                lparams.extend(chosen)
+            supprimes += conn.execute(f'DELETE FROM {table} WHERE {" AND ".join(lconds)}', lparams).rowcount
+            ts = [r[0] for r in doubles if r[1] == src]
+            for k in range(0, len(ts), 500):
+                part = ts[k:k + 500]
+                conn.execute(f'DELETE FROM {table} WHERE {col} IN ({ph}) AND recorded_at IN ({",".join("?" * len(part))})',
+                             [*dev_ids, *part])
+
         _log('brew', 'fermentation_purge',
              json.dumps({'_i18n': 'act.ferm_purge', 'n': supprimes}), brew_id, conn)
-    return jsonify({'deleted': supprimes})
+    return jsonify({'deleted': supprimes, 'deleted_stored': enregistres})
 
 
 @bp.route('/api/brews/<int:brew_id>/fermentation/readings', methods=['GET'])
 def list_brew_fermentation_readings(brew_id):
-    """Relevés d'un brassin, filtrables et paginés.
+    """Relevés d'un brassin, filtrables et paginés — enregistrés et en direct (densimètre ou sonde encore
+    reliés, fermentation en cours). `key` identifie le relevé pour la suppression (voir purge).
 
     Un brassin peut porter plusieurs milliers de relevés : on ne les renvoie
     pas tous d'un coup, et le total permet à l'interface d'annoncer ce qu'une
     suppression « tout ce qui correspond » emporterait.
     """
-    source = request.args.get('source')
-    depuis = request.args.get('from')
-    jusqua = request.args.get('to')
     try:
         limit = min(max(1, int(request.args.get('limit', 100))), 500)
         offset = max(0, int(request.args.get('offset', 0)))
     except (TypeError, ValueError):
         return api_error('validation', 400, detail='limit et offset doivent être des entiers')
 
-    conditions, params = ['brew_id=?'], [brew_id]
-    if source:
-        conditions.append("COALESCE(source,'spindle')=?")
-        params.append(source)
-    if depuis:
-        conditions.append('recorded_at >= ?')
-        params.append(depuis)
-    if jusqua:
-        borne = jusqua.strip()
-        conditions.append('recorded_at <= ?')
-        params.append(borne + ' 23:59:59' if len(borne) == 10 else borne)
-    where = ' AND '.join(conditions)
-
     with get_db() as conn:
-        total = conn.execute(
-            f'SELECT COUNT(*) FROM brew_fermentation_readings WHERE {where}', params).fetchone()[0]
-        rows = conn.execute(
-            f'''SELECT id, recorded_at, gravity, temperature, COALESCE(source,'spindle') AS source
-                FROM brew_fermentation_readings WHERE {where}
-                ORDER BY recorded_at DESC LIMIT ? OFFSET ?''',
-            [*params, limit, offset]).fetchall()
+        union, params = _readings_union(conn, brew_id, request.args.get('source'),
+                                        request.args.get('from'), request.args.get('to'))
+        total = conn.execute(f'SELECT COUNT(*) FROM ({union})', params).fetchone()[0]
+        rows = conn.execute(f'SELECT * FROM ({union}) ORDER BY recorded_at DESC LIMIT ? OFFSET ?',
+                            [*params, limit, offset]).fetchall()
     return jsonify({'total': total, 'rows': [dict(r) for r in rows]})
 
 
 @bp.route('/api/brews/<int:brew_id>/fermentation/sources', methods=['GET'])
 def get_brew_fermentation_sources(brew_id):
-    """Origines des relevés d'un brassin, avec leur nombre et leur période.
+    """Origines des relevés d'un brassin (enregistrés et en direct), avec leur nombre et leur période.
 
     Sert à proposer un nettoyage ciblé plutôt qu'une suppression à l'aveugle.
     """
     with get_db() as conn:
+        union, params = _readings_union(conn, brew_id)
         rows = conn.execute(
-            '''SELECT COALESCE(source, 'spindle') AS source, COUNT(*) AS count,
-                      MIN(recorded_at) AS first_at, MAX(recorded_at) AS last_at
-               FROM brew_fermentation_readings WHERE brew_id=?
-               GROUP BY COALESCE(source, 'spindle') ORDER BY count DESC''',
-            (brew_id,)
-        ).fetchall()
+            f'''SELECT source, COUNT(*) AS count, MIN(recorded_at) AS first_at, MAX(recorded_at) AS last_at
+                FROM ({union}) GROUP BY source ORDER BY count DESC''', params).fetchall()
     return jsonify([dict(r) for r in rows])
 
 

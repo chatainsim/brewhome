@@ -4,6 +4,11 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-10-17] — 41 · version 0.1.38
+
+### Ajouté
+- **Supprimer des relevés pendant la fermentation** (#29). Le nettoyage du journal de fermentation (sélection point par point, suppression par origine ou par période) ne voyait que les relevés enregistrés dans le brassin ; or, tant qu'un densimètre ou une sonde est relié au brassin, ses relevés restent à part et ne sont copiés dans le brassin qu'à la fin de la fermentation. Ils sont désormais listés et supprimables aussi : par exemple la première densité mesurée par l'iSpindel avant sa mise en cuve. Seuls les appareils reliés à ce brassin sont concernés, et un relevé présent en double (recopié au rattachement du densimètre) disparaît bien de la courbe.
+
 ## [2026-10-13] — 40 · version 0.1.37
 
 ### Corrigé

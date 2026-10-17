@@ -236,6 +236,9 @@ Restaure la recette à l'état du snapshot désigné (sauvegarde l'état courant
 | GET | `/api/brews/<id>/fermentation` | Lectures de fermentation d'un brassin |
 | POST | `/api/brews/<id>/fermentation` | Ajoute une lecture de fermentation manuelle |
 | DELETE | `/api/brews/<id>/fermentation/<reading_id>` | Supprime une lecture de fermentation |
+| GET | `/api/brews/<id>/fermentation/readings` | Relevés enregistrés et en direct, filtrables et paginés (nettoyage) |
+| GET | `/api/brews/<id>/fermentation/sources` | Nombre et période des relevés par origine |
+| DELETE | `/api/brews/<id>/fermentation` | Supprime des relevés (sélection, origine, période), y compris en direct |
 | GET | `/api/brews/<id>/log` | Liste le journal de brassage (notes horodatées) |
 | POST | `/api/brews/<id>/log` | Ajoute une entrée au journal |
 | DELETE | `/api/brews/<id>/log/<entry_id>` | Supprime une entrée du journal |
@@ -266,6 +269,17 @@ Corps requis : `recorded_at`, `gravity`. Champs optionnels : `temperature`, `not
 ### DELETE `/api/brews/<id>/fermentation/<reading_id>`
 
 Seules les lectures manuelles (`source: "manual"`) peuvent être supprimées — retourne `403` pour une lecture importée d'un densimètre.
+
+### GET `/api/brews/<id>/fermentation/readings`
+
+Paramètres : `source` (`spindle`, `temp_sensor`, `manual`…), `from`, `to` (date ou date-heure, UTC), `limit` (≤ 500), `offset`.
+Retourne `{ "total": n, "rows": [{ "key", "id", "recorded_at", "gravity", "temperature", "source" }] }`, du plus récent au plus ancien.
+Inclut les relevés **en direct** du densimètre et des sondes encore reliés au brassin (fermentation en cours), qui ne sont copiés dans le brassin qu'à sa fin. `key` identifie le relevé : `f12` = relevé enregistré (`id` = 12), `s34` = relevé en direct d'un densimètre, `t5` = d'une sonde de température (`id` vaut alors `null`).
+
+### DELETE `/api/brews/<id>/fermentation`
+
+Corps : au moins un filtre parmi `keys` (liste de clés renvoyées par `/fermentation/readings`), `ids` (relevés enregistrés), `source`, `from` / `to`, ou `{ "all": true }` pour tout supprimer. Les filtres se combinent. Porte aussi sur les relevés en direct des appareils reliés à ce brassin (jamais sur ceux d'un autre brassin), et supprimer un relevé enregistré retire aussi son double en direct (recopié au rattachement d'un densimètre), sinon la courbe le montrerait encore.
+Retourne `{ "deleted": n, "deleted_stored": m }` (`m` = relevés enregistrés parmi eux).
 
 ### GET / POST `/api/brews/<id>/log`
 

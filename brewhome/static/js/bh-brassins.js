@@ -3009,7 +3009,8 @@ async function purgeFermSource(brewId, source, count, libelle) {
     await _bflRefreshSources(brewId);
     const idx = S.brews.findIndex(b => b.id === brewId);
     if (idx !== -1) {
-      S.brews[idx].fermentation_count = Math.max(0, (S.brews[idx].fermentation_count || 0) - res.deleted);
+      // le compteur ne porte que sur les relevés enregistrés (pas ceux encore en direct)
+      S.brews[idx].fermentation_count = Math.max(0, (S.brews[idx].fermentation_count || 0) - (res.deleted_stored ?? res.deleted));
       renderBrassins();
     }
   } catch (e) { toast(t('brew.ferm_src_err'), 'error'); }
@@ -3069,8 +3070,8 @@ function _bflPickRender(rows) {
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:.82rem">${rows.map(r => `
       <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:4px 2px;width:26px"><input type="checkbox" data-rid="${r.id}"
-            ${st.coches.has(r.id) ? 'checked' : ''} onchange="_bflPickCheck(${r.id}, this.checked)"></td>
+        <td style="padding:4px 2px;width:26px"><input type="checkbox" data-rid="${r.key}"
+            ${st.coches.has(r.key) ? 'checked' : ''} onchange="_bflPickCheck('${r.key}', this.checked)"></td>
         <td style="padding:4px 2px;white-space:nowrap">${fmtReadingDate(r.recorded_at)}</td>
         <td style="padding:4px 2px;color:var(--muted)">${r.gravity != null ? (+r.gravity).toFixed(3) : '–'}</td>
         <td style="padding:4px 2px;color:var(--muted)">${r.temperature != null ? (+r.temperature).toFixed(1) + '°' : '–'}</td>
@@ -3092,7 +3093,7 @@ function _bflPickCheck(id, coche) {
 function _bflPickToggleAll() {
   const cases = document.querySelectorAll('#bfl-pick input[type=checkbox]');
   const tout = [...cases].every(c => c.checked);
-  cases.forEach(c => { c.checked = !tout; _bflPickCheck(+c.dataset.rid, !tout); });
+  cases.forEach(c => { c.checked = !tout; _bflPickCheck(c.dataset.rid, !tout); });
 }
 
 function _bflPickSync() {
@@ -3104,10 +3105,12 @@ function _bflPickSync() {
 }
 
 async function _bflPickDelete() {
-  const ids = [..._bflPickState.coches];
-  if (!ids.length) return;
-  if (!await confirmModal(t('brew.ferm_pick_confirm').replace('${n}', ids.length), { danger: true })) return;
-  await _bflPickApply({ ids });
+  // Clés « f12 » (relevé enregistré), « s34 » / « t5 » (relevé en direct d'un densimètre / d'une sonde encore
+  // relié : fermentation en cours) — renvoyées telles quelles par /fermentation/readings.
+  const keys = [..._bflPickState.coches];
+  if (!keys.length) return;
+  if (!await confirmModal(t('brew.ferm_pick_confirm').replace('${n}', keys.length), { danger: true })) return;
+  await _bflPickApply({ keys });
 }
 
 async function _bflPickDeleteMatching() {
@@ -3138,7 +3141,8 @@ async function _bflPickApply(corps) {
     await _bflPickLoad(0);
     const idx = S.brews.findIndex(b => b.id === brewId);
     if (idx !== -1) {
-      S.brews[idx].fermentation_count = Math.max(0, (S.brews[idx].fermentation_count || 0) - res.deleted);
+      // le compteur ne porte que sur les relevés enregistrés (pas ceux encore en direct)
+      S.brews[idx].fermentation_count = Math.max(0, (S.brews[idx].fermentation_count || 0) - (res.deleted_stored ?? res.deleted));
       renderBrassins();
     }
   } catch (e) { toast(t('brew.ferm_src_err'), 'error'); }
