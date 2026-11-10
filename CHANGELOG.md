@@ -4,6 +4,11 @@ Toutes les modifications notables de ce projet sont documentées ici.
 
 ---
 
+## [2026-11-10] — 42 · version 0.1.39
+
+### Sécurité
+- **Les PAT GitHub des destinations de sauvegarde et de vitrine n'étaient pas masqués** (#30). `GET /api/app-settings` masquait les jetons de premier niveau mais renvoyait en clair ceux rangés dans `gh_data_targets` et `gh_vitrine_targets` : tout appareil du réseau pouvait les lire. Ils sont désormais renvoyés en `***`, et un `***` renvoyé à l'enregistrement garde le jeton stocké (même dépôt, à défaut même position) ; un nouveau jeton saisi remplace l'ancien. La sauvegarde manuelle (Paramètres → GitHub) est faite par le serveur, comme la vitrine et la sauvegarde planifiée : le navigateur n'a plus besoin des jetons, et le relais `/api/git-proxy` qui les transportait est supprimé. **Régénérer les jetons** déjà enregistrés, qui ont pu être lus.
+
 ## [2026-10-17] — 41 · version 0.1.38
 
 ### Ajouté

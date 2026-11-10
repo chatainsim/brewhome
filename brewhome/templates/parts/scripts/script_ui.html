@@ -140,65 +140,6 @@ function togglePat(inputId) {
   el.type = el.type === 'password' ? 'text' : 'password';
 }
 
-// Pour les providers custom (Gitea/Forgejo), les fetch passent par le proxy Flask
-// afin d'éviter les restrictions CORS du navigateur.
-async function _gitFetch(url, options, isCustom) {
-  if (!isCustom) return fetch(url, options);
-  const authHeader = (options.headers || {})['Authorization'] || '';
-  const pat  = authHeader.replace(/^Bearer\s+/i, '');
-  const body = options.body !== undefined ? JSON.parse(options.body) : undefined;
-  return fetch('/api/git-proxy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, method: options.method || 'GET', pat, body }),
-  });
-}
-
-// binary=true : content est déjà du base64 pur (image), pas besoin d'encoder
-// apiBase : URL de base de l'API (ex: 'https://api.github.com' ou 'https://gitea.example.com/api/v1')
-// Retourne { skipped: true } si le contenu est identique, sinon la réponse de l'API.
-async function pushToGithub(repo, pat, branch, filePath, content, message, binary = false, apiBase = 'https://api.github.com') {
-  const base = `${apiBase}/repos/${repo}/contents/${filePath}`;
-  const isGithub = apiBase === 'https://api.github.com';
-  const isCustom = !isGithub;
-  const headers = {
-    'Authorization': `Bearer ${pat}`,
-    'Accept': isGithub ? 'application/vnd.github+json' : 'application/json',
-    'Content-Type': 'application/json',
-  };
-
-  // Récupérer le fichier existant : SHA (pour le PUT) + contenu base64 (pour comparer)
-  let sha, existingB64;
-  try {
-    const getRes = await _gitFetch(`${base}?ref=${encodeURIComponent(branch)}`, { headers, cache: 'no-store' }, isCustom);
-    if (getRes.ok) {
-      const data = await getRes.json();
-      sha = data.sha;
-      existingB64 = (data.content || '').replace(/\s/g, ''); // GitHub/Gitea insèrent des \n dans le base64
-    }
-  } catch(_) {}
-
-  // Encoder le nouveau contenu
-  const encoded = binary ? content : btoa(unescape(encodeURIComponent(content)));
-
-  // Comparer directement le base64 — skip si identique
-  if (existingB64 && existingB64 === encoded) return { skipped: true };
-
-  const body = { message, content: encoded, branch };
-  if (sha) body.sha = sha;
-
-  // Gitea/Forgejo : POST pour créer (pas de SHA), PUT pour mettre à jour (SHA requis)
-  // GitHub : PUT gère les deux cas
-  const method = isCustom && !sha ? 'POST' : 'PUT';
-
-  const putRes = await _gitFetch(base, { method, headers, body: JSON.stringify(body) }, isCustom);
-  if (!putRes.ok) {
-    const err = await putRes.json().catch(() => ({ message: putRes.statusText }));
-    throw new Error(err.message || putRes.statusText);
-  }
-  return putRes.json();
-}
-
 // Extrait le base64 pur et l'extension depuis un data URL (ex: data:image/jpeg;base64,...)
 // esc() est définie dans bh-core.js — alias pour compatibilité interne
 const _vEsc = esc;
@@ -491,57 +432,23 @@ async function pushVitrine(force = false, silent = false) {
 }
 
 async function pushGithubData() {
+  // Sauvegarde faite par le serveur, qui seul connaît les PAT (le navigateur ne reçoit que '***').
+  // Les réglages du formulaire sont enregistrés d'abord, comme pour la vitrine.
   _captureGithubSettings();
   const targets = ((appSettings.github || {}).data?.targets || []).filter(tgt => tgt.repo && tgt.pat);
   if (!targets.length) {
     toast(t('settings.github.err_missing_data'), 'error');
     return;
   }
-
-  const dateStr = new Date().toISOString().slice(0,10);
+  try { await saveSettings(); } catch (e) { console.warn('[BrewHome] saveSettings:', e); }
   try {
-    // Fetch all data in parallel (pas de conflit GitHub ici)
-    const [inv, rec, brews, beers, spindles, catalog, drafts, calendar] = await Promise.all([
-      api('GET', '/api/export/inventory'),
-      api('GET', '/api/export/recipes'),
-      api('GET', '/api/export/brews'),
-      api('GET', '/api/export/beers'),
-      api('GET', '/api/export/spindles'),
-      api('GET', '/api/export/catalog'),
-      api('GET', '/api/export/drafts'),
-      api('GET', '/api/export/calendar'),
-    ]);
-    // Paramètres avancés (sans PAT)
-    const settingsOut = JSON.parse(JSON.stringify(appSettings));
-    if (settingsOut.github?.vitrine) delete settingsOut.github.vitrine.pat;
-    if (settingsOut.github?.data)    delete settingsOut.github.data.pat;
-    // Push séquentiel pour éviter les conflits de SHA sur la même branche
-    const dataFiles = [
-      { path: 'inventaire.json',  content: JSON.stringify(inv,         null, 2), msg: `backup: inventaire ${dateStr}` },
-      { path: 'recettes.json',    content: JSON.stringify(rec,         null, 2), msg: `backup: recettes ${dateStr}` },
-      { path: 'brassins.json',    content: JSON.stringify(brews,       null, 2), msg: `backup: brassins ${dateStr}` },
-      { path: 'cave.json',        content: JSON.stringify(beers,       null, 2), msg: `backup: cave ${dateStr}` },
-      { path: 'densimetres.json', content: JSON.stringify(spindles,    null, 2), msg: `backup: densimètres ${dateStr}` },
-      { path: 'catalogue.json',   content: JSON.stringify(catalog,     null, 2), msg: `backup: catalogue ${dateStr}` },
-      { path: 'brouillons.json',  content: JSON.stringify(drafts,      null, 2), msg: `backup: brouillons ${dateStr}` },
-      { path: 'calendrier.json',  content: JSON.stringify(calendar,    null, 2), msg: `backup: calendrier ${dateStr}` },
-      { path: 'parametres.json',  content: JSON.stringify(settingsOut, null, 2), msg: `backup: paramètres ${dateStr}` },
-    ];
-    let totalPushed = 0, totalSkipped = 0;
-    for (const cfg of targets) {
-      const isCustom = cfg.provider === 'custom';
-      const apiBase  = isCustom && cfg.apiUrl ? cfg.apiUrl.replace(/\/+$/, '') : 'https://api.github.com';
-      for (const f of dataFiles) {
-        const res = await pushToGithub(cfg.repo, cfg.pat, cfg.branch, f.path, f.content, f.msg, false, apiBase);
-        res?.skipped ? totalSkipped++ : totalPushed++;
-      }
-    }
-    const skipTxt = totalSkipped ? t('settings.github.vitrine_skipped').replace('${n}', totalSkipped) : '';
-    toast(t('settings.github.data_pushed').replace('${files}', totalPushed) + skipTxt, 'success');
-    _logActivity('backup', 'manual', JSON.stringify({_i18n:'act.backup_manual', n: totalPushed}));
+    const res = await api('POST', '/api/github/backup', {});
+    if (res.errors && !res.pushed && !res.skipped) throw new Error(res.error_preview || `${res.errors} erreur(s)`);
+    const skipTxt = res.skipped ? t('settings.github.vitrine_skipped').replace('${n}', res.skipped) : '';
+    toast(t('settings.github.data_pushed').replace('${files}', res.pushed) + skipTxt, res.errors ? 'error' : 'success');
     if (!appSettings.github) appSettings.github = {};
     if (!appSettings.github.backup) appSettings.github.backup = {};
-    appSettings.github.backup.lastBackup = new Date().toLocaleString('sv').slice(0, 16);
+    appSettings.github.backup.lastBackup = res.last_backup || new Date().toLocaleString('sv').slice(0, 16);
     updateBackupNavBadge();
   } catch(e) {
     toast(t('settings.github.err_data') + ' ' + e.message, 'error');

@@ -282,6 +282,48 @@ SECRET_SETTING_KEYS = frozenset((
 SECRET_TARGET_KEYS = ('gh_data_targets', 'gh_vitrine_targets')
 
 
+def mask_target_pats(raw):
+    """JSON de cibles tel que renvoyé par GET /api/app-settings : chaque PAT remplacé par '***'.
+    Illisible → None (mieux vaut perdre l'affichage d'un réglage qu'un jeton)."""
+    try:
+        targets = json.loads(raw)
+        for target in targets:
+            if target.get('pat'):
+                target['pat'] = '***'
+        return json.dumps(targets, ensure_ascii=False)
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return None
+
+
+def restore_target_pats(new_raw, old_raw):
+    """À l'enregistrement : une cible reçue avec '***' (ou sans PAT) reprend le PAT déjà stocké pour la même
+    destination (même dépôt et même API, à défaut même position). Un nouveau PAT saisi remplace l'ancien."""
+    try:
+        new = json.loads(new_raw) if isinstance(new_raw, str) else new_raw
+        if not isinstance(new, list):
+            return new_raw
+    except (json.JSONDecodeError, TypeError):
+        return new_raw
+    try:
+        old = json.loads(old_raw) if old_raw else []
+        old = [t for t in old if isinstance(t, dict)] if isinstance(old, list) else []
+    except (json.JSONDecodeError, TypeError):
+        old = []
+
+    def cle(t):
+        return ((t.get('repo') or '').strip(), (t.get('apiUrl') or '').strip().rstrip('/'))
+    par_cle = {cle(t): t.get('pat') for t in old if t.get('pat')}
+    for i, target in enumerate(new):
+        if not isinstance(target, dict) or target.get('pat') not in (None, '', '***'):
+            continue
+        pat = par_cle.get(cle(target)) or (old[i].get('pat') if i < len(old) else None)
+        if pat:
+            target['pat'] = pat
+        else:
+            target.pop('pat', None)
+    return json.dumps(new, ensure_ascii=False)
+
+
 def strip_secret_settings(settings: dict) -> dict:
     """Retire les secrets d'un dictionnaire de réglages avant export.
 

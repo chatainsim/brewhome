@@ -1047,84 +1047,6 @@ def update_fontawesome():
 
 
 # ---------------------------------------------------------------------------
-# Git proxy
-# ---------------------------------------------------------------------------
-
-_GIT_PROXY_ALLOWED_HOSTS = {
-    'api.github.com',
-    'gitlab.com',
-    'codeberg.org',
-}
-
-
-def _git_proxy_url_allowed(url: str) -> bool:
-    try:
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme != 'https':
-            return False
-        # Reject any userinfo (e.g. https://allowed@evil.com/) — urlopen uses the real host
-        if parsed.username is not None:
-            return False
-        host = (parsed.hostname or '').lower()
-        if not host:
-            return False
-        if host in _GIT_PROXY_ALLOWED_HOSTS:
-            return True
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT value FROM app_settings WHERE key IN ('gh_vitrine_api_url','gh_data_api_url')"
-            ).fetchall()
-        for r in rows:
-            val = (r['value'] or '').strip().rstrip('/')
-            if val:
-                allowed_host = (urllib.parse.urlparse(val).hostname or '').lower()
-                if host == allowed_host:
-                    return True
-        return False
-    except Exception:
-        return False
-
-
-@bp.route('/api/git-proxy', methods=['POST'])
-def git_proxy():
-    """Proxifie les requêtes vers un provider Git custom (Gitea/Forgejo) côté serveur."""
-    data = request.json or {}
-    target_url = data.get('url', '').strip()
-    method     = data.get('method', 'GET').upper()
-    pat        = data.get('pat', '')
-    body_data  = data.get('body')
-
-    if not target_url:
-        return api_error('missing_field', 400, detail='Missing url')
-
-    if not _git_proxy_url_allowed(target_url):
-        current_app.logger.warning(f"git_proxy: URL refusée (SSRF protection): {target_url[:200]}")
-        return api_error('forbidden', 403, detail='URL non autorisée')
-
-    headers = {
-        'Authorization': f'Bearer {pat}',
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'BrewHome',
-    }
-    try:
-        req_body = json.dumps(body_data).encode('utf-8') if body_data is not None else None
-        req = urllib.request.Request(target_url, data=req_body, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            resp_body = resp.read()
-            return current_app.response_class(response=resp_body, status=resp.status, mimetype='application/json')
-    except urllib.error.HTTPError as e:
-        err_body = e.read()
-        try:
-            json.loads(err_body)
-            return current_app.response_class(response=err_body, status=e.code, mimetype='application/json')
-        except Exception:
-            return jsonify({'message': err_body.decode('utf-8', errors='replace') or str(e)}), e.code
-    except Exception as e:
-        return api_error('internal_error', 500)
-
-
-# ---------------------------------------------------------------------------
 # GitHub automatic backup
 # ---------------------------------------------------------------------------
 
@@ -1227,8 +1149,11 @@ def _gh_get_file(repo, pat, branch, file_path, api_base='https://api.github.com'
     return base64.b64decode(content_b64).decode('utf-8')
 
 
-def _github_data_backup():
-    """Sauvegarde complète des données vers tous les dépôts configurés."""
+def _github_data_backup(manuel=False):
+    """Sauvegarde complète des données vers tous les dépôts configurés.
+
+    Planifiée : fichiers sous backup_auto/. Manuelle (bouton des paramètres, POST /api/github/backup) : à la racine
+    du dépôt, comme le faisait le navigateur avant que les PAT ne lui soient plus transmis. Renvoie le bilan."""
     with get_db() as conn:
         rows = conn.execute("SELECT key, value FROM app_settings WHERE key IN "
                             "('gh_data_repo','gh_data_branch','gh_data_pat','gh_data_api_url','gh_data_targets')").fetchall()
@@ -1248,7 +1173,8 @@ def _github_data_backup():
                         'apiUrl':  (cfg.get('gh_data_api_url') or 'https://api.github.com').rstrip('/')}]
     if not targets:
         current_app.logger.warning('GitHub backup: aucune destination configurée, sauvegarde ignorée')
-        return
+        return {'error': 'no_target'}
+    prefix = '' if manuel else 'backup_auto/'
 
     date_str = datetime.now().strftime('%Y-%m-%d')
     try:
@@ -1324,9 +1250,9 @@ def _github_data_backup():
                     content = data if isinstance(data, bytes) \
                               else json.dumps(data, ensure_ascii=False, indent=2)
                     msg_key = name.split('/')[0].replace('.json', '')
-                    changed = _gh_push_file(t_repo, t_pat, t_branch, f'backup_auto/{name}',
+                    changed = _gh_push_file(t_repo, t_pat, t_branch, f'{prefix}{name}',
                                             content,
-                                            f'backup auto: {msg_key} {date_str}',
+                                            f'backup {"manuel" if manuel else "auto"}: {msg_key} {date_str}',
                                             api_base=t_api)
                     if changed:
                         total_pushed += 1
@@ -1343,9 +1269,12 @@ def _github_data_backup():
             conn.execute("INSERT OR REPLACE INTO app_settings (key,value) VALUES ('gh_data_last_backup',?)", (ts,))
             notify = conn.execute("SELECT value FROM app_settings WHERE key='gh_data_backup_notify'").fetchone()
         current_app.logger.info(f'GitHub backup: {total_pushed} fichier(s) mis à jour, {total_skipped} inchangé(s), {total_errors} erreur(s)')
-        _i18n_key = 'act.backup_auto_err' if total_errors else 'act.backup_auto'
-        _log('backup', 'auto', json.dumps({'_i18n': _i18n_key, 'n': total_pushed, 'repos': repo_list, 'e': total_errors, 'errors': push_errors}))
-        if notify and notify['value'] == 'true':
+        if manuel:
+            _log('backup', 'manual', json.dumps({'_i18n': 'act.backup_manual', 'n': total_pushed}))
+        else:
+            _i18n_key = 'act.backup_auto_err' if total_errors else 'act.backup_auto'
+            _log('backup', 'auto', json.dumps({'_i18n': _i18n_key, 'n': total_pushed, 'repos': repo_list, 'e': total_errors, 'errors': push_errors}))
+        if notify and notify['value'] == 'true' and not manuel:
             try:
                 tg_token, tg_chat, _, _ = _tg_get_settings()
                 if tg_token and tg_chat:
@@ -1367,8 +1296,22 @@ def _github_data_backup():
                                  f'📁 {repo_list}')
             except Exception as te:
                 current_app.logger.warning(f'GitHub backup Telegram notify error: {te}')
+        return {'pushed': total_pushed, 'skipped': total_skipped, 'errors': total_errors, 'last_backup': ts,
+                'error_preview': push_errors[0] if push_errors else None}
     except Exception as e:
         current_app.logger.error(f'GitHub backup error: {e}')
+        return {'error': 'internal'}
+
+
+@bp.route('/api/github/backup', methods=['POST'])
+def api_github_backup():
+    """Sauvegarde manuelle : faite par le serveur, qui seul détient les PAT."""
+    res = _github_data_backup(manuel=True)
+    if res.get('error') == 'no_target':
+        return api_error('missing_field', 400, detail='Aucune destination de sauvegarde configurée')
+    if res.get('error'):
+        return api_error('internal_error', 500)
+    return jsonify(res)
 
 
 # ── Vitrine ──────────────────────────────────────────────────────────────

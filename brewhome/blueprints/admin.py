@@ -10,11 +10,11 @@ from flask import Blueprint, Response, jsonify, request, current_app
 
 from db import get_db, get_readings_db, _log, DB_PATH, READINGS_DB_PATH
 from constants import BrewStatus, BottleSize
-from helpers import api_error, strip_secret_settings
+from helpers import SECRET_TARGET_KEYS, api_error, mask_target_pats, restore_target_pats, strip_secret_settings
 
 bp = Blueprint('admin', __name__)
 
-APP_VERSION = "0.1.38"
+APP_VERSION = "0.1.39"
 
 # Token généré à chaque démarrage du serveur — requis pour télécharger l'export SQL.
 # Injecté dans le HTML de la page principale (variable JS _BH_EXPORT_TOKEN).
@@ -209,6 +209,11 @@ def get_app_settings():
     for r in rows:
         if r['key'] in _SECRET_KEYS:
             result[r['key']] = '***' if r['value'] else ''
+        elif r['key'] in SECRET_TARGET_KEYS:
+            # PAT imbriqués dans les cibles : jamais renvoyés (sauvegarde et vitrine sont poussées par le serveur)
+            masked = mask_target_pats(r['value'])
+            if masked is not None:
+                result[r['key']] = masked
         else:
             result[r['key']] = r['value']
     return jsonify(result)
@@ -227,6 +232,9 @@ def save_app_settings():
             # sans rien signaler.
             if key in _SECRET_KEYS and value in (None, '', '***'):
                 continue
+            if key in SECRET_TARGET_KEYS and value not in (None, ''):
+                old = conn.execute('SELECT value FROM app_settings WHERE key=?', (key,)).fetchone()
+                value = restore_target_pats(value, old['value'] if old else None)
             if value is None or value == '':
                 conn.execute('DELETE FROM app_settings WHERE key=?', (key,))
             else:
